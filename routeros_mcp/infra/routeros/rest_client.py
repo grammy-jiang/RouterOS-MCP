@@ -179,8 +179,20 @@ class RouterOSRestClient:
                 if response.status_code >= 400:
                     self._handle_error_response(response)
 
-                # Success - return JSON
-                return response.json() if response.content else {}
+                # Success - return JSON (handle empty responses)
+                if response.content:
+                    try:
+                        json_data: dict[str, Any] = response.json()
+                        return json_data
+                    except ValueError as e:
+                        # Invalid JSON response
+                        raise RouterOSClientError(
+                            f"Invalid JSON response from RouterOS: {response.text[:100]}",
+                            response.status_code,
+                            response.text,
+                        ) from e
+                else:
+                    return {}
 
             except httpx.TimeoutException as e:
                 if attempt == self.max_retries - 1:

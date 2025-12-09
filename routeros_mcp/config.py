@@ -253,14 +253,19 @@ class Settings(BaseSettings):
     @property
     def database_driver(self) -> str:
         """Get database driver name."""
-        if self.is_sqlite:
-            if "+aiosqlite" in self.database_url:
-                return "aiosqlite"
+        # Check SQLite variants
+        if self.database_url.startswith("sqlite+aiosqlite://"):
+            return "aiosqlite"
+        elif self.database_url.startswith("sqlite://"):
             return "sqlite"
-        elif "+asyncpg://" in self.database_url:
+        # Check PostgreSQL variants
+        elif self.database_url.startswith("postgresql+asyncpg://"):
             return "asyncpg"
-        elif "+psycopg://" in self.database_url:
+        elif self.database_url.startswith("postgresql+psycopg://"):
             return "psycopg"
+        elif self.database_url.startswith("postgresql://"):
+            # No explicit driver, could be psycopg2 or psycopg3
+            return "postgresql"
         else:
             return "unknown"
 

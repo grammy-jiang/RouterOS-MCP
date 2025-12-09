@@ -224,7 +224,13 @@ def validate_encryption_key(key: str) -> bool:
             print("Key is valid")
     """
     try:
-        Fernet(key.encode("utf-8"))
+        # Validate UTF-8 encoding
+        key_bytes = key.encode("utf-8")
+        # Validate Fernet key format
+        Fernet(key_bytes)
         return True
-    except Exception:
+    except (UnicodeEncodeError, ValueError, TypeError):
+        # UnicodeEncodeError: Invalid UTF-8
+        # ValueError: Invalid Fernet key format
+        # TypeError: key is not a string
         return False
