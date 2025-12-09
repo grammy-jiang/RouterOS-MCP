@@ -20,7 +20,7 @@ class TestSettings:
         assert settings.debug is False
         assert settings.log_level == "INFO"
         assert settings.mcp_transport == "stdio"
-        assert settings.database_url == "sqlite:///./routeros_mcp.db"
+        assert settings.database_url == "sqlite+aiosqlite:///./routeros_mcp.db"
 
     def test_environment_override(self) -> None:
         """Test environment variable override."""
