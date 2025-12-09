@@ -106,13 +106,6 @@ class TestSettings:
                 encryption_key="test-key",
             )
 
-    def test_log_level_uppercase(self) -> None:
-        """Test log level is converted to uppercase."""
-        # Note: Pydantic Literal check happens before the validator,
-        # so we can only test that uppercase values are accepted
-        settings = Settings(log_level="INFO")
-        assert settings.log_level == "INFO"
-
     def test_is_sqlite_property(self) -> None:
         """Test is_sqlite property."""
         settings = Settings(database_url="sqlite:///./test.db")
@@ -135,6 +128,10 @@ class TestSettings:
 
         settings = Settings(database_url="postgresql+psycopg://localhost/test")
         assert settings.database_driver == "psycopg"
+
+        # Plain PostgreSQL URL without driver specification returns "unknown"
+        settings = Settings(database_url="postgresql://localhost/test")
+        assert settings.database_driver == "unknown"
 
     def test_to_dict_masks_secrets(self) -> None:
         """Test to_dict masks sensitive fields."""

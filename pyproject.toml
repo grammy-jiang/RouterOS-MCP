@@ -63,7 +63,6 @@ dependencies = [
     # Configuration file support
     "python-dotenv>=1.0.0",
     "pyyaml>=6.0.1",
-    "tomli>=2.0.1; python_version<'3.11'",
     
     # Security
     "cryptography>=41.0.0",

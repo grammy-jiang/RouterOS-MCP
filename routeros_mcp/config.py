@@ -234,12 +234,6 @@ class Settings(BaseSettings):
                 self.encryption_key = "INSECURE_LAB_KEY_DO_NOT_USE_IN_PRODUCTION"
         return self
 
-    @field_validator("log_level")
-    @classmethod
-    def validate_log_level(cls, v: str) -> str:
-        """Ensure log level is uppercase."""
-        return v.upper()
-
     # ========================================
     # Helper Methods
     # ========================================
@@ -345,10 +339,7 @@ def load_settings_from_file(config_file: Path | str) -> Settings:
         with open(config_path) as f:
             config_data = yaml.safe_load(f) or {}
     elif suffix == ".toml":
-        try:
-            import tomllib
-        except ImportError:
-            import tomli as tomllib  # type: ignore
+        import tomllib
 
         with open(config_path, "rb") as f:
             config_data = tomllib.load(f)

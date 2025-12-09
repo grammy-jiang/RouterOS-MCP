@@ -8,9 +8,37 @@ This module provides the main entry point that:
 
 import logging
 import sys
+from urllib.parse import urlparse, urlunparse
 
 from routeros_mcp.cli import load_config_from_cli
 from routeros_mcp.config import Settings, set_settings
+
+
+def sanitize_database_url(url: str) -> str:
+    """Sanitize database URL by redacting password.
+
+    Args:
+        url: Database URL that may contain credentials
+
+    Returns:
+        Sanitized URL with password redacted
+    """
+    try:
+        parsed = urlparse(url)
+        if parsed.password:
+            # Reconstruct netloc with password redacted
+            netloc = parsed.username or ""
+            if parsed.password:
+                netloc += ":***"
+            if parsed.hostname:
+                netloc += f"@{parsed.hostname}"
+            if parsed.port:
+                netloc += f":{parsed.port}"
+            parsed = parsed._replace(netloc=netloc)
+        return urlunparse(parsed)
+    except Exception:
+        # If parsing fails, just return a generic message
+        return "***REDACTED***"
 
 
 def setup_logging(settings: Settings) -> None:
@@ -35,6 +63,7 @@ def setup_logging(settings: Settings) -> None:
             level=log_level,
             format='{"timestamp":"%(asctime)s","level":"%(levelname)s","name":"%(name)s","message":"%(message)s"}',
             stream=log_stream,
+            force=True,
         )
     else:
         # Human-readable text logging
@@ -42,6 +71,7 @@ def setup_logging(settings: Settings) -> None:
             level=log_level,
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
             stream=log_stream,
+            force=True,
         )
 
 
@@ -72,7 +102,7 @@ def print_startup_banner(settings: Settings) -> None:
         logger.info(f"  HTTP Base Path: {settings.mcp_http_base_path}")
     logger.info("")
     logger.info("Database:")
-    logger.info(f"  URL: {settings.database_url}")
+    logger.info(f"  URL: {sanitize_database_url(settings.database_url)}")
     logger.info(f"  Driver: {settings.database_driver}")
     logger.info(f"  Pool Size: {settings.database_pool_size}")
     logger.info("")
