@@ -1,0 +1,28 @@
+# Lab Configuration for RouterOS MCP Service
+# This is a development-friendly configuration with permissive settings
+# DO NOT USE IN PRODUCTION
+
+# Application
+environment: lab
+debug: true
+log_level: DEBUG
+log_format: text
+
+# MCP (stdio for local development with Claude Desktop)
+mcp_transport: stdio
+
+# Database (SQLite for easy development)
+database_url: sqlite:///./data/routeros_mcp_lab.db
+database_echo: true
+
+# RouterOS (permissive for lab)
+routeros_rest_timeout_seconds: 10.0
+routeros_retry_attempts: 2
+
+# Health checks (more frequent for testing)
+health_check_interval_seconds: 30
+health_check_jitter_seconds: 5
+
+# Security
+# encryption_key will use insecure default for lab (warning will be shown)
+# NEVER use this in production!

@@ -184,17 +184,18 @@ Implementation is organized into phases that reflect increasing capability and r
 ### Prerequisites
 
 - Python 3.11+
-- PostgreSQL 14+
-- RouterOS v7.10+ devices
-- OIDC provider (for production HTTP mode)
+- [uv](https://github.com/astral-sh/uv) (recommended) or pip
+- Optional: PostgreSQL 14+ (SQLite works for development)
+- Optional: RouterOS v7.10+ devices (for full functionality)
+- Optional: OIDC provider (for production HTTP mode)
 - Optional: Claude Desktop or compatible MCP host
 
 ### Installation
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/routeros-mcp.git
-cd routeros-mcp
+git clone https://github.com/grammy-jiang/RouterOS-MCP.git
+cd RouterOS-MCP
 
 # Create virtual environment (using uv recommended)
 uv venv .venv
@@ -205,84 +206,88 @@ source .venv/bin/activate  # Unix
 uv pip install -e .[dev]
 ```
 
+### Test the CLI
+
+Run the CLI with the example lab configuration:
+
+```bash
+routeros-mcp --config config/lab.yaml
+```
+
+Or test with command-line overrides:
+
+```bash
+routeros-mcp --debug --log-level DEBUG
+```
+
 ### Configuration
 
-Create `config/lab.yaml`:
+The service supports multiple configuration methods (in priority order):
+
+1. **Built-in defaults** - Sensible defaults for development
+2. **Configuration file** - YAML or TOML via `--config`
+3. **Environment variables** - `ROUTEROS_MCP_*` prefix
+4. **Command-line arguments** - Highest priority
+
+Example `config/lab.yaml` (included):
 
 ```yaml
-# MCP transport
-mcp_transport: stdio  # or "http"
-
-# Environment
+# Application
 environment: lab
+debug: true
 log_level: DEBUG
+log_format: text
 
-# Database
-database_url: postgresql+asyncpg://user:pass@localhost/routeros_mcp_lab
+# MCP (stdio for local development with Claude Desktop)
+mcp_transport: stdio
 
-# RouterOS
-routeros_rest_timeout_seconds: 5.0
-routeros_max_concurrent_requests_per_device: 3
+# Database (SQLite for easy development)
+database_url: sqlite:///./data/routeros_mcp_lab.db
+database_echo: true
 
-# Encryption (generate secure key)
-encryption_key: ${ENCRYPTION_KEY}
+# RouterOS (permissive for lab)
+routeros_rest_timeout_seconds: 10.0
+routeros_retry_attempts: 2
 
-# OIDC (for HTTP transport)
-oidc_enabled: false  # true for production HTTP
+# Health checks (more frequent for testing)
+health_check_interval_seconds: 30
+health_check_jitter_seconds: 5
 ```
 
-### Database Setup
+### Next Steps
+
+**Note**: Full MCP server implementation (database, RouterOS clients, tools) will be added in subsequent tasks (T2+). For now, the CLI validates configuration and prepares the runtime environment.
+
+Future capabilities (implementation pending):
+
+- Database migrations
+- MCP server with stdio/HTTP transports
+- RouterOS device management
+- MCP tools, resources, and prompts
+- Claude Desktop integration
+
+### Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed development instructions.
+
+Quick commands:
 
 ```bash
-# Run migrations
-uv run alembic upgrade head
+# Run tests
+pytest
+
+# Run tests with coverage
+pytest --cov=routeros_mcp --cov-report=html
+
+# Type checking
+mypy routeros_mcp
+
+# Linting
+ruff check routeros_mcp
+
+# Code formatting
+black routeros_mcp
 ```
-
-### Run MCP Server (Stdio Mode)
-
-```bash
-# Start server
-uv run python -m routeros_mcp.mcp_server --config config/lab.yaml
-```
-
-### Configure Claude Desktop
-
-Edit `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "routeros-mcp": {
-      "command": "uv",
-      "args": [
-        "run",
-        "python",
-        "-m",
-        "routeros_mcp.mcp_server",
-        "--config",
-        "/absolute/path/to/config/lab.yaml"
-      ],
-      "env": {
-        "ROUTEROS_MCP_LOG_LEVEL": "INFO",
-        "ENCRYPTION_KEY": "your-secure-key"
-      }
-    }
-  }
-}
-```
-
-### Test with MCP Inspector
-
-```bash
-# Install MCP Inspector
-npm install -g @modelcontextprotocol/inspector
-
-# Launch inspector
-npx @modelcontextprotocol/inspector uv run python -m routeros_mcp.mcp_server \
-    --config config/lab.yaml
-```
-
-Navigate to `http://localhost:5173` to interactively test tools, resources, and prompts.
 
 ## Development
 
@@ -290,13 +295,22 @@ Navigate to `http://localhost:5173` to interactively test tools, resources, and 
 
 ```bash
 # All tests
-uv run pytest
+pytest
 
 # With coverage
-uv run pytest --cov=routeros_mcp --cov-report=html
+pytest --cov=routeros_mcp --cov-report=html
 
-# Using tox (recommended)
-uv run tox
+# Specific test file
+pytest tests/unit/test_config.py
+
+# Type checking
+mypy routeros_mcp
+
+# Linting
+ruff check routeros_mcp
+
+# Code formatting
+black routeros_mcp
 ```
 
 ### Linting and Formatting
