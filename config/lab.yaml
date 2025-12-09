@@ -1,0 +1,26 @@
+# Lab Configuration Example
+# This configuration is for local development and testing
+
+# Application
+environment: lab
+debug: true
+log_level: DEBUG
+log_format: text
+
+# MCP
+mcp_transport: stdio
+
+# Database (SQLite for easy development)
+database_url: sqlite:///./data/routeros_mcp_lab.db
+database_echo: true
+
+# RouterOS (permissive for lab)
+routeros_rest_timeout_seconds: 10.0
+routeros_retry_attempts: 2
+
+# Health checks (more frequent for testing)
+health_check_interval_seconds: 30
+health_check_jitter_seconds: 5
+
+# Security (insecure for lab only - warning will be shown)
+# encryption_key will use insecure default for lab

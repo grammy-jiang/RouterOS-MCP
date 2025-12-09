@@ -1,0 +1,41 @@
+# Production Configuration Example
+# This configuration is for production deployment
+
+# Application
+environment: prod
+debug: false
+log_level: INFO
+log_format: json
+
+# MCP (HTTP with OAuth)
+mcp_transport: http
+mcp_http_host: 0.0.0.0
+mcp_http_port: 8080
+
+# Database (PostgreSQL with asyncpg)
+# Use environment variables for sensitive values
+database_url: postgresql+asyncpg://mcp_user:${DB_PASSWORD}@postgres:5432/routeros_mcp_prod
+database_pool_size: 10
+database_max_overflow: 20
+
+# OIDC Authentication (REQUIRED for production HTTP)
+oidc_enabled: true
+oidc_issuer: https://idp.example.com
+oidc_client_id: routeros-mcp-prod
+oidc_client_secret: ${OIDC_CLIENT_SECRET}
+oidc_audience: routeros-mcp
+
+# RouterOS
+routeros_rest_timeout_seconds: 5.0
+routeros_max_concurrent_per_device: 3
+routeros_retry_attempts: 3
+
+# Health checks
+health_check_interval_seconds: 60
+health_check_jitter_seconds: 10
+
+# Metrics
+metrics_collection_interval_seconds: 300
+
+# Security (REQUIRED - set via environment variable)
+# encryption_key: ${ENCRYPTION_KEY}
