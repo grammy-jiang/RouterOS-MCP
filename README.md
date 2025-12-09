@@ -92,8 +92,8 @@ Foundation and high-level design:
 | [00](docs/00-requirements-and-scope-specification.md) | Requirements & Scope | Problem statement, use cases, success criteria |
 | [01](docs/01-overall-system-architecture-and-deployment-topology.md) | Architecture & Deployment | High-level architecture, Cloudflare Tunnel integration |
 | [02](docs/02-security-oauth-integration-and-access-control.md) | Security & Access Control | Threat model, OAuth/OIDC, RBAC, device scopes |
-| [03](docs/03-routeros-integration-and-platform-constraints-rest-and-ssh.md) | RouterOS Integration | REST client, SSH whitelisting, idempotency |
-| [04](docs/04-mcp-tools-interface-and-json-schema-specification.md) | MCP Tools Interface | 40 tool specifications, JSON-RPC schemas, authorization |
+| [03](docs/03-routeros-integration-and-platform-constraints-rest-and-ssh.md) | RouterOS Integration | 41 REST API endpoints, SSH whitelisting, idempotency |
+| [04](docs/04-mcp-tools-interface-and-json-schema-specification.md) | MCP Tools Interface | 46 tools (40 core + 6 fallback), JSON-RPC schemas, intent-based descriptions |
 | [05](docs/05-domain-model-persistence-and-task-job-model.md) | Domain Model & Persistence | Business logic, workflows, retention policies |
 | [06](docs/06-system-information-and-metrics-collection-module-design.md) | Metrics Collection | Endpoint mappings, health thresholds, collection intervals |
 | [07](docs/07-device-control-and-high-risk-operations-safeguards.md) | High-Risk Operations | Risk catalog, safeguards, governance |
@@ -117,13 +117,15 @@ Detailed implementation guidelines:
 | [18](docs/18-database-schema-and-orm-specification.md) | **Database Schema & ORM** | SQLAlchemy models, migrations, session management |
 | [19](docs/19-json-rpc-error-codes-and-mcp-protocol-specification.md) | **JSON-RPC Error Codes** | Complete error taxonomy, protocol compliance |
 
-### 📊 Meta & Reference Documents
+### 📊 Key Design Enhancements
 
-| Doc | Title | Description |
-|-----|-------|-------------|
-| [ANALYSIS](docs/ANALYSIS.md) | **Design Analysis** | MCP compliance analysis, gaps, recommendations |
-| [ENDPOINT-TOOL-MAPPING](docs/ENDPOINT-TOOL-MAPPING.md) | **Endpoint-Tool Mapping** | Cross-reference: RouterOS endpoints ↔ MCP tools |
-| [DOCUMENTATION-AUDIT](docs/DOCUMENTATION-AUDIT.md) | **Documentation Audit** | Comprehensive audit, consolidation analysis |
+All design documents have been enhanced with MCP best practices:
+
+- **Intent-Based Tool Descriptions**: All 46 tools include "Use when" guidance for optimal LLM tool selection
+- **Resource Metadata**: Comprehensive metadata with token estimation, size hints, and context safety flags
+- **Versioning & Capability Negotiation**: Semantic versioning with backward compatibility rules
+- **LLM-in-the-Loop Testing**: Testing strategy for tool selection accuracy (target: 90%+) and parameter inference (target: 85%+)
+- **MCP Observability**: Request correlation, token budget tracking, and tool-level metrics
 
 ## Implementation Roadmap (Phases)
 
@@ -369,14 +371,15 @@ CMD ["python", "-m", "routeros_mcp.mcp_server", "--config", "config/prod.yaml"]
 If you are implementing this service:
 
 1. **Read Core Design Docs**:
-   - Start with [docs/00](docs/00-requirements-and-scope-specification.md) (requirements)
-   - Then [docs/01](docs/01-overall-system-architecture-and-deployment-topology.md) (architecture)
-   - Review [docs/14](docs/14-mcp-protocol-integration-and-transport-design.md) (MCP integration)
+   - Start with [docs/00](docs/00-requirements-and-scope-specification.md) (requirements & scope)
+   - Then [docs/01](docs/01-overall-system-architecture-and-deployment-topology.md) (architecture & deployment)
+   - Review [docs/14](docs/14-mcp-protocol-integration-and-transport-design.md) (MCP protocol & transport)
 
-2. **Understand Security & MCP Tools**:
-   - Read [docs/02](docs/02-security-oauth-integration-and-access-control.md) (security)
-   - Review [docs/04](docs/04-mcp-tools-interface-and-json-schema-specification.md) (tools)
-   - Study [docs/15](docs/15-mcp-resources-and-prompts-design.md) (resources & prompts)
+2. **Understand Security, Tools & Endpoints**:
+   - Read [docs/02](docs/02-security-oauth-integration-and-access-control.md) (OAuth, RBAC, threat model)
+   - Review [docs/03](docs/03-routeros-integration-and-platform-constraints-rest-and-ssh.md) (41 REST endpoints)
+   - Study [docs/04](docs/04-mcp-tools-interface-and-json-schema-specification.md) (46 tools with intent-based descriptions)
+   - Review [docs/15](docs/15-mcp-resources-and-prompts-design.md) (resources & prompts)
 
 3. **Set Up Development Environment**:
    - Follow [docs/12](docs/12-development-environment-dependencies-and-commands.md)
@@ -400,19 +403,23 @@ If you are implementing this service:
 
 - All clients (including AI) are untrusted
 - Server-side enforcement of all safety rules
-- OAuth 2.1 authorization for HTTP transport
-- Encrypted credential storage
-- Comprehensive audit logging
+- OAuth 2.1 / OIDC authorization for HTTP transport
+- Fernet-encrypted credential storage (AES-128-CBC)
+- Comprehensive audit logging with immutable event records
+- Three-tier authorization: fundamental (read-only), advanced (single-device writes), professional (multi-device workflows)
 
-### MCP Best Practices
+### MCP Best Practices Integration
 
-- Official FastMCP SDK usage
-- Stdio safety (stderr only for logs)
-- HTTP/SSE for production with OAuth
-- JSON-RPC 2.0 error handling
-- Resources for contextual data
-- Prompts for workflow guidance
-- MCP Inspector for testing
+This design follows official MCP best practices from Anthropic:
+
+- **FastMCP SDK**: Zero-boilerplate tool registration with automatic schema generation
+- **Transport Safety**: Stdio (stderr only for logs) and HTTP/SSE with OAuth
+- **Intent-Based Descriptions**: All 46 tools include "Use when" guidance for optimal LLM selection
+- **Resource Metadata**: Token estimation, size hints, safe_for_context flags
+- **Error Recovery**: Actionable error messages with recovery strategies
+- **Versioning**: Semantic versioning with capability negotiation
+- **Observability**: Request correlation, token budget tracking, tool-level metrics
+- **LLM Testing**: Automated testing for tool selection accuracy (90%+) and parameter inference (85%+)
 
 ### Operational Excellence
 
@@ -450,6 +457,14 @@ If you are implementing this service:
 
 ---
 
-**Status**: This is a comprehensive design specification and architectural blueprint. Implementation is organized in phases (0-5) as described in the roadmap above. The design follows MCP best practices and industry standards for Python development.
+**Status**: ✅ **Design Complete** - This is a comprehensive, production-ready design specification with 20 numbered documents covering all aspects of the RouterOS MCP service. Implementation is organized in phases (0-5) as described in the roadmap above. The design incorporates official MCP best practices from Anthropic and follows industry standards for Python development.
+
+**Key Metrics**:
+- **46 MCP tools** (23 fundamental, 9 advanced, 14 professional)
+- **41 RouterOS REST endpoints** (25 read-only, 10 advanced writes, 6 high-risk)
+- **6 Phase-1 fallback tools** for tools-only client compatibility (ChatGPT, Mistral)
+- **20 design documents** (~50,000 lines) with comprehensive specifications
+- **3 security tiers** with OAuth 2.1 / OIDC integration
+- **85% test coverage target** (100% for core modules)
 
 For questions or contributions, please open an issue or discussion on GitHub.

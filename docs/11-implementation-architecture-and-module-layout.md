@@ -19,9 +19,20 @@ The implementation is based on:
 
 - **MCP integration**
   - A dedicated `MCPServer` component that:
-    - Exposes tools over the MCP protocol (e.g., via stdin/stdout or HTTP-based transport).  
-    - Uses the same domain services as the HTTP API.  
-  - The MCP server is implemented in-process alongside the HTTP API.
+    - Implements JSON-RPC 2.0 protocol for MCP communication.
+    - Exposes tools over the MCP protocol via multiple transports (stdio, HTTP/SSE).
+    - Uses the same domain services as the HTTP API.
+    - Provides automatic tool discovery and registration.
+    - Manages client sessions and capability negotiation.
+  - **MCP SDK**: FastMCP (official MCP SDK for Python) or custom implementation
+    - Handles MCP protocol compliance (initialize, tools/list, tools/call, etc.)
+    - Provides decorators for tool registration with automatic JSON Schema generation
+    - Manages transport abstraction (stdio/HTTP/SSE)
+  - The MCP server is implemented in-process alongside the HTTP API for flexibility.
+  - **Transport Modes**:
+    - **Stdio transport** (default): JSON-RPC over stdin/stdout for Claude Desktop and similar clients
+    - **HTTP/SSE transport**: HTTP with Server-Sent Events for multi-client deployments
+    - Transport selection via `MCP_TRANSPORT_MODE` environment variable
 
 - **Configuration & validation**
   - Pydantic (v2) for settings and request/response schemas.
@@ -61,16 +72,81 @@ The main Python package is `routeros_mcp` with the following structure:
 
 - `routeros_mcp/config.py`
   - Pydantic `Settings` class for application configuration (DB URL, OIDC config, etc.).
+  - **MCP-specific settings**: `MCP_SERVER_NAME`, `MCP_SERVER_VERSION`, `MCP_TRANSPORT_MODE`, `MCP_ENABLE_TOOLS`, `MCP_ENABLE_RESOURCES`, `MCP_ENABLE_PROMPTS`, `MCP_TOKEN_BUDGET_WARNING_THRESHOLD`
   - See `docs/17-configuration-specification.md` for complete Settings specification.
 
 - `routeros_mcp/cli.py`
   - Command-line argument parsing for MCP server.
   - Supports config files (YAML/TOML), environment variables, and CLI overrides.
+  - Startup validation (database connectivity, tool schemas, transport binding).
   - See `docs/17-configuration-specification.md` for CLI specification.
 
-- `routeros_mcp/mcp_server.py` (top-level)
-  - `MCPServer` implementation and tool registration/discovery using FastMCP SDK.
-  - See `docs/14-mcp-protocol-integration-and-transport-design.md` for MCP integration.
+- `routeros_mcp/main.py` (top-level entry point)
+  - Application startup: initializes database, MCP server, FastAPI app
+  - Transport selection and configuration
+  - Graceful shutdown handling (in-flight tool calls, database draining)
+
+- `routeros_mcp/mcp/` (MCP protocol implementation)
+  - `mcp/server.py`
+    - `MCPServer` core implementation using FastMCP SDK
+    - Tool discovery and registration
+    - Client session management
+    - Capability negotiation
+    - See `docs/14-mcp-protocol-integration-and-transport-design.md`
+
+  - `mcp/protocol/`
+    - `protocol/jsonrpc.py`
+      - JSON-RPC 2.0 message handling (request/response/error formatting)
+      - Error code mapping (Python exceptions → JSON-RPC error codes)
+    - `protocol/messages.py`
+      - MCP protocol message types (InitializeRequest, ToolsListRequest, ToolsCallRequest)
+      - Pydantic models for MCP protocol messages
+
+  - `mcp/transport/`
+    - `transport/base.py`
+      - `Transport` abstract base class
+    - `transport/stdio.py`
+      - `StdioTransport` implementation (stdin/stdout JSON-RPC)
+    - `transport/http.py`
+      - `HttpTransport` implementation (HTTP + Server-Sent Events)
+    - `transport/factory.py`
+      - Transport factory based on configuration
+
+  - `mcp/session/`
+    - `session/manager.py`
+      - Client session lifecycle (initialize → tools/list → tools/call → close)
+      - Capability tracking per session
+      - Client info tracking (name, version)
+    - `session/state.py`
+      - Session state models (initialized, ready, closed)
+
+  - `mcp/registry/`
+    - `registry/tools.py`
+      - Tool registry with automatic discovery
+      - Tool metadata management (name, tier, schema, handler)
+      - Tool filtering by tier/subscription
+    - `registry/resources.py` (Phase 2)
+      - Resource provider registry
+      - URI pattern routing
+    - `registry/prompts.py` (Phase 2)
+      - Prompt template registry
+
+  - `mcp/middleware/`
+    - `middleware/auth.py`
+      - MCP-level authentication (session-based auth)
+    - `middleware/logging.py`
+      - Request/response logging with correlation IDs
+    - `middleware/metrics.py`
+      - MCP protocol metrics collection
+    - `middleware/validation.py`
+      - Tool argument validation against JSON schemas
+    - `middleware/token_budget.py`
+      - Token estimation and budget tracking
+
+  - `mcp/errors.py`
+    - MCP-specific exception classes
+    - Error code constants (JSON-RPC -32700 to -32603)
+    - Error formatting utilities
 
 - `routeros_mcp/api/`
   - `api/http.py`
@@ -259,30 +335,435 @@ class JobService:
 ### MCP server and tool registration
 
 ```python
-from typing import Callable, Awaitable
-from routeros_mcp.domain.models import ToolRequest, ToolResponse
+from typing import Callable, Awaitable, Any
+from pydantic import BaseModel
+from routeros_mcp.domain.models import Device
+from routeros_mcp.mcp.protocol.messages import (
+    InitializeRequest,
+    InitializeResponse,
+    ToolsListRequest,
+    ToolsListResponse,
+    ToolsCallRequest,
+    ToolsCallResponse
+)
 
-ToolHandler = Callable[[ToolRequest], Awaitable[ToolResponse]]
+# Tool handler signature
+ToolHandler = Callable[[dict[str, Any], Device], Awaitable[dict[str, Any]]]
 
 class MCPServer:
-    def __init__(self) -> None: ...
+    """MCP protocol server implementation."""
 
-    def register_tool(
+    def __init__(
         self,
-        name: str,
-        handler: ToolHandler,
         *,
-        tier: str,
-        required_role: str,
-        environments: list[str],
-        requires_approval: bool = False,
+        name: str,
+        version: str,
+        transport_mode: str,  # "stdio" | "http" | "both"
+        settings: Settings,
+        session_manager: SessionManager,
+        tool_registry: ToolRegistry
     ) -> None:
+        """Initialize MCP server with transport and registries."""
         ...
 
-    async def handle_request(self, request: ToolRequest) -> ToolResponse: ...
+    async def start(self) -> None:
+        """Start MCP server and begin accepting requests."""
+        ...
+
+    async def stop(self) -> None:
+        """Gracefully stop server (complete in-flight requests)."""
+        ...
+
+    # MCP Protocol Methods
+    async def handle_initialize(
+        self,
+        request: InitializeRequest
+    ) -> InitializeResponse:
+        """Handle initialize request (capability negotiation)."""
+        ...
+
+    async def handle_tools_list(
+        self,
+        request: ToolsListRequest
+    ) -> ToolsListResponse:
+        """Return list of available tools for client."""
+        ...
+
+    async def handle_tools_call(
+        self,
+        request: ToolsCallRequest
+    ) -> ToolsCallResponse:
+        """Execute tool and return result."""
+        ...
+
+    # Tool Registration
+    def register_tool(
+        self,
+        *,
+        name: str,
+        description: str,
+        handler: ToolHandler,
+        input_schema: dict[str, Any],
+        tier: str,  # "free" | "basic" | "professional"
+        environments: list[str] | None = None,
+        requires_approval: bool = False
+    ) -> None:
+        """Register tool with metadata."""
+        ...
+
+class ToolRegistry:
+    """Registry for MCP tools with automatic discovery."""
+
+    def __init__(self) -> None:
+        self.tools: dict[str, ToolMetadata] = {}
+
+    def register(self, tool_metadata: ToolMetadata) -> None:
+        """Register a tool with metadata."""
+        ...
+
+    def discover_tools(self, package: str = "routeros_mcp.mcp_tools") -> None:
+        """Automatically discover and register tools from package."""
+        ...
+
+    def get_tools_for_tier(self, tier: str) -> list[ToolMetadata]:
+        """Get all tools available for given tier."""
+        ...
+
+    def get_tool(self, name: str) -> ToolMetadata:
+        """Get tool metadata by name."""
+        ...
+
+class ToolMetadata(BaseModel):
+    """Metadata for an MCP tool."""
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+    tier: str
+    handler: ToolHandler
+    environments: list[str] | None = None
+    requires_approval: bool = False
+    estimated_tokens: int = 0
+
+# Tool decorator for automatic registration
+def mcp_tool(
+    *,
+    name: str,
+    description: str,
+    tier: str = "free",
+    environments: list[str] | None = None,
+    requires_approval: bool = False
+):
+    """Decorator for MCP tool registration with automatic schema generation."""
+    def decorator(func: ToolHandler) -> ToolHandler:
+        # Extract input schema from function signature and Pydantic models
+        input_schema = generate_schema_from_signature(func)
+
+        # Register tool
+        tool_metadata = ToolMetadata(
+            name=name,
+            description=description,
+            input_schema=input_schema,
+            tier=tier,
+            handler=func,
+            environments=environments,
+            requires_approval=requires_approval
+        )
+        get_global_tool_registry().register(tool_metadata)
+
+        return func
+    return decorator
+
+# Example tool implementation using decorator
+@mcp_tool(
+    name="system.get_overview",
+    description="Get RouterOS system overview and health metrics",
+    tier="free"
+)
+async def get_system_overview(
+    device_id: str,
+    *,
+    device: Device
+) -> dict[str, Any]:
+    """Get system overview for device."""
+    # Implementation uses domain services
+    system_service = get_system_service()
+    overview = await system_service.get_overview(device_id)
+
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": format_system_overview(overview)
+            }
+        ],
+        "_meta": {
+            "routeros_version": overview["routeros_version"],
+            "cpu": overview["cpu"],
+            "memory": overview["memory"],
+            "estimated_tokens": estimate_tokens(overview)
+        }
+    }
 ```
 
-`ToolRequest` and `ToolResponse` are Pydantic models that wrap the generic envelope described in `docs/04-...` (tool name, params, success/error, result).
+**MCP Protocol Message Types:**
+
+```python
+from pydantic import BaseModel
+
+class InitializeRequest(BaseModel):
+    """MCP initialize request."""
+    protocol_version: str
+    capabilities: dict[str, Any]
+    client_info: dict[str, str]
+
+class InitializeResponse(BaseModel):
+    """MCP initialize response."""
+    protocol_version: str
+    capabilities: dict[str, Any]
+    server_info: dict[str, str]
+
+class ToolsListRequest(BaseModel):
+    """MCP tools/list request."""
+    pass  # No params
+
+class ToolsListResponse(BaseModel):
+    """MCP tools/list response."""
+    tools: list[dict[str, Any]]  # List of tool schemas
+
+class ToolsCallRequest(BaseModel):
+    """MCP tools/call request."""
+    name: str
+    arguments: dict[str, Any]
+
+class ToolsCallResponse(BaseModel):
+    """MCP tools/call response."""
+    content: list[dict[str, Any]]  # MCP content blocks
+    is_error: bool = False
+    _meta: dict[str, Any] | None = None
+```
+
+**MCP Transport Implementations:**
+
+```python
+from abc import ABC, abstractmethod
+
+class Transport(ABC):
+    """Abstract base class for MCP transports."""
+
+    @abstractmethod
+    async def start(self) -> None:
+        """Start transport."""
+        ...
+
+    @abstractmethod
+    async def stop(self) -> None:
+        """Stop transport."""
+        ...
+
+    @abstractmethod
+    async def send_message(self, message: dict[str, Any]) -> None:
+        """Send JSON-RPC message to client."""
+        ...
+
+    @abstractmethod
+    async def receive_message(self) -> dict[str, Any]:
+        """Receive JSON-RPC message from client."""
+        ...
+
+class StdioTransport(Transport):
+    """Stdio transport for MCP (JSON-RPC over stdin/stdout)."""
+
+    def __init__(self) -> None:
+        self.stdin = asyncio.get_event_loop().stdin
+        self.stdout = asyncio.get_event_loop().stdout
+
+    async def send_message(self, message: dict[str, Any]) -> None:
+        """Send JSON-RPC message to stdout."""
+        json_str = json.dumps(message)
+        self.stdout.write(f"{json_str}\n")
+        await self.stdout.drain()
+
+    async def receive_message(self) -> dict[str, Any]:
+        """Receive JSON-RPC message from stdin."""
+        line = await self.stdin.readline()
+        return json.loads(line)
+
+class HttpTransport(Transport):
+    """HTTP/SSE transport for MCP."""
+
+    def __init__(self, app: FastAPI, base_path: str = "/mcp") -> None:
+        self.app = app
+        self.base_path = base_path
+        self.sessions: dict[str, ClientSession] = {}
+
+    async def send_message(self, session_id: str, message: dict[str, Any]) -> None:
+        """Send message via Server-Sent Events."""
+        session = self.sessions[session_id]
+        await session.send_event(data=json.dumps(message))
+
+    async def receive_message(self, session_id: str) -> dict[str, Any]:
+        """Receive message via HTTP POST."""
+        # HTTP transport receives via POST to /mcp/message
+        # This is handled by FastAPI route
+        ...
+```
+
+**MCP Session Management:**
+
+```python
+from enum import Enum
+
+class SessionState(str, Enum):
+    """MCP client session states."""
+    UNINITIALIZED = "uninitialized"
+    INITIALIZED = "initialized"
+    READY = "ready"
+    CLOSED = "closed"
+
+class ClientSession(BaseModel):
+    """MCP client session."""
+    session_id: str
+    client_info: dict[str, str]
+    capabilities: dict[str, Any]
+    state: SessionState
+    created_at: datetime
+    last_activity_at: datetime
+
+class SessionManager:
+    """Manages MCP client sessions."""
+
+    def __init__(self) -> None:
+        self.sessions: dict[str, ClientSession] = {}
+
+    async def create_session(
+        self,
+        client_info: dict[str, str],
+        capabilities: dict[str, Any]
+    ) -> ClientSession:
+        """Create new client session."""
+        session_id = str(uuid.uuid4())
+        session = ClientSession(
+            session_id=session_id,
+            client_info=client_info,
+            capabilities=capabilities,
+            state=SessionState.INITIALIZED,
+            created_at=datetime.utcnow(),
+            last_activity_at=datetime.utcnow()
+        )
+        self.sessions[session_id] = session
+        return session
+
+    async def get_session(self, session_id: str) -> ClientSession:
+        """Get session by ID."""
+        return self.sessions[session_id]
+
+    async def close_session(self, session_id: str) -> None:
+        """Close and remove session."""
+        if session_id in self.sessions:
+            self.sessions[session_id].state = SessionState.CLOSED
+            del self.sessions[session_id]
+```
+
+**Token Estimation Utilities:**
+
+```python
+class TokenEstimator:
+    """Estimate token count for tool responses."""
+
+    @staticmethod
+    def estimate_tokens(text: str) -> int:
+        """Estimate token count using simple heuristic."""
+        # Simple approximation: ~4 chars per token
+        return len(text) // 4
+
+    @staticmethod
+    def estimate_tokens_for_response(response: dict[str, Any]) -> int:
+        """Estimate tokens for MCP tool response."""
+        content = response.get("content", [])
+        total_chars = 0
+
+        for block in content:
+            if block.get("type") == "text":
+                total_chars += len(block.get("text", ""))
+            elif block.get("type") == "resource":
+                # Resource blocks typically smaller
+                total_chars += 100
+
+        return total_chars // 4
+
+    @staticmethod
+    def check_token_budget(
+        response: dict[str, Any],
+        warning_threshold: int = 5000,
+        error_threshold: int = 50000
+    ) -> tuple[int, str]:
+        """Check token budget and return (tokens, status)."""
+        tokens = TokenEstimator.estimate_tokens_for_response(response)
+
+        if tokens > error_threshold:
+            return tokens, "error"
+        elif tokens > warning_threshold:
+            return tokens, "warning"
+        else:
+            return tokens, "ok"
+```
+
+**Error Mapping:**
+
+```python
+class MCPError(Exception):
+    """Base MCP error."""
+    code: int
+    message: str
+
+class ParseError(MCPError):
+    """Invalid JSON was received by the server (-32700)."""
+    code = -32700
+
+class InvalidRequest(MCPError):
+    """The JSON sent is not a valid Request object (-32600)."""
+    code = -32600
+
+class MethodNotFound(MCPError):
+    """The method does not exist / is not available (-32601)."""
+    code = -32601
+
+class InvalidParams(MCPError):
+    """Invalid method parameter(s) (-32602)."""
+    code = -32602
+
+class InternalError(MCPError):
+    """Internal JSON-RPC error (-32603)."""
+    code = -32603
+
+def map_exception_to_mcp_error(exc: Exception) -> dict[str, Any]:
+    """Map Python exception to MCP JSON-RPC error."""
+    if isinstance(exc, MCPError):
+        return {
+            "code": exc.code,
+            "message": exc.message
+        }
+    elif isinstance(exc, ValidationError):
+        return {
+            "code": -32602,
+            "message": f"Invalid params: {str(exc)}"
+        }
+    elif isinstance(exc, DeviceNotFoundError):
+        return {
+            "code": -32602,
+            "message": f"Device not found: {str(exc)}"
+        }
+    elif isinstance(exc, AuthorizationError):
+        return {
+            "code": -32000,  # Custom error code
+            "message": f"Authorization failed: {str(exc)}"
+        }
+    else:
+        return {
+            "code": -32603,
+            "message": f"Internal error: {str(exc)}"
+        }
+```
 
 ### FastAPI HTTP entrypoint
 
@@ -322,6 +803,67 @@ Each MCP tool is implemented by a thin wrapper that:
 2. Loads the `Device` and environment/capability flags.
 3. Calls the appropriate domain service method.
 4. Maps the result into the JSON schema defined in `docs/04-...`.
+
+---
+
+## Summary
+
+This document defines the complete implementation architecture for the RouterOS MCP service with comprehensive MCP protocol integration:
+
+**Core Technology Stack:**
+- **Python 3.11+** with async/await throughout
+- **FastMCP SDK** or custom MCP protocol implementation
+- **FastAPI** for HTTP/admin APIs with Uvicorn ASGI server
+- **SQLAlchemy 2.x** + PostgreSQL for persistence
+- **Pydantic v2** for validation and settings
+- **httpx** (async) for RouterOS REST, **asyncssh** for SSH fallback
+- **Prometheus + OpenTelemetry** for observability
+
+**MCP Protocol Implementation:**
+- **JSON-RPC 2.0** message handling with proper error codes
+- **Multiple transports**: stdio (stdin/stdout) and HTTP/SSE
+- **Session management**: client initialization, capability negotiation, state tracking
+- **Tool registry**: automatic discovery, tier filtering, schema generation
+- **Token estimation**: automatic token counting with budget warnings
+- **Error mapping**: Python exceptions → JSON-RPC error codes
+
+**Module Organization:**
+- `routeros_mcp/mcp/` - Complete MCP protocol implementation
+  - `protocol/` - JSON-RPC messages and error handling
+  - `transport/` - Stdio and HTTP/SSE transport implementations
+  - `session/` - Client session lifecycle management
+  - `registry/` - Tool/resource/prompt registration
+  - `middleware/` - Auth, logging, metrics, validation, token budgets
+- `routeros_mcp/mcp_tools/` - Tool implementations with @mcp_tool decorator
+- `routeros_mcp/mcp_resources/` - Resource providers (Phase 2)
+- `routeros_mcp/mcp_prompts/` - Prompt templates (Phase 2)
+- `routeros_mcp/domain/` - Business logic (device, plans, jobs, operations)
+- `routeros_mcp/infra/` - Infrastructure (RouterOS clients, database, jobs, observability)
+- `routeros_mcp/security/` - Authentication (OIDC) and authorization (RBAC)
+- `routeros_mcp/api/` - FastAPI HTTP/admin APIs
+
+**Key Design Patterns:**
+- **Decorator-based tool registration**: @mcp_tool with automatic schema generation
+- **Transport abstraction**: Abstract Transport base class with stdio/HTTP implementations
+- **Session-based state**: ClientSession tracks capabilities and lifecycle
+- **Middleware pipeline**: Auth → Validation → Metrics → Logging → Token Budget
+- **Error handling**: Centralized exception → MCP error mapping
+- **Token estimation**: Automatic estimation with warning/error thresholds
+
+**Operational Features:**
+- **Graceful shutdown**: Complete in-flight tool calls before stopping
+- **Startup validation**: Database, tool schemas, transport binding, device connectivity
+- **Health endpoints**: `/health` for load balancer probes
+- **Metrics endpoint**: `/metrics` for Prometheus scraping
+- **Multiple transports**: Run stdio + HTTP simultaneously for flexibility
+
+**Cross-references:**
+- See [Doc 04 (MCP Tools)](04-mcp-tools-interface-and-json-schema-specification.md) for tool JSON schemas
+- See [Doc 14 (MCP Protocol Integration)](14-mcp-protocol-integration-and-transport-design.md) for transport details
+- See [Doc 15 (MCP Resources and Prompts)](15-mcp-resources-and-prompts-design.md) for Phase 2 features
+- See [Doc 16 (Detailed Module Specifications)](16-detailed-module-specifications.md) for complete implementation details
+- See [Doc 17 (Configuration Specification)](17-configuration-specification.md) for all configuration options
+- See [Doc 10 (Testing)](10-testing-validation-and-sandbox-strategy-and-safety-nets.md) for MCP testing patterns
 
 ---
 

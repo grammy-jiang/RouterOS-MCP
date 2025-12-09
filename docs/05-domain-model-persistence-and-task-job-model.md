@@ -47,6 +47,10 @@ This section describes the **domain logic, business rules, and responsibilities*
 - `serial_number` (str, optional): Device serial number
 - `firmware_version` (str, optional): Firmware version
 
+**Health Check Configuration:**
+- `health_check_interval_seconds` (int): Per-device check frequency (default: 60, range: 30-600)
+- `health_check_enabled` (bool): Whether automated checks are enabled (default: true)
+
 **Status Values:**
 - `healthy`: Device is reachable and responding normally
 - `degraded`: Device is reachable but health checks show warnings (high CPU, memory, etc.)
@@ -167,6 +171,7 @@ This section describes the **domain logic, business rules, and responsibilities*
 - `status` (str): Health status ("healthy", "warning", "critical", "error")
 - `response_time_ms` (float): Connection response time
 - `check_type` (str): Type of check ("connectivity", "resource", "comprehensive")
+- `correlation_id` (str, optional): Links to triggering MCP request (for on-demand checks)
 
 **Health Metrics** (Optional, based on check_type):
 - `cpu_usage_percent` (float): CPU utilization (0-100)
@@ -242,6 +247,8 @@ This section describes the **domain logic, business rules, and responsibilities*
 - `payload_ref` (str): Reference to stored configuration data
 - `size_bytes` (int): Uncompressed payload size
 - `compressed` (bool): Whether payload is compressed
+- `correlation_id` (str, optional): Links to MCP request that triggered snapshot
+- `estimated_tokens` (int, optional): Estimated token count for LLM context (for large configs)
 
 **Snapshot Types (`kind`):**
 - `config_full`: Complete configuration export (`/export`)
@@ -326,6 +333,7 @@ This section describes the **domain logic, business rules, and responsibilities*
 - `status` (str): Plan lifecycle status
 - `summary` (str): Human-readable description
 - `risk_level` (str): Risk assessment ("low", "medium", "high")
+- `correlation_id` (str): Links plan to originating MCP request for end-to-end tracing
 
 **Plan Targets** (JSON field):
 ```python
@@ -400,6 +408,7 @@ This section describes the **domain logic, business rules, and responsibilities*
 - `scheduled_at` (datetime): When job should run
 - `started_at` (datetime, optional): Actual start time
 - `completed_at` (datetime, optional): Actual completion time
+- `correlation_id` (str, optional): Links job to MCP request (inherits from plan if plan-based)
 
 **Job Types:**
 - `apply_plan`: Execute approved plan
@@ -428,27 +437,40 @@ This section describes the **domain logic, business rules, and responsibilities*
 }
 ```
 
-**Execution Results** (JSON field):
+**Execution Results** (JSON field - MCP-compatible format):
 ```python
 {
-    "total_devices": 3,
-    "successful": 2,
-    "failed": 1,
-    "results": [
+    "content": [
         {
-            "device_id": "dev-lab-01",
-            "status": "success",
-            "changed": true,
-            "execution_time_ms": 450,
-            "changes_applied": ["dns_servers_updated"]
-        },
-        {
-            "device_id": "dev-lab-02",
-            "status": "failed",
-            "error": "Device unreachable",
-            "error_code": "DEVICE_UNREACHABLE"
+            "type": "text",
+            "text": "Job completed: 2/3 devices successful"
         }
-    ]
+    ],
+    "isError": false,
+    "_meta": {
+        "job_id": "job-20250115-001",
+        "plan_id": "plan-20250115-001",
+        "correlation_id": "corr-abc-123",
+        "total_devices": 3,
+        "successful": 2,
+        "failed": 1,
+        "execution_time_ms": 1350,
+        "results": [
+            {
+                "device_id": "dev-lab-01",
+                "status": "success",
+                "changed": true,
+                "execution_time_ms": 450,
+                "changes_applied": ["dns_servers_updated"]
+            },
+            {
+                "device_id": "dev-lab-02",
+                "status": "failed",
+                "error": "Device unreachable",
+                "error_code": "DEVICE_UNREACHABLE"
+            }
+        ]
+    }
 }
 ```
 
@@ -636,9 +658,11 @@ This section describes the **domain logic, business rules, and responsibilities*
    - One device, many audit events
    - Cascade: Delete device → retain audit events (immutable)
 
-5. **Plan → Job** (1:N):
-   - One plan can spawn multiple jobs (per device)
-   - Jobs can exist without plans (health checks, etc.)
+5. **Plan → Job** (1:N or M:N for parallel execution):
+   - One plan can spawn multiple jobs (professional tier: one job per device for parallel execution)
+   - Sequential plans: One job contains all devices
+   - Parallel plans: Multiple jobs (one per device) linked to same plan_id
+   - Jobs can exist without plans (health checks, metrics collection, etc.)
    - Cascade: Archive plan → archive related jobs
 
 6. **Plan → Device** (M:N):
@@ -1236,18 +1260,36 @@ class DeviceRepository:
             return device
 ```
 
-### Query Patterns
+### Query Patterns with Pagination
 
 ```python
-# Find devices with specific tags
-async def find_devices_by_tag(tag_key: str, tag_value: str) -> list[Device]:
+# Find devices with specific tags (paginated)
+async def find_devices_by_tag(
+    tag_key: str,
+    tag_value: str,
+    limit: int = 100,
+    offset: int = 0
+) -> tuple[list[Device], int]:
+    """Find devices by tag with pagination support.
+
+    Returns:
+        Tuple of (devices, total_count)
+    """
     async with session_manager.session() as session:
-        result = await session.execute(
-            select(Device).where(
-                Device.tags[tag_key].as_string() == tag_value
-            )
+        # Build base query
+        query = select(Device).where(
+            Device.tags[tag_key].as_string() == tag_value
         )
-        return result.scalars().all()
+
+        # Get total count
+        count_query = select(func.count()).select_from(query.subquery())
+        total_count = await session.scalar(count_query)
+
+        # Apply pagination
+        paginated_query = query.limit(limit).offset(offset)
+        result = await session.execute(paginated_query)
+
+        return result.scalars().all(), total_count
 
 # Find health checks in warning state
 async def find_warning_health_checks(since: datetime) -> list[HealthCheck]:
@@ -1260,12 +1302,19 @@ async def find_warning_health_checks(since: datetime) -> list[HealthCheck]:
         )
         return result.scalars().all()
 
-# Find audit events for a device
+# Find audit events for a device (paginated)
 async def find_audit_events(
     device_id: str,
     action: str | None = None,
-    start_time: datetime | None = None
-) -> list[AuditEvent]:
+    start_time: datetime | None = None,
+    limit: int = 100,
+    offset: int = 0
+) -> tuple[list[AuditEvent], int]:
+    """Find audit events with pagination support.
+
+    Returns:
+        Tuple of (events, total_count)
+    """
     async with session_manager.session() as session:
         query = select(AuditEvent).where(AuditEvent.device_id == device_id)
 
@@ -1275,10 +1324,247 @@ async def find_audit_events(
         if start_time:
             query = query.where(AuditEvent.timestamp >= start_time)
 
-        query = query.order_by(AuditEvent.timestamp.desc())
+        # Get total count
+        count_query = select(func.count()).select_from(query.subquery())
+        total_count = await session.scalar(count_query)
+
+        # Apply pagination and ordering
+        query = query.order_by(AuditEvent.timestamp.desc()).limit(limit).offset(offset)
 
         result = await session.execute(query)
-        return result.scalars().all()
+        return result.scalars().all(), total_count
+```
+
+---
+
+## MCP Resource Cache Integration (Phase 2)
+
+**Background jobs populate resource cache for efficient MCP resource access.**
+
+### Resource Cache Architecture
+
+```python
+from cachetools import TTLCache
+from typing import Any
+
+class ResourceCache:
+    """In-memory cache for MCP resources with TTL."""
+
+    def __init__(self):
+        # Device health cache (60s TTL)
+        self.device_health = TTLCache(maxsize=1000, ttl=60)
+
+        # Device config snapshots (300s TTL)
+        self.device_configs = TTLCache(maxsize=100, ttl=300)
+
+        # Fleet summaries (120s TTL)
+        self.fleet_summaries = TTLCache(maxsize=10, ttl=120)
+
+        # Plan details (60s TTL)
+        self.plans = TTLCache(maxsize=100, ttl=60)
+
+    async def get_device_health(self, device_id: str) -> dict | None:
+        """Get cached device health data."""
+        return self.device_health.get(device_id)
+
+    async def set_device_health(self, device_id: str, health_data: dict):
+        """Cache device health data."""
+        self.device_health[device_id] = health_data
+
+    async def get_fleet_summary(self, environment: str) -> dict | None:
+        """Get cached fleet summary."""
+        return self.fleet_summaries.get(environment)
+
+    async def set_fleet_summary(self, environment: str, summary: dict):
+        """Cache fleet summary."""
+        self.fleet_summaries[environment] = summary
+```
+
+### Background Job: Resource Cache Refresh
+
+```python
+async def refresh_resource_cache_job():
+    """Background job to refresh MCP resource cache (runs every 60s)."""
+    resource_cache = get_resource_cache()
+
+    # Refresh device health for all active devices
+    devices = await device_repo.find_by_status(["healthy", "degraded"])
+
+    for device in devices:
+        try:
+            # Get latest health check
+            latest_health = await health_check_repo.find_latest(device.id)
+
+            if latest_health:
+                # Build resource-compatible health data
+                health_data = {
+                    "device_id": device.id,
+                    "name": device.name,
+                    "status": latest_health.status,
+                    "timestamp": latest_health.timestamp.isoformat(),
+                    "cpu_usage_percent": latest_health.cpu_usage_percent,
+                    "memory_usage_percent": latest_health.memory_usage_percent,
+                    "uptime_seconds": latest_health.uptime_seconds,
+                    "response_time_ms": latest_health.response_time_ms,
+                    "routeros_version": device.routeros_version,
+                    "hardware_model": device.hardware_model
+                }
+
+                # Cache with resource URI as key
+                await resource_cache.set_device_health(device.id, health_data)
+
+        except Exception as e:
+            logger.warning(
+                f"Failed to refresh resource cache for device {device.id}",
+                error=str(e)
+            )
+
+    # Refresh fleet summaries
+    for environment in ["lab", "staging", "prod"]:
+        try:
+            fleet_summary = await build_fleet_summary(environment)
+            await resource_cache.set_fleet_summary(environment, fleet_summary)
+        except Exception as e:
+            logger.warning(
+                f"Failed to refresh fleet summary for {environment}",
+                error=str(e)
+            )
+
+    logger.info(
+        "Resource cache refreshed",
+        devices_cached=len(devices),
+        environments_cached=3
+    )
+```
+
+### Resource URI to Cache Key Mapping
+
+**Phase 2 MCP Resources map to cached data:**
+
+| Resource URI | Cache Key | Background Job | TTL |
+|--------------|-----------|----------------|-----|
+| `device://{id}/health` | `device_health[{id}]` | Health check job | 60s |
+| `device://{id}/config` | `device_configs[{id}]` | Config snapshot job | 300s |
+| `fleet://{env}/summary` | `fleet_summaries[{env}]` | Fleet aggregation job | 120s |
+| `plan://{id}` | `plans[{id}]` | Plan retrieval | 60s |
+
+### MCP Resource Handler (Phase 2)
+
+```python
+@mcp.resource("device://{device_id}/health")
+async def get_device_health_resource(device_id: str) -> dict:
+    """MCP resource handler for device health (Phase 2).
+
+    Returns cached health data from background job.
+    """
+    resource_cache = get_resource_cache()
+
+    # Try cache first
+    cached_health = await resource_cache.get_device_health(device_id)
+
+    if cached_health:
+        return {
+            "uri": f"device://{device_id}/health",
+            "mimeType": "application/json",
+            "text": json.dumps(cached_health, indent=2),
+            "metadata": {
+                "estimated_tokens": estimate_tokens(cached_health),
+                "cache_hit": True,
+                "cache_ttl_seconds": 60
+            }
+        }
+
+    # Cache miss - fetch fresh data
+    device = await device_repo.find_by_id(device_id)
+    if not device:
+        raise NotFoundError(f"Device not found: {device_id}")
+
+    latest_health = await health_check_repo.find_latest(device_id)
+
+    if not latest_health:
+        # No health check available yet
+        return {
+            "uri": f"device://{device_id}/health",
+            "mimeType": "application/json",
+            "text": json.dumps({"status": "pending", "message": "No health check data available"}),
+            "metadata": {"estimated_tokens": 50}
+        }
+
+    # Build and cache health data
+    health_data = build_health_resource_data(device, latest_health)
+    await resource_cache.set_device_health(device_id, health_data)
+
+    return {
+        "uri": f"device://{device_id}/health",
+        "mimeType": "application/json",
+        "text": json.dumps(health_data, indent=2),
+        "metadata": {
+            "estimated_tokens": estimate_tokens(health_data),
+            "cache_hit": False
+        }
+    }
+```
+
+### Token Budget Estimation for Snapshots
+
+```python
+def estimate_snapshot_tokens(snapshot: Snapshot) -> int:
+    """Estimate token count for snapshot payload.
+
+    Used to warn LLMs about large config exports.
+    """
+    if snapshot.kind == "config_full":
+        # Full config: ~100 tokens per KB
+        return snapshot.size_bytes // 10
+
+    elif snapshot.kind == "config_compact":
+        # Compact config: ~80 tokens per KB
+        return (snapshot.size_bytes // 10) * 0.8
+
+    elif snapshot.kind in ["dns_ntp", "firewall_rules", "ip_addresses"]:
+        # Topic-specific configs: smaller, ~60 tokens per KB
+        return (snapshot.size_bytes // 10) * 0.6
+
+    else:
+        # Conservative estimate
+        return snapshot.size_bytes // 8
+
+
+async def create_snapshot_with_token_estimate(
+    device: Device,
+    kind: str,
+    payload: str
+) -> Snapshot:
+    """Create snapshot with token budget estimation."""
+    size_bytes = len(payload.encode('utf-8'))
+    estimated_tokens = estimate_snapshot_tokens(
+        Snapshot(kind=kind, size_bytes=size_bytes)
+    )
+
+    # Warn if snapshot is very large
+    if estimated_tokens > 50000:
+        logger.warning(
+            "Large snapshot created",
+            device_id=device.id,
+            kind=kind,
+            size_bytes=size_bytes,
+            estimated_tokens=estimated_tokens,
+            warning="Snapshot exceeds 50,000 tokens - may impact LLM context"
+        )
+
+    snapshot = Snapshot(
+        id=generate_id(),
+        device_id=device.id,
+        timestamp=datetime.utcnow(),
+        kind=kind,
+        payload_ref=payload if size_bytes < 1_000_000 else upload_to_object_storage(payload),
+        size_bytes=size_bytes,
+        compressed=False,
+        estimated_tokens=estimated_tokens
+    )
+
+    await snapshot_repo.create(snapshot)
+    return snapshot
 ```
 
 ---

@@ -285,16 +285,52 @@ uv pip install -e .[dev]
 
 ### Running the application (development)
 
-Run the FastAPI app with Uvicorn:
+**Run the FastAPI app with Uvicorn:**
 
 ```bash
 uv run uvicorn routeros_mcp.api.http:create_app --factory --reload
 ```
 
-This starts the HTTP API for admin and health/metrics endpoints. The MCP server component may be started as:
+This starts the HTTP API for admin and health/metrics endpoints.
+
+**Run the MCP server (stdio transport for Claude Desktop):**
 
 ```bash
-uv run python -m routeros_mcp.api.mcp_server
+uv run python -m routeros_mcp.mcp.server
+```
+
+This starts the MCP server in stdio mode, listening on stdin/stdout for JSON-RPC messages. This is the default mode for integration with Claude Desktop or other MCP clients that launch the server as a subprocess.
+
+**Run the MCP server (HTTP/SSE transport for multi-client):**
+
+```bash
+uv run python -m routeros_mcp.mcp.server --transport http --port 8080
+```
+
+This starts the MCP server in HTTP/SSE mode, accepting connections on `http://localhost:8080/mcp`. Multiple MCP clients can connect simultaneously.
+
+**Run both HTTP API and MCP server:**
+
+```bash
+uv run python -m routeros_mcp.main
+```
+
+This starts both the FastAPI HTTP admin API and the MCP server with the configured transport mode (default: stdio).
+
+**Environment variables for development:**
+
+```bash
+# Development with stdio transport (default)
+export MCP_TRANSPORT_MODE=stdio
+export MCP_ENV=lab
+export DATABASE_URL=postgresql://localhost/routeros_mcp_dev
+uv run python -m routeros_mcp.main
+
+# Development with HTTP transport
+export MCP_TRANSPORT_MODE=http
+export MCP_HTTP_PORT=8080
+export MCP_ENV=lab
+uv run python -m routeros_mcp.main
 ```
 
 ### Database migrations
@@ -333,9 +369,233 @@ uv run black routeros_mcp
 uv run mypy routeros_mcp
 ```
 
+### MCP-Specific Development and Testing
+
+**Test MCP server with MCP Inspector:**
+
+[MCP Inspector](https://github.com/modelcontextprotocol/inspector) is the official debugging tool for MCP servers.
+
+```bash
+# Install MCP Inspector globally
+npm install -g @modelcontextprotocol/inspector
+
+# Launch MCP Inspector with stdio transport
+mcp-inspector "uv run python -m routeros_mcp.mcp.server"
+
+# This opens a browser UI at http://localhost:5173
+# allowing you to:
+# - View server capabilities
+# - Browse available tools
+# - Test tool execution with custom arguments
+# - Inspect JSON-RPC messages
+```
+
+**Test MCP protocol compliance:**
+
+```bash
+# Run MCP protocol compliance tests
+uv run pytest tests/e2e/test_mcp_protocol.py -v
+
+# Test specific transport mode
+uv run pytest tests/e2e/test_mcp_protocol.py::test_mcp_transport_modes -v
+```
+
+**Test MCP tool schema validation:**
+
+```bash
+# Validate all tool JSON schemas
+uv run python -m routeros_mcp.mcp.validate_tools
+
+# Generate tool catalog JSON
+uv run python -m routeros_mcp.mcp.generate_catalog --output dist/mcp-tools.json
+```
+
+**Test with Claude Desktop:**
+
+1. Configure Claude Desktop to use local MCP server:
+
+```json
+// ~/Library/Application Support/Claude/claude_desktop_config.json (macOS)
+// %APPDATA%\Claude\claude_desktop_config.json (Windows)
+{
+  "mcpServers": {
+    "routeros-mcp-dev": {
+      "command": "uv",
+      "args": [
+        "run",
+        "python",
+        "-m",
+        "routeros_mcp.mcp.server"
+      ],
+      "env": {
+        "MCP_ENV": "lab",
+        "DATABASE_URL": "postgresql://localhost/routeros_mcp_dev"
+      }
+    }
+  }
+}
+```
+
+2. Restart Claude Desktop
+3. Tools should appear in Claude's tool list
+4. Test tool execution through Claude chat interface
+
+**Debug MCP JSON-RPC messages:**
+
+```bash
+# Enable verbose JSON-RPC logging
+export MCP_LOG_LEVEL=DEBUG
+export MCP_LOG_JSONRPC=true
+uv run python -m routeros_mcp.mcp.server
+
+# This logs all JSON-RPC requests and responses to stderr
+```
+
+**Test MCP tool execution:**
+
+```bash
+# Test tool execution via Python client
+uv run python << 'EOF'
+import asyncio
+from routeros_mcp.mcp.client import MCPClient
+
+async def test_tool():
+    client = MCPClient(
+        transport="stdio",
+        command=["uv", "run", "python", "-m", "routeros_mcp.mcp.server"]
+    )
+
+    # Initialize
+    await client.initialize()
+
+    # List tools
+    tools = await client.call_method("tools/list")
+    print(f"Available tools: {[t['name'] for t in tools['result']['tools']]}")
+
+    # Call tool
+    response = await client.call_method(
+        "tools/call",
+        {"name": "system.get_overview", "arguments": {"device_id": "dev-lab-01"}}
+    )
+    print(f"Response: {response}")
+
+    await client.close()
+
+asyncio.run(test_tool())
+EOF
+```
+
+**Validate tool tier assignments:**
+
+```bash
+# Check tool tier assignments
+uv run python -m routeros_mcp.mcp.tools --list-by-tier
+
+# Output example:
+# Free tier: system.get_overview, system.get_health, ...
+# Basic tier: dns.update_servers, ntp.update_servers, ...
+# Professional tier: plan.create, plan.apply, ...
+```
+
+**Test MCP resource URIs (Phase 2):**
+
+```bash
+# Test resource resolution
+uv run pytest tests/e2e/test_mcp_resources.py -v
+
+# Test specific resource URI
+uv run python << 'EOF'
+from routeros_mcp.mcp.resources import resolve_resource_uri
+
+resource = await resolve_resource_uri("device://dev-001/status")
+print(f"Resource content: {resource}")
+EOF
+```
+
+**Performance testing for MCP tools:**
+
+```bash
+# Benchmark tool execution latency
+uv run python -m routeros_mcp.mcp.benchmark \
+  --tool system.get_overview \
+  --iterations 100 \
+  --device dev-lab-01
+
+# Output example:
+# p50: 123ms, p95: 234ms, p99: 456ms
+```
+
+**Test concurrent MCP connections (HTTP transport):**
+
+```bash
+# Start HTTP server
+uv run python -m routeros_mcp.mcp.server --transport http --port 8080 &
+
+# Run concurrent client test
+uv run pytest tests/integration/test_mcp_concurrency.py -v
+```
+
+**MCP tool development workflow:**
+
+```bash
+# 1. Create new tool file
+touch routeros_mcp/mcp_tools/newfeature.py
+
+# 2. Write tool with @mcp_tool decorator
+# (See Doc 11 for decorator example)
+
+# 3. Validate tool schema
+uv run python -m routeros_mcp.mcp.validate_tools
+
+# 4. Test tool in isolation
+uv run pytest tests/unit/mcp_tools/test_newfeature.py -v
+
+# 5. Test tool via MCP protocol
+uv run pytest tests/e2e/test_mcp_protocol.py::test_newfeature_tool -v
+
+# 6. Test with MCP Inspector
+mcp-inspector "uv run python -m routeros_mcp.mcp.server"
+```
+
+**MCP debugging checklist:**
+
+When MCP tool execution fails:
+
+1. **Check JSON-RPC message format:**
+   ```bash
+   export MCP_LOG_JSONRPC=true
+   # Review request/response in logs
+   ```
+
+2. **Validate tool schema:**
+   ```bash
+   uv run python -m routeros_mcp.mcp.validate_tools
+   ```
+
+3. **Test tool in isolation:**
+   ```bash
+   uv run pytest tests/unit/mcp_tools/test_<toolname>.py -v
+   ```
+
+4. **Check authorization:**
+   ```bash
+   # Verify user has required role and device access
+   uv run python -m routeros_mcp.security.check_access \
+     --user <user_id> \
+     --tool <tool_name> \
+     --device <device_id>
+   ```
+
+5. **Test with minimal client:**
+   ```bash
+   # Use MCP Inspector or minimal Python client
+   mcp-inspector "uv run python -m routeros_mcp.mcp.server"
+   ```
+
 ### Local health checks
 
 After starting the service, you should be able to:
 
-- Hit a health endpoint (to be defined, e.g. `/health`) to validate the app is up.  
+- Hit a health endpoint (e.g. `/health`) to validate the app is up.
 - Hit a metrics endpoint (e.g. `/metrics`) to see Prometheus metrics.
+- Test MCP protocol via MCP Inspector (`mcp-inspector "uv run python -m routeros_mcp.mcp.server"`)

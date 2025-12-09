@@ -1327,6 +1327,657 @@ await manager.close()
 
 ---
 
+## MCP Best Practices Integration
+
+### Domain/Infrastructure Separation (MCP Section B2)
+
+Following MCP best practice B2 (Project Structure and Layering), separate domain logic from database infrastructure:
+
+```
+routeros_mcp/
+├── domain/                    # Pure business logic, NO SQLAlchemy imports
+│   ├── __init__.py
+│   ├── models.py             # Domain models (Pydantic/dataclasses)
+│   ├── device_service.py     # Device business logic
+│   ├── plan_service.py       # Plan business logic
+│   └── validation.py         # Domain validation rules
+│
+└── infra/                     # Infrastructure layer
+    ├── db/
+    │   ├── __init__.py
+    │   ├── models.py         # SQLAlchemy ORM models (THIS document)
+    │   ├── session.py        # Session management
+    │   ├── repositories.py   # Data access patterns
+    │   └── migrations/       # Alembic migrations
+    └── routeros/
+        └── client.py          # RouterOS API client
+```
+
+**Example: Domain Model (Pure Python)**
+
+```python
+# routeros_mcp/domain/models.py
+# NO SQLAlchemy imports - pure domain logic
+
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Optional
+
+
+@dataclass
+class DeviceDomain:
+    """Domain model for RouterOS device.
+
+    This is the domain representation, independent of persistence.
+    Following MCP best practice B2: domain logic has no MCP or DB dependencies.
+    """
+    id: str
+    name: str
+    management_address: str
+    environment: str
+    status: str
+    tags: dict[str, str]
+    allow_advanced_writes: bool
+    allow_professional_workflows: bool
+
+    # Metadata
+    routeros_version: Optional[str] = None
+    hardware_model: Optional[str] = None
+    last_seen_at: Optional[datetime] = None
+
+    def is_reachable(self) -> bool:
+        """Check if device is considered reachable."""
+        return self.status in ["healthy", "degraded"]
+
+    def can_execute_tier(self, tier: str) -> bool:
+        """Check if device allows operations from specific tier."""
+        if tier == "fundamental":
+            return True  # Always allowed
+        elif tier == "advanced":
+            return self.allow_advanced_writes
+        elif tier == "professional":
+            return self.allow_professional_workflows
+        return False
+
+    def validate_environment_match(self, service_environment: str) -> bool:
+        """Validate device environment matches service environment."""
+        return self.environment == service_environment
+```
+
+**Example: Repository Pattern (Infrastructure Layer)**
+
+```python
+# routeros_mcp/infra/db/repositories.py
+
+from typing import Optional, Sequence
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from routeros_mcp.domain.models import DeviceDomain
+from routeros_mcp.infra.db.models import Device as DeviceORM
+
+
+class DeviceRepository:
+    """Device data access repository.
+
+    Translates between domain models and ORM models.
+    Following MCP best practice B2: infrastructure layer adapts domain to persistence.
+    """
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def get_by_id(self, device_id: str) -> Optional[DeviceDomain]:
+        """Get device by ID.
+
+        Returns:
+            Domain model or None
+        """
+        result = await self.session.execute(
+            select(DeviceORM).where(DeviceORM.id == device_id)
+        )
+        orm_device = result.scalar_one_or_none()
+
+        if orm_device is None:
+            return None
+
+        # Convert ORM → Domain
+        return self._to_domain(orm_device)
+
+    async def list_by_environment(self, environment: str) -> Sequence[DeviceDomain]:
+        """List devices by environment."""
+        result = await self.session.execute(
+            select(DeviceORM)
+            .where(DeviceORM.environment == environment)
+            .order_by(DeviceORM.name)
+        )
+        orm_devices = result.scalars().all()
+
+        return [self._to_domain(d) for d in orm_devices]
+
+    async def save(self, device: DeviceDomain) -> DeviceDomain:
+        """Save device (create or update)."""
+        # Check if exists
+        existing = await self.session.get(DeviceORM, device.id)
+
+        if existing:
+            # Update existing
+            self._update_orm(existing, device)
+        else:
+            # Create new
+            orm_device = self._to_orm(device)
+            self.session.add(orm_device)
+
+        await self.session.flush()
+
+        # Return refreshed domain model
+        result = await self.session.get(DeviceORM, device.id)
+        return self._to_domain(result)
+
+    def _to_domain(self, orm: DeviceORM) -> DeviceDomain:
+        """Convert ORM model to domain model."""
+        return DeviceDomain(
+            id=orm.id,
+            name=orm.name,
+            management_address=orm.management_address,
+            environment=orm.environment,
+            status=orm.status,
+            tags=orm.tags,
+            allow_advanced_writes=orm.allow_advanced_writes,
+            allow_professional_workflows=orm.allow_professional_workflows,
+            routeros_version=orm.routeros_version,
+            hardware_model=orm.hardware_model,
+            last_seen_at=orm.last_seen_at,
+        )
+
+    def _to_orm(self, domain: DeviceDomain) -> DeviceORM:
+        """Convert domain model to ORM model."""
+        return DeviceORM(
+            id=domain.id,
+            name=domain.name,
+            management_address=domain.management_address,
+            environment=domain.environment,
+            status=domain.status,
+            tags=domain.tags,
+            allow_advanced_writes=domain.allow_advanced_writes,
+            allow_professional_workflows=domain.allow_professional_workflows,
+            routeros_version=domain.routeros_version,
+            hardware_model=domain.hardware_model,
+            last_seen_at=domain.last_seen_at,
+        )
+
+    def _update_orm(self, orm: DeviceORM, domain: DeviceDomain) -> None:
+        """Update ORM model from domain model."""
+        orm.name = domain.name
+        orm.management_address = domain.management_address
+        orm.environment = domain.environment
+        orm.status = domain.status
+        orm.tags = domain.tags
+        orm.allow_advanced_writes = domain.allow_advanced_writes
+        orm.allow_professional_workflows = domain.allow_professional_workflows
+        orm.routeros_version = domain.routeros_version
+        orm.hardware_model = domain.hardware_model
+        orm.last_seen_at = domain.last_seen_at
+```
+
+### Observability for Database Operations (MCP Section A9)
+
+Following MCP instrumentation guidelines, add observability to database operations:
+
+```python
+# routeros_mcp/infra/db/observability.py
+
+import time
+import logging
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def traced_session(
+    session_factory,
+    operation: str,
+    request_id: str
+) -> AsyncGenerator[AsyncSession, None]:
+    """Session context manager with tracing.
+
+    Following MCP Section A9: log every database operation with
+    correlation ID, duration, and outcome.
+
+    Args:
+        session_factory: Session factory
+        operation: Operation name (e.g., "get_device", "list_plans")
+        request_id: JSON-RPC request ID for correlation
+
+    Example:
+        async with traced_session(manager.session, "get_device", req_id) as session:
+            device = await session.get(Device, device_id)
+    """
+    start_time = time.time()
+
+    async with session_factory() as session:
+        try:
+            yield session
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            logger.info(
+                "database_operation",
+                extra={
+                    "request_id": request_id,
+                    "operation": operation,
+                    "status": "success",
+                    "duration_ms": duration_ms,
+                }
+            )
+
+        except Exception as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            logger.error(
+                "database_operation_error",
+                extra={
+                    "request_id": request_id,
+                    "operation": operation,
+                    "status": "error",
+                    "duration_ms": duration_ms,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                }
+            )
+
+            raise
+
+
+# Enhanced repository with tracing
+class TracedDeviceRepository(DeviceRepository):
+    """Device repository with observability."""
+
+    def __init__(self, session: AsyncSession, request_id: str):
+        super().__init__(session)
+        self.request_id = request_id
+
+    async def get_by_id(self, device_id: str) -> Optional[DeviceDomain]:
+        """Get device with tracing."""
+        start = time.time()
+
+        try:
+            result = await super().get_by_id(device_id)
+
+            logger.info(
+                "repository_operation",
+                extra={
+                    "request_id": self.request_id,
+                    "operation": "get_device",
+                    "device_id": device_id,
+                    "found": result is not None,
+                    "duration_ms": int((time.time() - start) * 1000),
+                }
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error(
+                "repository_error",
+                extra={
+                    "request_id": self.request_id,
+                    "operation": "get_device",
+                    "device_id": device_id,
+                    "error": str(e),
+                    "duration_ms": int((time.time() - start) * 1000),
+                }
+            )
+            raise
+```
+
+### Performance Best Practices (MCP Section B8)
+
+Following MCP performance guidelines:
+
+#### 1. Pagination
+
+**Always paginate queries to avoid unbounded result sets:**
+
+```python
+# routeros_mcp/infra/db/repositories.py
+
+from typing import Tuple
+
+
+class DeviceRepository:
+    async def list_paginated(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        environment: Optional[str] = None
+    ) -> Tuple[Sequence[DeviceDomain], int]:
+        """List devices with pagination.
+
+        Following MCP Section B8: Never return unbounded result sets.
+
+        Args:
+            page: Page number (1-indexed)
+            page_size: Items per page (max 100)
+            environment: Optional environment filter
+
+        Returns:
+            Tuple of (devices, total_count)
+        """
+        # Enforce maximum page size
+        page_size = min(page_size, 100)
+        offset = (page - 1) * page_size
+
+        # Build query
+        query = select(DeviceORM)
+        if environment:
+            query = query.where(DeviceORM.environment == environment)
+
+        # Get total count
+        count_query = select(func.count()).select_from(DeviceORM)
+        if environment:
+            count_query = count_query.where(DeviceORM.environment == environment)
+
+        count_result = await self.session.execute(count_query)
+        total = count_result.scalar()
+
+        # Get page
+        query = query.offset(offset).limit(page_size).order_by(DeviceORM.name)
+        result = await self.session.execute(query)
+        devices = result.scalars().all()
+
+        return [self._to_domain(d) for d in devices], total
+```
+
+#### 2. Selective Loading (Avoid N+1 Queries)
+
+```python
+# Use selectinload for relationships to avoid N+1 queries
+
+from sqlalchemy.orm import selectinload
+
+async def get_device_with_credentials(self, device_id: str) -> Optional[DeviceDomain]:
+    """Get device with credentials loaded efficiently."""
+    result = await self.session.execute(
+        select(DeviceORM)
+        .where(DeviceORM.id == device_id)
+        .options(selectinload(DeviceORM.credentials))  # Eager load
+    )
+    device = result.scalar_one_or_none()
+
+    if device is None:
+        return None
+
+    return self._to_domain(device)
+```
+
+#### 3. Connection Pooling Configuration
+
+**SQLite:**
+```python
+# For SQLite, use minimal pooling
+if settings.is_sqlite:
+    pool_config = {
+        "poolclass": NullPool,  # No pooling for SQLite
+    }
+```
+
+**PostgreSQL:**
+```python
+# For PostgreSQL, optimize pool size
+if settings.is_postgresql:
+    pool_config = {
+        "pool_size": 10,           # Base connections
+        "max_overflow": 20,        # Burst capacity
+        "pool_pre_ping": True,     # Verify connections
+        "pool_recycle": 3600,      # Recycle after 1 hour
+        "pool_timeout": 30,        # Connection timeout
+    }
+```
+
+### Testing Strategy (MCP Section B9)
+
+Following MCP testing best practices:
+
+#### Unit Tests for Domain Logic
+
+```python
+# tests/domain/test_device.py
+
+from routeros_mcp.domain.models import DeviceDomain
+
+
+def test_device_can_execute_fundamental_tier():
+    """Fundamental tier is always allowed."""
+    device = DeviceDomain(
+        id="dev-001",
+        name="test",
+        management_address="192.168.1.1:443",
+        environment="lab",
+        status="healthy",
+        tags={},
+        allow_advanced_writes=False,
+        allow_professional_workflows=False,
+    )
+
+    assert device.can_execute_tier("fundamental") is True
+
+
+def test_device_cannot_execute_advanced_tier_when_disabled():
+    """Advanced tier requires flag."""
+    device = DeviceDomain(
+        id="dev-001",
+        name="test",
+        management_address="192.168.1.1:443",
+        environment="lab",
+        status="healthy",
+        tags={},
+        allow_advanced_writes=False,  # Disabled
+        allow_professional_workflows=False,
+    )
+
+    assert device.can_execute_tier("advanced") is False
+
+
+def test_device_environment_validation():
+    """Device environment must match service environment."""
+    device = DeviceDomain(
+        id="dev-001",
+        name="test",
+        management_address="192.168.1.1:443",
+        environment="prod",
+        status="healthy",
+        tags={},
+        allow_advanced_writes=True,
+        allow_professional_workflows=True,
+    )
+
+    assert device.validate_environment_match("prod") is True
+    assert device.validate_environment_match("lab") is False
+```
+
+#### Integration Tests for Database Operations
+
+```python
+# tests/infra/db/test_repositories.py
+
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from routeros_mcp.domain.models import DeviceDomain
+from routeros_mcp.infra.db.repositories import DeviceRepository
+
+
+@pytest.mark.asyncio
+async def test_device_repository_save_and_retrieve(db_session: AsyncSession):
+    """Test saving and retrieving device."""
+    repo = DeviceRepository(db_session)
+
+    # Create device
+    device = DeviceDomain(
+        id="dev-test-001",
+        name="test-router",
+        management_address="192.168.1.1:443",
+        environment="lab",
+        status="healthy",
+        tags={"role": "edge"},
+        allow_advanced_writes=True,
+        allow_professional_workflows=False,
+    )
+
+    # Save
+    saved = await repo.save(device)
+    await db_session.commit()
+
+    # Retrieve
+    retrieved = await repo.get_by_id("dev-test-001")
+
+    assert retrieved is not None
+    assert retrieved.id == device.id
+    assert retrieved.name == device.name
+    assert retrieved.tags == {"role": "edge"}
+
+
+@pytest.mark.asyncio
+async def test_device_repository_pagination(db_session: AsyncSession):
+    """Test paginated device listing."""
+    repo = DeviceRepository(db_session)
+
+    # Create multiple devices
+    for i in range(25):
+        device = DeviceDomain(
+            id=f"dev-{i:03d}",
+            name=f"router-{i:03d}",
+            management_address=f"192.168.1.{i}:443",
+            environment="lab",
+            status="healthy",
+            tags={},
+            allow_advanced_writes=True,
+            allow_professional_workflows=False,
+        )
+        await repo.save(device)
+
+    await db_session.commit()
+
+    # Get first page
+    devices_page1, total = await repo.list_paginated(page=1, page_size=10)
+
+    assert len(devices_page1) == 10
+    assert total == 25
+
+    # Get second page
+    devices_page2, total = await repo.list_paginated(page=2, page_size=10)
+
+    assert len(devices_page2) == 10
+    assert total == 25
+
+    # Verify no overlap
+    page1_ids = {d.id for d in devices_page1}
+    page2_ids = {d.id for d in devices_page2}
+    assert page1_ids.isdisjoint(page2_ids)
+
+
+# Pytest fixtures
+@pytest.fixture
+async def db_session(test_db_engine):
+    """Provide test database session."""
+    async with test_db_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with AsyncSession(test_db_engine) as session:
+        yield session
+        await session.rollback()
+
+    async with test_db_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+```
+
+### Database Migration Best Practices
+
+#### Safe Migration Patterns
+
+```python
+# alembic/versions/002_add_device_metadata.py
+
+"""Add device metadata fields
+
+Revision ID: 002
+Revises: 001
+Create Date: 2024-01-15 10:00:00
+
+"""
+from alembic import op
+import sqlalchemy as sa
+
+
+def upgrade() -> None:
+    """Add new fields with safe defaults."""
+    # Add nullable columns first
+    op.add_column('devices', sa.Column('firmware_variant', sa.String(64), nullable=True))
+    op.add_column('devices', sa.Column('license_level', sa.String(32), nullable=True))
+
+    # Create index
+    op.create_index('idx_device_firmware', 'devices', ['firmware_variant'], unique=False)
+
+
+def downgrade() -> None:
+    """Revert changes."""
+    op.drop_index('idx_device_firmware', table_name='devices')
+    op.drop_column('devices', 'license_level')
+    op.drop_column('devices', 'firmware_variant')
+```
+
+#### Zero-Downtime Migrations
+
+**For production PostgreSQL:**
+
+1. Add columns as nullable
+2. Backfill data in batches
+3. Add NOT NULL constraint later (if needed)
+4. Never drop columns in same deployment as code change
+
+---
+
+## Database Best Practices Checklist
+
+### Design
+
+- [ ] Domain models separated from ORM models (B2)
+- [ ] Repository pattern for data access
+- [ ] All queries use pagination (B8)
+- [ ] Relationships configured with appropriate lazy loading
+- [ ] Indexes on frequently queried columns
+- [ ] Foreign keys with appropriate CASCADE/SET NULL
+
+### Performance
+
+- [ ] Connection pooling configured per database type
+- [ ] Eager loading (selectinload) used to avoid N+1 queries
+- [ ] Query results limited to prevent memory issues
+- [ ] Large binary data compressed before storage
+- [ ] Pagination enforced (max 100 items per page)
+
+### Observability
+
+- [ ] Database operations logged with correlation IDs (A9)
+- [ ] Latency tracked (P50/P95/P99)
+- [ ] Error rates monitored
+- [ ] Connection pool metrics exposed
+- [ ] Slow query logging enabled
+
+### Testing
+
+- [ ] Unit tests for domain logic (no database)
+- [ ] Integration tests with real database
+- [ ] Test fixtures isolate test data
+- [ ] Migrations tested in both directions (upgrade/downgrade)
+
+---
+
 This database schema specification provides:
 
 ✅ **Full type hints** for all models
@@ -1337,3 +1988,8 @@ This database schema specification provides:
 ✅ **Migration strategy** with Alembic
 ✅ **Session management** with proper cleanup
 ✅ **Implementation-ready** code examples
+✅ **Domain/Infrastructure separation** following MCP best practices (B2)
+✅ **Repository pattern** for clean data access
+✅ **Observability** with traced operations (A9)
+✅ **Performance optimization** with pagination and connection pooling (B8)
+✅ **Comprehensive testing strategy** (B9)

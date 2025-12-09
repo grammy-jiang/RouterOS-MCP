@@ -10,7 +10,13 @@ Define how the RouterOS MCP service implements the Model Context Protocol (MCP) 
 
 ### Protocol Version
 
-This service targets **MCP Specification 2025-11-25** (latest stable).
+This service targets **MCP Specification 2024-11-05** (current stable version).
+
+**Version Negotiation:**
+- Server declares support for `2024-11-05` in initialization response
+- Client proposes version in initialization request
+- Server must respond with same version if supported, or error if unsupported
+- Future versions: Maintain backward compatibility where possible
 
 ### Core MCP Concepts
 
@@ -1236,6 +1242,1172 @@ oidc_client_secret: "${OIDC_CLIENT_SECRET}"
 # RouterOS integration
 routeros_rest_timeout_seconds: 5.0
 routeros_max_concurrent_requests_per_device: 3
+```
+
+---
+
+## Token Budget Management for MCP Tools
+
+### Token Estimation Pattern
+
+All MCP tools MUST estimate and report token counts in responses to help clients manage context budgets:
+
+```python
+from routeros_mcp.mcp.token_estimation import estimate_tokens
+
+@mcp.tool()
+async def system_get_overview(device_id: str) -> dict:
+    """Fetch system overview with token estimation."""
+
+    overview = await system_service.get_overview(device_id)
+
+    # Format response text
+    response_text = format_system_overview(overview)
+
+    # Estimate tokens (approximately 4 chars per token)
+    estimated_tokens = estimate_tokens(response_text)
+
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": response_text
+            }
+        ],
+        "_meta": {
+            "estimated_tokens": estimated_tokens,
+            "routeros_version": overview["routeros_version"],
+            "device_uptime_seconds": overview["uptime_seconds"]
+        }
+    }
+```
+
+### Token Budget Middleware
+
+Implement middleware to warn/error on large responses:
+
+```python
+from fastmcp import FastMCP, get_context
+from routeros_mcp.mcp.exceptions import TokenBudgetExceededError
+
+TOKEN_WARNING_THRESHOLD = 5_000
+TOKEN_ERROR_THRESHOLD = 50_000
+
+async def token_budget_middleware(tool_name: str, result: dict) -> dict:
+    """Check token budget and warn/error on large responses."""
+
+    estimated_tokens = result.get("_meta", {}).get("estimated_tokens", 0)
+
+    if estimated_tokens > TOKEN_ERROR_THRESHOLD:
+        # This response is too large - error out
+        raise TokenBudgetExceededError(
+            code=-32000,
+            message="Response exceeds token budget",
+            data={
+                "tool_name": tool_name,
+                "estimated_tokens": estimated_tokens,
+                "threshold": TOKEN_ERROR_THRESHOLD,
+                "suggested_action": "Use pagination or filtering parameters to reduce response size"
+            }
+        )
+
+    if estimated_tokens > TOKEN_WARNING_THRESHOLD:
+        # Add warning to metadata
+        result["_meta"]["token_warning"] = (
+            f"Response size ({estimated_tokens} tokens) exceeds recommended limit "
+            f"({TOKEN_WARNING_THRESHOLD} tokens). Consider using pagination."
+        )
+
+    return result
+```
+
+### Pagination Support for Large Results
+
+Tools that may return large result sets should support pagination:
+
+```python
+from pydantic import BaseModel, Field
+
+class InterfaceListResult(BaseModel):
+    """Paginated interface list result."""
+    interfaces: list[dict]
+    total_count: int
+    limit: int
+    offset: int
+    has_more: bool
+
+@mcp.tool()
+async def interface_list_interfaces(
+    device_id: str,
+    limit: int = Field(default=50, ge=1, le=500, description="Maximum results to return"),
+    offset: int = Field(default=0, ge=0, description="Number of results to skip")
+) -> InterfaceListResult:
+    """List interfaces with pagination support.
+
+    Args:
+        device_id: Device identifier
+        limit: Maximum number of interfaces to return (1-500)
+        offset: Number of interfaces to skip
+
+    Returns:
+        Paginated interface list with pagination metadata
+    """
+    interfaces = await interface_service.list_interfaces(
+        device_id=device_id,
+        limit=limit,
+        offset=offset
+    )
+
+    total_count = await interface_service.count_interfaces(device_id)
+    has_more = (offset + len(interfaces)) < total_count
+
+    response_text = format_interface_list(interfaces, total_count, limit, offset)
+
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": response_text
+            }
+        ],
+        "_meta": {
+            "estimated_tokens": estimate_tokens(response_text),
+            "total_count": total_count,
+            "limit": limit,
+            "offset": offset,
+            "has_more": has_more,
+            "pagination_hint": f"Use offset={offset + limit} to get next page" if has_more else None
+        }
+    }
+```
+
+---
+
+## Session Lifecycle and State Management
+
+### Session Tracking Pattern
+
+Track MCP client sessions for metrics and resource cleanup:
+
+```python
+from dataclasses import dataclass, field
+from datetime import datetime
+from uuid import uuid4
+
+@dataclass
+class MCPSession:
+    """MCP client session state."""
+    session_id: str = field(default_factory=lambda: str(uuid4()))
+    client_info: dict[str, str] = field(default_factory=dict)
+    protocol_version: str = "2024-11-05"
+    capabilities: dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    last_activity: datetime = field(default_factory=datetime.utcnow)
+
+    # Statistics
+    total_tool_calls: int = 0
+    total_tokens: int = 0
+    total_errors: int = 0
+
+    # User context (from OAuth in HTTP/SSE mode)
+    user_sub: str | None = None
+    user_roles: list[str] = field(default_factory=list)
+
+class MCPSessionManager:
+    """Manage MCP client sessions."""
+
+    def __init__(self):
+        self._sessions: dict[str, MCPSession] = {}
+
+    async def create_session(
+        self,
+        client_info: dict[str, str],
+        protocol_version: str,
+        capabilities: dict[str, Any],
+        user_sub: str | None = None,
+        user_roles: list[str] | None = None
+    ) -> MCPSession:
+        """Create new MCP session."""
+        session = MCPSession(
+            client_info=client_info,
+            protocol_version=protocol_version,
+            capabilities=capabilities,
+            user_sub=user_sub,
+            user_roles=user_roles or []
+        )
+
+        self._sessions[session.session_id] = session
+
+        logger.info(
+            "MCP session created",
+            extra={
+                "session_id": session.session_id,
+                "client_name": client_info.get("name"),
+                "client_version": client_info.get("version"),
+                "user_sub": user_sub
+            }
+        )
+
+        return session
+
+    async def update_activity(
+        self,
+        session_id: str,
+        *,
+        tool_called: bool = False,
+        tokens: int = 0,
+        error: bool = False
+    ) -> None:
+        """Update session activity statistics."""
+        session = self._sessions.get(session_id)
+        if not session:
+            return
+
+        session.last_activity = datetime.utcnow()
+
+        if tool_called:
+            session.total_tool_calls += 1
+        if tokens > 0:
+            session.total_tokens += tokens
+        if error:
+            session.total_errors += 1
+
+    async def close_session(self, session_id: str) -> None:
+        """Close MCP session and log statistics."""
+        session = self._sessions.pop(session_id, None)
+        if not session:
+            return
+
+        duration = (datetime.utcnow() - session.created_at).total_seconds()
+
+        logger.info(
+            "MCP session closed",
+            extra={
+                "session_id": session_id,
+                "duration_seconds": duration,
+                "total_tool_calls": session.total_tool_calls,
+                "total_tokens": session.total_tokens,
+                "total_errors": session.total_errors,
+                "client_name": session.client_info.get("name")
+            }
+        )
+```
+
+### Integration with FastMCP
+
+Use FastMCP context to track session:
+
+```python
+from fastmcp import FastMCP, get_context, set_context
+
+session_manager = MCPSessionManager()
+
+@mcp.on_initialize
+async def on_initialize(params: dict) -> None:
+    """Handle MCP initialization - create session."""
+    session = await session_manager.create_session(
+        client_info=params["clientInfo"],
+        protocol_version=params["protocolVersion"],
+        capabilities=params.get("capabilities", {})
+    )
+
+    # Store session ID in context for all tool calls
+    set_context("session_id", session.session_id)
+
+@mcp.on_close
+async def on_close() -> None:
+    """Handle MCP connection close - cleanup session."""
+    context = get_context()
+    session_id = context.get("session_id")
+
+    if session_id:
+        await session_manager.close_session(session_id)
+
+@mcp.tool()
+async def system_get_overview(device_id: str) -> dict:
+    """Tool with session tracking."""
+    context = get_context()
+    session_id = context.get("session_id")
+
+    try:
+        result = await _execute_tool(device_id)
+
+        # Update session stats
+        tokens = result.get("_meta", {}).get("estimated_tokens", 0)
+        await session_manager.update_activity(
+            session_id,
+            tool_called=True,
+            tokens=tokens
+        )
+
+        return result
+
+    except Exception:
+        await session_manager.update_activity(session_id, error=True)
+        raise
+```
+
+---
+
+## Rate Limiting and Concurrency Control
+
+### Per-Session Rate Limiting
+
+Implement rate limiting per MCP session to prevent abuse:
+
+```python
+from datetime import datetime, timedelta
+from collections import defaultdict
+
+class MCPRateLimiter:
+    """Rate limiter for MCP tool calls per session."""
+
+    def __init__(self):
+        # session_id -> list of timestamps
+        self._call_history: dict[str, list[datetime]] = defaultdict(list)
+
+        # Rate limits by tier
+        self._limits = {
+            "free": 100,      # 100 calls per hour
+            "basic": 500,     # 500 calls per hour
+            "professional": 2000  # 2000 calls per hour
+        }
+
+    async def check_rate_limit(
+        self,
+        session_id: str,
+        user_tier: str = "free"
+    ) -> None:
+        """Check if session has exceeded rate limit."""
+        limit = self._limits.get(user_tier, 100)
+        now = datetime.utcnow()
+        one_hour_ago = now - timedelta(hours=1)
+
+        # Remove old timestamps
+        self._call_history[session_id] = [
+            ts for ts in self._call_history[session_id]
+            if ts > one_hour_ago
+        ]
+
+        # Check limit
+        if len(self._call_history[session_id]) >= limit:
+            raise McpError(
+                code=-32000,
+                message="Rate limit exceeded",
+                data={
+                    "error_code": "RATE_LIMIT_EXCEEDED",
+                    "limit": limit,
+                    "window": "1 hour",
+                    "tier": user_tier,
+                    "retry_after_seconds": 3600
+                }
+            )
+
+        # Record this call
+        self._call_history[session_id].append(now)
+
+# Global rate limiter
+rate_limiter = MCPRateLimiter()
+
+@mcp.tool()
+async def system_get_overview(device_id: str) -> dict:
+    """Tool with rate limiting."""
+    context = get_context()
+    session_id = context.get("session_id")
+    user_tier = context.get("user_tier", "free")
+
+    # Check rate limit before executing
+    await rate_limiter.check_rate_limit(session_id, user_tier)
+
+    # Execute tool
+    return await _execute_tool(device_id)
+```
+
+### Concurrent Tool Execution Limiting
+
+Limit concurrent tool executions to prevent resource exhaustion:
+
+```python
+import asyncio
+
+class MCPConcurrencyLimiter:
+    """Limit concurrent MCP tool executions."""
+
+    def __init__(self, max_concurrent: int = 10):
+        self._semaphore = asyncio.Semaphore(max_concurrent)
+        self._active_calls: dict[str, int] = defaultdict(int)
+
+    async def execute_with_limit(
+        self,
+        tool_name: str,
+        coro: Coroutine
+    ) -> Any:
+        """Execute tool with concurrency limiting."""
+        async with self._semaphore:
+            self._active_calls[tool_name] += 1
+
+            try:
+                logger.debug(
+                    f"Executing tool {tool_name}",
+                    extra={"active_calls": self._active_calls[tool_name]}
+                )
+                result = await coro
+                return result
+
+            finally:
+                self._active_calls[tool_name] -= 1
+
+# Global concurrency limiter
+concurrency_limiter = MCPConcurrencyLimiter(max_concurrent=10)
+
+@mcp.tool()
+async def system_get_overview(device_id: str) -> dict:
+    """Tool with concurrency limiting."""
+    return await concurrency_limiter.execute_with_limit(
+        "system_get_overview",
+        _execute_tool(device_id)
+    )
+```
+
+---
+
+## Graceful Shutdown and In-Flight Request Handling
+
+### Shutdown Handler
+
+Ensure all in-flight tool calls complete before shutting down:
+
+```python
+import signal
+from typing import Set
+import asyncio
+
+class MCPServerShutdownHandler:
+    """Handle graceful shutdown of MCP server."""
+
+    def __init__(self, timeout: float = 30.0):
+        self._shutdown_event = asyncio.Event()
+        self._in_flight_calls: Set[asyncio.Task] = set()
+        self._timeout = timeout
+
+    def register_call(self, task: asyncio.Task) -> None:
+        """Register an in-flight tool call."""
+        self._in_flight_calls.add(task)
+        task.add_done_callback(lambda t: self._in_flight_calls.discard(t))
+
+    async def wait_for_shutdown(self) -> None:
+        """Wait for shutdown signal."""
+        await self._shutdown_event.wait()
+
+    async def shutdown(self) -> None:
+        """Initiate graceful shutdown."""
+        logger.info(
+            "MCP server shutting down gracefully",
+            extra={"in_flight_calls": len(self._in_flight_calls)}
+        )
+
+        self._shutdown_event.set()
+
+        # Wait for in-flight calls to complete
+        if self._in_flight_calls:
+            logger.info(
+                f"Waiting for {len(self._in_flight_calls)} in-flight calls to complete"
+            )
+
+            done, pending = await asyncio.wait(
+                self._in_flight_calls,
+                timeout=self._timeout
+            )
+
+            if pending:
+                logger.warning(
+                    f"Canceling {len(pending)} calls that didn't complete in {self._timeout}s"
+                )
+                for task in pending:
+                    task.cancel()
+
+# Global shutdown handler
+shutdown_handler = MCPServerShutdownHandler()
+
+# Register signal handlers
+def handle_signal(signum, frame):
+    """Handle shutdown signals."""
+    asyncio.create_task(shutdown_handler.shutdown())
+
+signal.signal(signal.SIGTERM, handle_signal)
+signal.signal(signal.SIGINT, handle_signal)
+
+@mcp.tool()
+async def system_get_overview(device_id: str) -> dict:
+    """Tool with shutdown tracking."""
+    task = asyncio.current_task()
+    if task:
+        shutdown_handler.register_call(task)
+
+    # Execute tool
+    return await _execute_tool(device_id)
+```
+
+---
+
+## Correlation ID and Distributed Tracing
+
+### Correlation ID Propagation
+
+Propagate correlation IDs through MCP tool calls for end-to-end tracing:
+
+```python
+from contextvars import ContextVar
+from uuid import uuid4
+
+# Context variable for correlation ID
+correlation_id_var: ContextVar[str] = ContextVar("correlation_id")
+
+@mcp.on_request
+async def on_request(request: dict) -> None:
+    """Generate correlation ID for each request."""
+    correlation_id = str(uuid4())
+    correlation_id_var.set(correlation_id)
+
+    logger.info(
+        "MCP request received",
+        extra={
+            "correlation_id": correlation_id,
+            "method": request.get("method"),
+            "request_id": request.get("id")
+        }
+    )
+
+@mcp.tool()
+async def system_get_overview(device_id: str) -> dict:
+    """Tool with correlation ID in logs."""
+    correlation_id = correlation_id_var.get()
+
+    logger.info(
+        "Executing system.get_overview",
+        extra={
+            "correlation_id": correlation_id,
+            "device_id": device_id
+        }
+    )
+
+    # Correlation ID is automatically included in all logs
+    result = await _execute_tool(device_id)
+
+    # Include in response metadata
+    result["_meta"]["correlation_id"] = correlation_id
+
+    return result
+```
+
+### OpenTelemetry Integration
+
+Integrate OpenTelemetry spans for distributed tracing:
+
+```python
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
+
+tracer = trace.get_tracer(__name__)
+
+@mcp.tool()
+async def system_get_overview(device_id: str) -> dict:
+    """Tool with OpenTelemetry tracing."""
+    correlation_id = correlation_id_var.get()
+
+    with tracer.start_as_current_span(
+        "mcp.tool.system_get_overview",
+        attributes={
+            "mcp.tool.name": "system_get_overview",
+            "mcp.device.id": device_id,
+            "mcp.correlation_id": correlation_id
+        }
+    ) as span:
+        try:
+            result = await _execute_tool(device_id)
+
+            # Add result metadata to span
+            tokens = result.get("_meta", {}).get("estimated_tokens", 0)
+            span.set_attribute("mcp.response.tokens", tokens)
+            span.set_status(Status(StatusCode.OK))
+
+            return result
+
+        except Exception as e:
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            span.record_exception(e)
+            raise
+```
+
+---
+
+## Automated Protocol Compliance Testing
+
+### Pytest Examples for MCP Protocol
+
+```python
+import pytest
+from fastmcp.testing import MCPTestClient
+
+@pytest.fixture
+async def mcp_client():
+    """Create test MCP client."""
+    from routeros_mcp.mcp_server import create_mcp_server
+
+    mcp = create_mcp_server()
+    async with MCPTestClient(mcp) as client:
+        yield client
+
+@pytest.mark.asyncio
+async def test_mcp_initialize_handshake(mcp_client):
+    """Test MCP initialization handshake."""
+    response = await mcp_client.initialize(
+        protocol_version="2024-11-05",
+        capabilities={"tools": {}},
+        client_info={"name": "test-client", "version": "1.0.0"}
+    )
+
+    assert response["protocolVersion"] == "2024-11-05"
+    assert "serverInfo" in response
+    assert response["serverInfo"]["name"] == "routeros-mcp"
+    assert "capabilities" in response
+    assert "tools" in response["capabilities"]
+
+@pytest.mark.asyncio
+async def test_mcp_tools_list(mcp_client):
+    """Test tools/list request."""
+    await mcp_client.initialize()
+
+    tools = await mcp_client.list_tools()
+
+    assert len(tools) > 0
+    assert any(t["name"] == "system_get_overview" for t in tools)
+
+    # Verify schema completeness
+    for tool in tools:
+        assert "name" in tool
+        assert "description" in tool
+        assert "inputSchema" in tool
+        assert tool["inputSchema"]["type"] == "object"
+
+@pytest.mark.asyncio
+async def test_mcp_tool_call_success(mcp_client, mock_device_service):
+    """Test successful tool execution."""
+    await mcp_client.initialize()
+
+    result = await mcp_client.call_tool(
+        "system_get_overview",
+        {"device_id": "test-device-123"}
+    )
+
+    assert "content" in result
+    assert len(result["content"]) > 0
+    assert result["content"][0]["type"] == "text"
+    assert result.get("isError") is False
+
+@pytest.mark.asyncio
+async def test_mcp_tool_call_error(mcp_client):
+    """Test tool execution error handling."""
+    await mcp_client.initialize()
+
+    with pytest.raises(Exception) as exc_info:
+        await mcp_client.call_tool(
+            "system_get_overview",
+            {"device_id": "nonexistent-device"}
+        )
+
+    # Verify JSON-RPC error format
+    error = exc_info.value
+    assert hasattr(error, "code")
+    assert hasattr(error, "message")
+    assert hasattr(error, "data")
+
+@pytest.mark.asyncio
+async def test_mcp_rate_limiting(mcp_client):
+    """Test rate limiting enforcement."""
+    await mcp_client.initialize()
+
+    # Make calls up to rate limit
+    for i in range(100):
+        await mcp_client.call_tool("system_get_overview", {"device_id": f"dev-{i}"})
+
+    # 101st call should fail with rate limit error
+    with pytest.raises(Exception) as exc_info:
+        await mcp_client.call_tool("system_get_overview", {"device_id": "dev-101"})
+
+    assert "rate limit" in str(exc_info.value).lower()
+
+@pytest.mark.asyncio
+async def test_mcp_token_budget_warning(mcp_client, large_response_mock):
+    """Test token budget warning on large responses."""
+    await mcp_client.initialize()
+
+    result = await mcp_client.call_tool(
+        "interface_list_interfaces",
+        {"device_id": "test-device", "limit": 500}
+    )
+
+    # Check for token warning in metadata
+    meta = result.get("_meta", {})
+    if meta.get("estimated_tokens", 0) > 5000:
+        assert "token_warning" in meta
+```
+
+### CI Integration Pattern
+
+```yaml
+# .github/workflows/mcp-protocol-tests.yml
+
+name: MCP Protocol Compliance Tests
+
+on: [push, pull_request]
+
+jobs:
+  mcp-protocol-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv sync
+
+      - name: Run MCP protocol compliance tests
+        run: |
+          uv run pytest tests/mcp/test_protocol_compliance.py -v
+
+      - name: Run MCP Inspector validation
+        run: |
+          npm install -g @modelcontextprotocol/inspector
+          uv run python scripts/validate_mcp_inspector.py
+
+      - name: Validate tool schemas
+        run: |
+          uv run python -m routeros_mcp.mcp.validate_schemas
+```
+
+---
+
+## Versioning & Capability Negotiation
+
+### Overview
+
+Following MCP best practices, the RouterOS MCP Server implements semantic versioning and advertises capabilities during protocol initialization to enable graceful degradation and backward compatibility.
+
+### Semantic Versioning
+
+Server follows semantic versioning (MAJOR.MINOR.PATCH):
+
+```
+MAJOR.MINOR.PATCH
+
+Example: 1.2.3
+- MAJOR (1): Breaking changes to tool schemas, removal of tools
+- MINOR (2): New tools, new resources, new prompts, backward-compatible changes
+- PATCH (3): Bug fixes, documentation updates, no schema changes
+```
+
+**Current Version:** `1.0.0`
+
+**Version History:**
+- `1.0.0` (2025-01-15): Initial Phase 1 release (46 tools: 23 fundamental, 8 advanced, 9 professional, 6 fallback)
+- `1.1.0` (planned): Phase 2 (add resources + prompts, subscriptions)
+- `1.2.0` (planned): Phase 4 (HTTP transport with OAuth 2.1)
+- `2.0.0` (planned): Breaking changes (if needed for RouterOS API changes)
+
+### Version Declaration
+
+Declare version in server initialization:
+
+```python
+from fastmcp import FastMCP
+
+mcp = FastMCP(
+    name="RouterOS MCP Server",
+    version="1.0.0",  # Semantic version
+    description="MikroTik RouterOS management via MCP protocol"
+)
+```
+
+### Capability Advertisement
+
+Server advertises capabilities during MCP initialize handshake:
+
+```python
+# routeros_mcp/mcp/server.py
+
+from fastmcp.protocol import InitializeRequest, InitializeResponse
+
+async def handle_initialize(request: InitializeRequest) -> InitializeResponse:
+    """Handle MCP initialize request with capability advertisement."""
+    return InitializeResponse(
+        protocol_version="2024-11-05",  # MCP protocol version
+        server_info={
+            "name": "RouterOS MCP Server",
+            "version": "1.0.0"
+        },
+        capabilities={
+            # Phase 1 capabilities (CURRENT)
+            "tools": {
+                "supported": True,
+                "tier_support": {
+                    "fundamental": True,   # 23 read-only tools
+                    "advanced": True,      # 8 single-device write tools
+                    "professional": True   # 9 multi-device orchestration tools
+                }
+            },
+
+            # Phase 2 capabilities (PLANNED)
+            "resources": {
+                "supported": True,
+                "subscribe": True,        # Supports resource subscriptions
+                "list_changed": True      # Notifies when resource list changes
+            },
+
+            "prompts": {
+                "supported": True,
+                "list_changed": False     # Prompts are static (from YAML files)
+            },
+
+            # Not applicable for network devices
+            "roots": {
+                "supported": False        # RouterOS devices don't have filesystem roots
+            },
+
+            # Phase 3+ capabilities (FUTURE)
+            "sampling": {
+                "supported": False        # Not implemented yet
+            },
+
+            "elicitation": {
+                "supported": False        # Not implemented yet
+            },
+
+            # Custom capabilities (RouterOS-specific)
+            "custom": {
+                # Environment support
+                "environments": ["lab", "staging", "prod"],
+
+                # Plan system limits
+                "max_devices_per_plan": 50,
+                "plan_expiry_hours": 24,
+                "supports_dry_run": True,
+                "supports_plan_apply": True,
+
+                # Security requirements
+                "oauth_required_for_http": True,
+                "credential_encryption": True,
+
+                # RouterOS compatibility
+                "routeros_versions_supported": ["7.x"],
+                "rest_api_required": True,
+                "ssh_optional": True
+            }
+        }
+    )
+```
+
+### Client Capability Detection
+
+Clients can check server capabilities before using features:
+
+```python
+# Client-side capability check
+
+async def check_server_capabilities(mcp_client):
+    """Check what server supports and adapt workflows."""
+    init_response = await mcp_client.initialize()
+    caps = init_response.capabilities
+
+    # Check resource support
+    if caps.get("resources", {}).get("supported"):
+        print("✅ Server supports resources - use resource-based workflows")
+        # Use device://{id}/health, fleet://summary, etc.
+    else:
+        print("⚠️  Server is tools-only - use fallback tools")
+        # Use device/get-health-data tool instead
+
+    # Check prompt support
+    if caps.get("prompts", {}).get("supported"):
+        print("✅ Server has workflow prompts")
+        prompts = await mcp_client.list_prompts()
+        # Use guided workflows
+    else:
+        print("⚠️  No prompt support - use manual workflows")
+
+    # Check tier support
+    tool_caps = caps.get("tools", {}).get("tier_support", {})
+    if tool_caps.get("professional"):
+        print("✅ Professional tier available (multi-device operations)")
+    elif tool_caps.get("advanced"):
+        print("⚠️  Only fundamental + advanced tiers available")
+    else:
+        print("⚠️  Read-only mode (fundamental tier only)")
+
+    # Check custom capabilities
+    custom = caps.get("custom", {})
+    environments = custom.get("environments", [])
+    print(f"Available environments: {', '.join(environments)}")
+
+    max_devices = custom.get("max_devices_per_plan", "unknown")
+    print(f"Max devices per plan: {max_devices}")
+```
+
+### Tool Versioning and Deprecation
+
+#### Backward-Compatible Changes
+
+When adding new optional parameters:
+
+```python
+# Version 1.0.0
+@mcp.tool()
+async def system_get_overview(device_id: str) -> dict:
+    """Get system overview."""
+    return await system_service.get_overview(device_id)
+
+
+# Version 1.1.0 (backward compatible - new optional parameter)
+@mcp.tool()
+async def system_get_overview(
+    device_id: str,
+    include_packages: bool = True  # New optional parameter with default
+) -> dict:
+    """Get system overview with optional package information."""
+    overview = await system_service.get_overview(device_id)
+
+    if include_packages:
+        overview["packages"] = await system_service.get_packages(device_id)
+
+    return overview
+```
+
+#### Breaking Changes (New Tool Version)
+
+When breaking changes are required:
+
+```python
+# Original tool (1.0.0)
+@mcp.tool()
+async def interface_list(device_id: str) -> list[dict]:
+    """List all interfaces."""
+    return await interface_service.list_interfaces(device_id)
+
+
+# New version with breaking changes (2.0.0)
+@mcp.tool()
+async def interface_list_v2(
+    device_id: str,
+    include_stats: bool = True,  # New required behavior
+    format: str = "detailed"      # New response format
+) -> dict:  # Changed return type
+    """List interfaces with enhanced statistics (V2).
+
+    Breaking changes from v1:
+    - Returns dict instead of list
+    - Always includes statistics
+    - New 'format' parameter
+    """
+    return await interface_service.list_interfaces_v2(
+        device_id,
+        include_stats=include_stats,
+        format=format
+    )
+
+
+# Mark old version as deprecated (keep for 6 months)
+@mcp.tool(
+    deprecated=True,
+    replacement="interface/list-v2"
+)
+async def interface_list(device_id: str) -> list[dict]:
+    """DEPRECATED: Use interface/list-v2 instead.
+
+    This tool will be removed in version 3.0.0.
+    Migration guide: https://docs.example.com/migration/interface-list-v2
+    """
+    return await interface_service.list_interfaces(device_id)
+```
+
+#### Deprecation Metadata
+
+Include deprecation information in tool schema:
+
+```json
+{
+  "name": "interface/list",
+  "description": "DEPRECATED: Use interface/list-v2 instead...",
+  "inputSchema": {...},
+  "deprecated": true,
+  "deprecation": {
+    "since_version": "2.0.0",
+    "removal_version": "3.0.0",
+    "replacement_tool": "interface/list-v2",
+    "migration_guide": "https://docs.example.com/migration/interface-list-v2",
+    "reason": "New version provides enhanced statistics and better response structure"
+  }
+}
+```
+
+### Backward Compatibility Rules
+
+Following MCP best practices, maintain backward compatibility:
+
+1. **Optional Parameters Only**: New parameters MUST have defaults
+   ```python
+   # ✅ GOOD: Optional parameter with default
+   async def tool(device_id: str, new_param: bool = False):
+       pass
+
+   # ❌ BAD: Required parameter breaks compatibility
+   async def tool(device_id: str, new_param: bool):
+       pass
+   ```
+
+2. **Additive Changes**: Add new response fields, don't remove existing
+   ```python
+   # ✅ GOOD: Add new field
+   return {
+       "existing_field": "value",
+       "new_field": "value"  # New field added
+   }
+
+   # ❌ BAD: Remove existing field
+   return {
+       # "existing_field": "removed"  # Breaking change!
+       "new_field": "value"
+   }
+   ```
+
+3. **Graceful Degradation**: Old clients MUST work with new servers
+4. **6-Month Deprecation Window**: Maintain deprecated tools for 6 months minimum
+5. **Clear Migration Paths**: Document upgrade path from old to new
+
+### Version Negotiation Example
+
+```python
+# Server-side version check
+
+from packaging import version
+
+def check_client_compatibility(client_version: str) -> bool:
+    """Check if client version is compatible with server.
+
+    Args:
+        client_version: Client's reported version (e.g., "1.0.0")
+
+    Returns:
+        True if compatible, False otherwise
+    """
+    server_version = version.parse("1.0.0")
+    client_ver = version.parse(client_version)
+
+    # Major version must match
+    if server_version.major != client_ver.major:
+        return False
+
+    # Server minor version must be >= client minor version
+    if server_version.minor < client_ver.minor:
+        return False
+
+    return True
+
+
+# Usage in initialize handler
+async def handle_initialize(request: InitializeRequest) -> InitializeResponse:
+    client_info = request.client_info
+    client_version = client_info.get("version", "0.0.0")
+
+    if not check_client_compatibility(client_version):
+        raise McpError(
+            -32600,
+            f"Client version {client_version} incompatible with server 1.0.0"
+        )
+
+    # Return capabilities
+    return InitializeResponse(...)
+```
+
+### Capability Evolution
+
+**Phase 1 (Current - v1.0.0):**
+```python
+capabilities = {
+    "tools": {"supported": True},
+    "resources": {"supported": False},
+    "prompts": {"supported": False}
+}
+```
+
+**Phase 2 (Planned - v1.1.0):**
+```python
+capabilities = {
+    "tools": {"supported": True},
+    "resources": {"supported": True, "subscribe": True},
+    "prompts": {"supported": True}
+}
+```
+
+**Phase 4 (Planned - v1.2.0):**
+```python
+capabilities = {
+    "tools": {"supported": True},
+    "resources": {"supported": True, "subscribe": True},
+    "prompts": {"supported": True},
+    "custom": {
+        "http_transport": True,
+        "oauth_required": True
+    }
+}
+```
+
+### Deprecation Policy
+
+**Timeline:**
+- **Announcement**: Deprecation announced in release notes
+- **Warning Period**: Tool marked deprecated, warnings logged
+- **Migration Window**: 6 months minimum
+- **Removal**: Tool removed in next major version
+
+**Process:**
+1. Mark tool as deprecated with `@mcp.tool(deprecated=True)`
+2. Add deprecation notice to description
+3. Log warning on each deprecated tool call
+4. Provide replacement tool reference
+5. Document migration in release notes
+6. Remove after 6 months + major version bump
+
+**Example Deprecation Log:**
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+
+@mcp.tool(deprecated=True, replacement="interface/list-v2")
+async def interface_list(device_id: str) -> list[dict]:
+    """DEPRECATED: Use interface/list-v2 instead."""
+
+    # Log deprecation warning
+    logger.warning(
+        "deprecated_tool_call",
+        extra={
+            "tool": "interface/list",
+            "replacement": "interface/list-v2",
+            "removal_version": "3.0.0",
+            "device_id": device_id
+        }
+    )
+
+    # Continue to work as before
+    return await interface_service.list_interfaces(device_id)
 ```
 
 ---

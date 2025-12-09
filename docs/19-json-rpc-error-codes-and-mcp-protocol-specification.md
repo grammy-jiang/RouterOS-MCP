@@ -727,4 +727,590 @@ def raise_forbidden_tier(device: Device, tool_tier: str) -> None:
 
 ---
 
-**This error taxonomy provides comprehensive coverage for all MCP tool operations while maintaining JSON-RPC 2.0 compliance.**
+## MCP Best Practices Integration
+
+### Intent-Based Error Messages (MCP Section A4.2)
+
+Following MCP best practices, error messages must explain *what to do next*, not just *what went wrong*:
+
+```python
+# routeros_mcp/mcp/errors.py
+
+from fastmcp.exceptions import McpError
+
+
+def raise_device_not_found_intent_based(device_id: str, available_devices: list[str]) -> None:
+    """Raise NOT_FOUND error with actionable guidance.
+
+    Following MCP Section A4.2: Describe when to use, not just what failed.
+    """
+    # ❌ BAD: Functional description (what went wrong)
+    # raise McpError(-32003, "Device not found")
+
+    # ✅ GOOD: Intent-based description (what to do next)
+    suggestion = (
+        f"Device '{device_id}' not found in registry. "
+        f"Available devices: {', '.join(available_devices[:5])}. "
+        f"Use registry/list to see all devices, or registry/add to add a new device."
+    )
+
+    raise McpError(
+        code=-32003,
+        message="Device Not Found",
+        data={
+            "mcp_error_code": "NOT_FOUND",
+            "details": suggestion,
+            "device_id": device_id,
+            "available_device_count": len(available_devices),
+            "suggestions": [
+                "Use registry/list to see all available devices",
+                "Check device_id spelling and try again",
+                f"Use registry/add to add '{device_id}' to the registry"
+            ]
+        }
+    )
+```
+
+### Actionable Error Recovery Guidance (MCP Section B7)
+
+Errors should classify themselves and provide recovery steps:
+
+```python
+# routeros_mcp/mcp/errors.py
+
+from enum import Enum
+from typing import Optional
+
+
+class ErrorRecoveryStrategy(str, Enum):
+    """Error recovery strategies for clients."""
+    RETRY_WITH_BACKOFF = "retry_with_backoff"
+    USER_ACTION_REQUIRED = "user_action_required"
+    FIX_AND_RETRY = "fix_and_retry"
+    REPORT_AND_ABORT = "report_and_abort"
+
+
+def create_actionable_error(
+    code: int,
+    mcp_error_code: str,
+    details: str,
+    recovery_strategy: ErrorRecoveryStrategy,
+    **context
+) -> McpError:
+    """Create error with recovery guidance.
+
+    Following MCP Section B7: Help the model recover from failures.
+
+    Args:
+        code: JSON-RPC error code
+        mcp_error_code: MCP-specific error code
+        details: Detailed error description
+        recovery_strategy: How client should handle this error
+        **context: Additional context fields
+
+    Returns:
+        McpError with recovery guidance
+
+    Example:
+        error = create_actionable_error(
+            code=-32010,
+            mcp_error_code="DEVICE_UNREACHABLE",
+            details="Connection timeout after 5.0 seconds",
+            recovery_strategy=ErrorRecoveryStrategy.RETRY_WITH_BACKOFF,
+            device_id="dev-lab-01",
+            retry_after=60
+        )
+    """
+    error_data = {
+        "mcp_error_code": mcp_error_code,
+        "details": details,
+        "recovery_strategy": recovery_strategy.value,
+        **context
+    }
+
+    # Add strategy-specific guidance
+    if recovery_strategy == ErrorRecoveryStrategy.RETRY_WITH_BACKOFF:
+        error_data["suggestion"] = (
+            f"Wait {context.get('retry_after', 60)} seconds and retry. "
+            "This is likely a temporary issue."
+        )
+
+    elif recovery_strategy == ErrorRecoveryStrategy.USER_ACTION_REQUIRED:
+        error_data["suggestion"] = (
+            "User intervention required. "
+            "Check permissions or configuration and try again."
+        )
+
+    elif recovery_strategy == ErrorRecoveryStrategy.FIX_AND_RETRY:
+        error_data["suggestion"] = (
+            "Fix the input parameters based on the validation errors below, "
+            "then retry the request."
+        )
+
+    elif recovery_strategy == ErrorRecoveryStrategy.REPORT_AND_ABORT:
+        error_data["suggestion"] = (
+            "This error cannot be resolved automatically. "
+            "Report to system administrator."
+        )
+
+    # Determine message based on code
+    message_map = {
+        -32003: "Not Found",
+        -32002: "Forbidden",
+        -32005: "Validation Error",
+        -32006: "Rate Limited",
+        -32007: "Timeout",
+        -32010: "Device Unreachable",
+        -32011: "Device Authentication Failed",
+        -32012: "Device Error",
+    }
+    message = message_map.get(code, "Error")
+
+    return McpError(code=code, message=message, data=error_data)
+
+
+# Usage examples
+def raise_device_unreachable(device_id: str, timeout: float) -> None:
+    """Raise DEVICE_UNREACHABLE with retry guidance."""
+    raise create_actionable_error(
+        code=-32010,
+        mcp_error_code="DEVICE_UNREACHABLE",
+        details=f"Connection timeout after {timeout} seconds",
+        recovery_strategy=ErrorRecoveryStrategy.RETRY_WITH_BACKOFF,
+        device_id=device_id,
+        timeout_seconds=timeout,
+        retry_after=60
+    )
+
+
+def raise_validation_error(field: str, value: any, expected: str) -> None:
+    """Raise VALIDATION_ERROR with fix-and-retry guidance."""
+    raise create_actionable_error(
+        code=-32005,
+        mcp_error_code="VALIDATION_ERROR",
+        details=f"Invalid value for field '{field}': {value}",
+        recovery_strategy=ErrorRecoveryStrategy.FIX_AND_RETRY,
+        field=field,
+        value=str(value),
+        expected=expected,
+        suggestion=f"Provide a valid {expected} for field '{field}'"
+    )
+
+
+def raise_forbidden_tier(device_id: str, tier: str, required_flag: str) -> None:
+    """Raise FORBIDDEN with user action required."""
+    raise create_actionable_error(
+        code=-32002,
+        mcp_error_code="FORBIDDEN",
+        details=f"Device '{device_id}' does not allow {tier} tier operations",
+        recovery_strategy=ErrorRecoveryStrategy.USER_ACTION_REQUIRED,
+        device_id=device_id,
+        tool_tier=tier,
+        required_flag=required_flag,
+        suggestion=(
+            f"Enable {tier} operations by setting device flag '{required_flag}=true', "
+            "or use a different device."
+        )
+    )
+```
+
+### Token-Conscious Error Messages (MCP Section B8)
+
+Keep error messages concise but helpful:
+
+```python
+# routeros_mcp/mcp/errors.py
+
+def create_token_efficient_error(
+    code: int,
+    mcp_error_code: str,
+    short_details: str,
+    full_details: Optional[str] = None,
+    **context
+) -> McpError:
+    """Create error optimized for token consumption.
+
+    Following MCP Section B8: Token budget management.
+
+    Provides short details for model consumption, with full details
+    available in data object for debugging.
+
+    Args:
+        code: JSON-RPC error code
+        mcp_error_code: MCP-specific error code
+        short_details: Concise error description (for model)
+        full_details: Detailed error description (for debugging)
+        **context: Additional context fields
+
+    Returns:
+        McpError with token-optimized messaging
+    """
+    # Short details for model (token-efficient)
+    error_data = {
+        "mcp_error_code": mcp_error_code,
+        "details": short_details,
+        **context
+    }
+
+    # Full details in separate field (for logging/debugging)
+    if full_details:
+        error_data["_debug_details"] = full_details
+
+    # Determine message
+    message_map = {
+        -32003: "Not Found",
+        -32002: "Forbidden",
+        -32005: "Validation Error",
+        -32010: "Device Unreachable",
+    }
+    message = message_map.get(code, "Error")
+
+    return McpError(code=code, message=message, data=error_data)
+
+
+# Example: Concise vs Verbose
+def raise_device_error_verbose(device_id: str, routeros_error: str) -> None:
+    """❌ BAD: Verbose error that consumes too many tokens."""
+    long_message = (
+        f"The RouterOS device with identifier '{device_id}' has returned an error "
+        f"response when attempting to execute the requested operation. The full error "
+        f"message from the RouterOS API is as follows: {routeros_error}. This may "
+        f"indicate a configuration issue, permission problem, or invalid parameters. "
+        f"Please review the device configuration and ensure all parameters are correct "
+        f"before retrying the operation."
+    )
+    raise McpError(-32012, "Device Error", {"details": long_message})
+
+
+def raise_device_error_concise(device_id: str, routeros_error: str) -> None:
+    """✅ GOOD: Concise error with essential information."""
+    raise create_token_efficient_error(
+        code=-32012,
+        mcp_error_code="DEVICE_ERROR",
+        short_details=f"RouterOS error: {routeros_error[:100]}",  # Truncate long errors
+        full_details=routeros_error,  # Full error in debug field
+        device_id=device_id,
+        suggestion="Check device configuration or parameters"
+    )
+```
+
+### Error Classification and Client Handling (MCP Section B7)
+
+Provide clear error classification to guide client behavior:
+
+```python
+# routeros_mcp/mcp/error_handler.py
+
+import logging
+from typing import Callable, TypeVar, Any
+from functools import wraps
+
+logger = logging.getLogger(__name__)
+
+T = TypeVar('T')
+
+
+def handle_tool_errors(tool_name: str, tier: str):
+    """Decorator for consistent tool error handling.
+
+    Following MCP Section B7: Classify errors and provide recovery guidance.
+
+    Args:
+        tool_name: Name of the tool
+        tier: Tool tier (fundamental/advanced/professional)
+
+    Returns:
+        Decorated function with error handling
+    """
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @wraps(func)
+        async def wrapper(*args, **kwargs) -> T:
+            try:
+                return await func(*args, **kwargs)
+
+            # User errors (invalid parameters) - FIX_AND_RETRY
+            except ValueError as e:
+                logger.error(f"Validation error in {tool_name}: {e}")
+                raise create_actionable_error(
+                    code=-32005,
+                    mcp_error_code="VALIDATION_ERROR",
+                    details=str(e),
+                    recovery_strategy=ErrorRecoveryStrategy.FIX_AND_RETRY,
+                    tool_name=tool_name,
+                    tool_tier=tier
+                )
+
+            # Permission errors - USER_ACTION_REQUIRED
+            except PermissionError as e:
+                logger.error(f"Permission denied in {tool_name}: {e}")
+                raise create_actionable_error(
+                    code=-32002,
+                    mcp_error_code="FORBIDDEN",
+                    details=str(e),
+                    recovery_strategy=ErrorRecoveryStrategy.USER_ACTION_REQUIRED,
+                    tool_name=tool_name,
+                    tool_tier=tier
+                )
+
+            # Timeout errors - RETRY_WITH_BACKOFF
+            except TimeoutError as e:
+                logger.error(f"Timeout in {tool_name}: {e}")
+                raise create_actionable_error(
+                    code=-32007,
+                    mcp_error_code="TIMEOUT",
+                    details=str(e),
+                    recovery_strategy=ErrorRecoveryStrategy.RETRY_WITH_BACKOFF,
+                    tool_name=tool_name,
+                    retry_after=60
+                )
+
+            # System errors - REPORT_AND_ABORT
+            except Exception as e:
+                logger.exception(f"Unexpected error in {tool_name}: {e}")
+                raise create_actionable_error(
+                    code=-32000,
+                    mcp_error_code="INTERNAL_ERROR",
+                    details=f"Unexpected error: {type(e).__name__}",
+                    recovery_strategy=ErrorRecoveryStrategy.REPORT_AND_ABORT,
+                    tool_name=tool_name,
+                    error_type=type(e).__name__
+                )
+
+        return wrapper
+    return decorator
+
+
+# Usage in MCP tools
+@mcp.tool()
+@handle_tool_errors(tool_name="system/get-overview", tier="fundamental")
+async def system_get_overview(device_id: str) -> dict:
+    """Get system overview with automatic error handling."""
+    # Tool implementation
+    pass
+```
+
+### Structured Error Responses with Next-Step Guidance
+
+Following MCP best practices, errors should guide the next action:
+
+```python
+# Example: Complete error response structure
+
+{
+  "jsonrpc": "2.0",
+  "id": "req-001",
+  "error": {
+    "code": -32002,
+    "message": "Forbidden",
+    "data": {
+      "mcp_error_code": "FORBIDDEN",
+      "details": "Device 'dev-lab-01' does not allow advanced tier operations",
+      "device_id": "dev-lab-01",
+      "tool_tier": "advanced",
+      "required_flag": "allow_advanced_writes",
+
+      // Recovery guidance
+      "recovery_strategy": "user_action_required",
+      "suggestion": "Enable advanced operations by setting device flag 'allow_advanced_writes=true', or use a different device.",
+
+      // Next steps (intent-based guidance)
+      "next_steps": [
+        "Use registry/update to enable allow_advanced_writes flag",
+        "Use registry/list with environment filter to find devices with advanced tier enabled",
+        "Contact administrator to enable advanced tier for this device"
+      ],
+
+      // Alternative actions
+      "alternatives": [
+        {
+          "tool": "registry/list",
+          "description": "List devices with advanced tier enabled",
+          "arguments": {
+            "environment": "lab",
+            "filter": "allow_advanced_writes=true"
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+### Error Message Templates
+
+**Device Errors:**
+
+```python
+DEVICE_ERROR_TEMPLATES = {
+    "DEVICE_UNREACHABLE": {
+        "code": -32010,
+        "message_template": "Cannot connect to device '{device_id}' at {management_address}",
+        "recovery": ErrorRecoveryStrategy.RETRY_WITH_BACKOFF,
+        "suggestions": [
+            "Wait {retry_after} seconds and retry",
+            "Check device is powered on and network is accessible",
+            "Use registry/update to update management address if changed"
+        ]
+    },
+    "DEVICE_AUTH_FAILED": {
+        "code": -32011,
+        "message_template": "Authentication failed for device '{device_id}'",
+        "recovery": ErrorRecoveryStrategy.USER_ACTION_REQUIRED,
+        "suggestions": [
+            "Check device credentials are correct",
+            "Use registry/rotate-credentials to update credentials",
+            "Verify user has access to device in RouterOS"
+        ]
+    },
+    "DEVICE_ERROR": {
+        "code": -32012,
+        "message_template": "RouterOS error on device '{device_id}': {error_summary}",
+        "recovery": ErrorRecoveryStrategy.FIX_AND_RETRY,
+        "suggestions": [
+            "Check RouterOS error message for details",
+            "Verify operation is valid for this RouterOS version",
+            "Use system/get-overview to check device state"
+        ]
+    }
+}
+```
+
+**Validation Errors:**
+
+```python
+VALIDATION_ERROR_TEMPLATES = {
+    "INVALID_IP_ADDRESS": {
+        "code": -32005,
+        "message_template": "Invalid IP address: {value}",
+        "recovery": ErrorRecoveryStrategy.FIX_AND_RETRY,
+        "expected": "Valid IPv4 or IPv6 address (e.g., 192.168.1.1 or 2001:db8::1)"
+    },
+    "INVALID_DEVICE_ID": {
+        "code": -32005,
+        "message_template": "Device '{value}' not found",
+        "recovery": ErrorRecoveryStrategy.FIX_AND_RETRY,
+        "expected": "Valid device ID from registry (use registry/list to see options)"
+    },
+    "REQUIRED_FIELD_MISSING": {
+        "code": -32005,
+        "message_template": "Required field '{field}' is missing",
+        "recovery": ErrorRecoveryStrategy.FIX_AND_RETRY,
+        "expected": "{field} must be provided"
+    }
+}
+```
+
+### Error Logging with Correlation (MCP Section A9)
+
+Log errors with JSON-RPC request ID for traceability:
+
+```python
+# routeros_mcp/mcp/logging.py
+
+import logging
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+
+def log_error_with_correlation(
+    request_id: str,
+    tool_name: str,
+    error_code: int,
+    mcp_error_code: str,
+    details: str,
+    **context
+) -> None:
+    """Log error with correlation ID.
+
+    Following MCP Section A9: Emit structured logs with correlation IDs.
+
+    Args:
+        request_id: JSON-RPC request ID
+        tool_name: Tool that generated error
+        error_code: JSON-RPC error code
+        mcp_error_code: MCP-specific error code
+        details: Error details
+        **context: Additional context
+    """
+    logger.error(
+        "tool_error",
+        extra={
+            "request_id": request_id,
+            "tool_name": tool_name,
+            "error_code": error_code,
+            "mcp_error_code": mcp_error_code,
+            "details": details,
+            **context
+        }
+    )
+
+
+# Enhanced error creation with logging
+def create_logged_error(
+    request_id: str,
+    tool_name: str,
+    code: int,
+    mcp_error_code: str,
+    details: str,
+    **context
+) -> McpError:
+    """Create error and log with correlation ID."""
+    # Log error
+    log_error_with_correlation(
+        request_id=request_id,
+        tool_name=tool_name,
+        error_code=code,
+        mcp_error_code=mcp_error_code,
+        details=details,
+        **context
+    )
+
+    # Create error response
+    return create_actionable_error(
+        code=code,
+        mcp_error_code=mcp_error_code,
+        details=details,
+        recovery_strategy=ErrorRecoveryStrategy.FIX_AND_RETRY,
+        **context
+    )
+```
+
+---
+
+## Error Handling Best Practices Checklist
+
+### Error Message Design
+
+- [ ] Errors explain *what to do next*, not just *what went wrong* (A4.2)
+- [ ] Each error includes recovery strategy
+- [ ] Suggestions provided for user action
+- [ ] Error messages are token-conscious (B8)
+- [ ] Alternative actions listed when applicable
+
+### Error Classification
+
+- [ ] Errors classified by recovery strategy
+- [ ] User errors (validation) separate from system errors
+- [ ] Permission errors provide clear guidance
+- [ ] Timeout errors include retry_after hint
+- [ ] Device errors categorized correctly
+
+### Observability
+
+- [ ] All errors logged with correlation ID (A9)
+- [ ] Error rates tracked per tool
+- [ ] Error types monitored
+- [ ] Full error details in logs (not in response for token efficiency)
+
+### Client Experience
+
+- [ ] Error codes consistent with JSON-RPC 2.0
+- [ ] MCP error codes provided in data object
+- [ ] Structured error data includes context
+- [ ] Suggestions actionable by model
+- [ ] No sensitive data in error messages
+
+---
+
+**This error taxonomy provides comprehensive coverage for all MCP tool operations while maintaining JSON-RPC 2.0 compliance and following MCP best practices for actionable, intent-based error handling.**

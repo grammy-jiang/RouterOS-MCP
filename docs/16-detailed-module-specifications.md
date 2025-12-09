@@ -635,6 +635,660 @@ class DeviceService:
 
 ---
 
+## MCP Tool Modules
+
+### `mcp_tools/system.py`
+
+```python
+from fastmcp import FastMCP
+from pydantic import BaseModel, Field
+
+from routeros_mcp.domain.devices import DeviceService
+from routeros_mcp.domain.routeros_operations.system import SystemOperations
+from routeros_mcp.security.auth import get_current_user
+from routeros_mcp.security.authz import AuthorizationService
+from routeros_mcp.mcp.token_estimation import estimate_tokens
+
+def register_system_tools(mcp: FastMCP):
+    """Register all system-related MCP tools.
+
+    Args:
+        mcp: FastMCP server instance
+    """
+
+    @mcp.tool(
+        description="Get RouterOS system overview including CPU, memory, uptime, and health metrics"
+    )
+    async def system_get_overview(
+        device_id: str = Field(description="UUID of target RouterOS device")
+    ) -> dict:
+        """Fetch comprehensive system overview for a RouterOS device.
+
+        Returns:
+            Dict with:
+            - content: list[dict] with type="text" and formatted overview
+            - _meta: metadata including estimated tokens, RouterOS version, uptime
+        """
+        # Get services
+        user = get_current_user()
+        device_service = get_device_service()
+        system_ops = get_system_operations()
+        authz_service = get_authz_service()
+
+        # Get device
+        device = await device_service.get_device(device_id)
+
+        # Authorization check
+        authz_service.check_tool_access(
+            user=user,
+            device=device,
+            tool_name="system_get_overview",
+            tool_tier="fundamental"
+        )
+
+        # Execute operation
+        overview = await system_ops.get_overview(device)
+
+        # Format response
+        response_text = _format_system_overview(overview)
+        tokens = estimate_tokens(response_text)
+
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": response_text
+                }
+            ],
+            "_meta": {
+                "estimated_tokens": tokens,
+                "routeros_version": overview.get("routeros_version"),
+                "device_uptime_seconds": overview.get("uptime_seconds"),
+                "health_status": overview.get("health_status", "unknown")
+            }
+        }
+
+    @mcp.tool(
+        description="Update system identity (hostname) on a RouterOS device"
+    )
+    async def system_update_identity(
+        device_id: str = Field(description="UUID of target device"),
+        identity: str = Field(description="New system identity", max_length=64),
+        dry_run: bool = Field(default=False, description="Preview changes without applying")
+    ) -> dict:
+        """Update system identity with audit logging.
+
+        Returns:
+            Dict with before/after values and changed flag
+        """
+        user = get_current_user()
+        device_service = get_device_service()
+        system_ops = get_system_operations()
+        authz_service = get_authz_service()
+
+        device = await device_service.get_device(device_id)
+
+        # Authorization (advanced tier)
+        authz_service.check_tool_access(
+            user=user,
+            device=device,
+            tool_name="system_update_identity",
+            tool_tier="advanced"
+        )
+
+        # Execute operation
+        result = await system_ops.update_identity(
+            device=device,
+            identity=identity,
+            dry_run=dry_run
+        )
+
+        # Format response
+        response_text = (
+            f"System identity update {'(dry run)' if dry_run else 'applied'}\n"
+            f"Device: {device.name} ({device_id})\n"
+            f"Old identity: {result['old_identity']}\n"
+            f"New identity: {result['new_identity']}\n"
+            f"Changed: {result['changed']}\n"
+        )
+
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": response_text
+                }
+            ],
+            "_meta": {
+                "estimated_tokens": estimate_tokens(response_text),
+                "changed": result["changed"],
+                "dry_run": dry_run
+            }
+        }
+
+def _format_system_overview(overview: dict) -> str:
+    """Format system overview for display."""
+    return f"""
+# System Overview
+
+## Device Information
+- RouterOS Version: {overview.get('routeros_version', 'Unknown')}
+- System Identity: {overview.get('identity', 'Unknown')}
+- Board Name: {overview.get('board_name', 'Unknown')}
+- Architecture: {overview.get('architecture', 'Unknown')}
+
+## System Resources
+- CPU: {overview.get('cpu_usage', 'N/A')}%
+- Memory: {overview.get('memory_used', 'N/A')} / {overview.get('memory_total', 'N/A')} ({overview.get('memory_usage_percent', 'N/A')}%)
+- Uptime: {_format_uptime(overview.get('uptime_seconds', 0))}
+
+## Health Metrics
+- Temperature: {overview.get('temperature_celsius', 'N/A')}°C
+- Voltage: {overview.get('voltage', 'N/A')}V
+- Health Status: {overview.get('health_status', 'Unknown')}
+"""
+
+def _format_uptime(seconds: int) -> str:
+    """Format uptime seconds to human-readable string."""
+    days = seconds // 86400
+    hours = (seconds % 86400) // 3600
+    minutes = (seconds % 3600) // 60
+    return f"{days}d {hours}h {minutes}m"
+```
+
+---
+
+## MCP Resource Modules
+
+### `mcp_resources/device.py`
+
+```python
+from fastmcp import FastMCP
+import json
+
+from routeros_mcp.domain.devices import DeviceService
+from routeros_mcp.domain.health import HealthService
+from routeros_mcp.security.auth import get_current_user
+from routeros_mcp.mcp.resources import check_resource_access
+
+def register_device_resources(mcp: FastMCP):
+    """Register device-scoped resources.
+
+    Args:
+        mcp: FastMCP server instance
+    """
+
+    @mcp.resource(
+        uri="device://{device_id}/overview",
+        name="Device System Overview",
+        description="Current system metrics and information for a RouterOS device"
+    )
+    async def device_overview(device_id: str) -> str:
+        """Get current system overview for device.
+
+        Returns:
+            JSON-formatted system overview
+        """
+        user = get_current_user()
+        await check_resource_access(user, device_id, "overview")
+
+        system_service = get_system_service()
+        overview = await system_service.get_overview(device_id)
+
+        return json.dumps(overview, indent=2)
+
+    @mcp.resource(
+        uri="device://{device_id}/health",
+        name="Device Health Metrics",
+        description="Real-time health status and metrics",
+        subscribe=True
+    )
+    async def device_health(device_id: str) -> str:
+        """Get current health metrics (subscribable).
+
+        Returns:
+            JSON-formatted health metrics
+        """
+        user = get_current_user()
+        await check_resource_access(user, device_id, "health")
+
+        health_service = get_health_service()
+        health = await health_service.get_current_health(device_id)
+
+        return json.dumps(health, indent=2)
+
+    @mcp.resource(
+        uri="device://{device_id}/config",
+        name="RouterOS Configuration",
+        description="Current device configuration export",
+        mime_type="text/x-routeros-script"
+    )
+    async def device_config(device_id: str) -> str:
+        """Get current RouterOS configuration.
+
+        Returns:
+            RouterOS configuration script
+        """
+        user = get_current_user()
+        await check_resource_access(user, device_id, "config")
+
+        snapshot_service = get_snapshot_service()
+        config = await snapshot_service.get_current_config(device_id)
+
+        return config
+```
+
+---
+
+## MCP Prompt Modules
+
+### `mcp_prompts/workflows.py`
+
+```python
+from fastmcp import FastMCP
+from typing import Literal
+
+from routeros_mcp.domain.devices import DeviceService
+
+def register_workflow_prompts(mcp: FastMCP):
+    """Register workflow-oriented prompts.
+
+    Args:
+        mcp: FastMCP server instance
+    """
+
+    @mcp.prompt(
+        name="dns-ntp-rollout",
+        description="Step-by-step guide for rolling out DNS/NTP changes across devices"
+    )
+    async def dns_ntp_rollout_workflow(
+        environment: Literal["lab", "staging", "prod"] = "lab",
+        dry_run: bool = True
+    ) -> str:
+        """DNS/NTP configuration rollout workflow guide.
+
+        Args:
+            environment: Target environment for rollout
+            dry_run: Whether to recommend dry-run first
+
+        Returns:
+            Formatted workflow guide with step-by-step instructions
+        """
+        device_service = get_device_service()
+        devices = await device_service.list_devices(environment=environment)
+        device_count = len(devices)
+
+        safety_note = ""
+        if environment == "prod":
+            safety_note = """
+⚠️  PRODUCTION ENVIRONMENT ALERT ⚠️
+- Changes require admin role
+- Plan/apply workflow is MANDATORY
+- Human approval token required
+- Devices must have allow_advanced_writes=true
+- Post-change monitoring required
+"""
+
+        return f"""
+# DNS/NTP Rollout Workflow for {environment.upper()}
+
+## Overview
+Rolling out DNS/NTP changes to **{device_count} devices** in {environment} environment.
+
+{safety_note}
+
+## Prerequisites
+- [ ] User role: {'admin' if environment == 'prod' else 'ops_rw or admin'}
+- [ ] Environment: {environment}
+- [ ] Backup current DNS/NTP config (recommended)
+
+## Workflow Steps
+
+### 1. List Target Devices
+**Tool:** `device.list_devices`
+
+**Parameters:**
+```json
+{{
+  "environment": "{environment}"
+}}
+```
+
+### 2. Create Rollout Plan
+**Tool:** `config.plan_dns_ntp_rollout`
+
+**Parameters:**
+```json
+{{
+  "device_ids": ["dev-001", "dev-002"],
+  "dns_servers": ["8.8.8.8", "8.8.4.4"],
+  "ntp_servers": ["time.cloudflare.com"],
+  "description": "DNS/NTP update for {environment}"
+}}
+```
+
+### 3. Review Plan Details
+**Resource:** `plan://{{plan_id}}/details`
+
+**Review checklist:**
+- [ ] All intended devices included
+- [ ] Current vs new values are correct
+- [ ] Risk levels acceptable
+- [ ] No precondition failures
+
+### 4. Apply Changes
+**Tool:** `config.apply_dns_ntp_rollout`
+
+**Parameters:**
+```json
+{{
+  "plan_id": "<plan_id from step 2>",
+  "batch_size": 5,
+  "pause_between_batches_seconds": 30
+}}
+```
+
+## Safety Notes
+- Always test in **lab** first
+- Use **staging** for final validation
+- Production requires **admin approval**
+- Monitor health checks post-change
+"""
+```
+
+---
+
+## MCP Registry and Middleware Modules
+
+### `mcp/registry.py`
+
+```python
+from typing import Callable, Any, Protocol
+from dataclasses import dataclass
+from inspect import signature
+import json
+
+class ToolHandler(Protocol):
+    """Protocol for MCP tool handler functions."""
+    async def __call__(self, **kwargs: Any) -> dict[str, Any]: ...
+
+@dataclass
+class ToolMetadata:
+    """Metadata for a registered MCP tool."""
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+    tier: str  # fundamental, advanced, professional
+    handler: ToolHandler
+    environments: list[str] | None = None
+    requires_approval: bool = False
+
+class ToolRegistry:
+    """Registry for MCP tools."""
+
+    def __init__(self):
+        self._tools: dict[str, ToolMetadata] = {}
+
+    def register(self, metadata: ToolMetadata) -> None:
+        """Register a tool.
+
+        Args:
+            metadata: Tool metadata including handler and schema
+        """
+        self._tools[metadata.name] = metadata
+
+    def get(self, name: str) -> ToolMetadata | None:
+        """Get tool metadata by name.
+
+        Args:
+            name: Tool name
+
+        Returns:
+            Tool metadata or None if not found
+        """
+        return self._tools.get(name)
+
+    def list_all(self) -> list[ToolMetadata]:
+        """List all registered tools.
+
+        Returns:
+            List of all tool metadata
+        """
+        return list(self._tools.values())
+
+    def list_by_tier(self, tier: str) -> list[ToolMetadata]:
+        """List tools by tier.
+
+        Args:
+            tier: Tool tier (fundamental, advanced, professional)
+
+        Returns:
+            List of tools in the specified tier
+        """
+        return [t for t in self._tools.values() if t.tier == tier]
+
+# Global registry
+_global_registry: ToolRegistry | None = None
+
+def get_global_tool_registry() -> ToolRegistry:
+    """Get global tool registry (singleton).
+
+    Returns:
+        Global ToolRegistry instance
+    """
+    global _global_registry
+    if _global_registry is None:
+        _global_registry = ToolRegistry()
+    return _global_registry
+
+def mcp_tool(
+    *,
+    name: str,
+    description: str,
+    tier: str = "fundamental",
+    environments: list[str] | None = None,
+    requires_approval: bool = False
+):
+    """Decorator for MCP tool registration with automatic schema generation.
+
+    Args:
+        name: Tool name (e.g., "system.get_overview")
+        description: Human-readable description
+        tier: Tool tier (fundamental, advanced, professional)
+        environments: Allowed environments (None = all)
+        requires_approval: Whether tool requires approval
+
+    Returns:
+        Decorated function with automatic registration
+    """
+    def decorator(func: ToolHandler) -> ToolHandler:
+        # Generate schema from function signature
+        sig = signature(func)
+        input_schema = _generate_schema_from_signature(sig)
+
+        # Register tool
+        metadata = ToolMetadata(
+            name=name,
+            description=description,
+            input_schema=input_schema,
+            tier=tier,
+            handler=func,
+            environments=environments,
+            requires_approval=requires_approval
+        )
+        get_global_tool_registry().register(metadata)
+
+        return func
+
+    return decorator
+
+def _generate_schema_from_signature(sig) -> dict[str, Any]:
+    """Generate JSON Schema from function signature.
+
+    Args:
+        sig: Function signature from inspect.signature
+
+    Returns:
+        JSON Schema dict
+    """
+    properties = {}
+    required = []
+
+    for param_name, param in sig.parameters.items():
+        if param_name in ("self", "cls"):
+            continue
+
+        # Extract type annotation
+        param_type = param.annotation
+        if param_type == str:
+            properties[param_name] = {"type": "string"}
+        elif param_type == int:
+            properties[param_name] = {"type": "integer"}
+        elif param_type == bool:
+            properties[param_name] = {"type": "boolean"}
+        else:
+            properties[param_name] = {"type": "string"}  # Default
+
+        # Check if required
+        if param.default == param.empty:
+            required.append(param_name)
+
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required
+    }
+```
+
+### `mcp/middleware.py`
+
+```python
+from typing import Callable, Any
+from datetime import datetime
+from contextvars import ContextVar
+from uuid import uuid4
+
+from routeros_mcp.mcp.token_estimation import estimate_tokens
+from routeros_mcp.mcp.exceptions import TokenBudgetExceededError
+
+# Context variables
+correlation_id_var: ContextVar[str] = ContextVar("correlation_id")
+session_id_var: ContextVar[str] = ContextVar("session_id")
+
+TOKEN_WARNING_THRESHOLD = 5_000
+TOKEN_ERROR_THRESHOLD = 50_000
+
+async def correlation_id_middleware(request: dict, next_handler: Callable) -> Any:
+    """Generate and propagate correlation ID.
+
+    Args:
+        request: JSON-RPC request
+        next_handler: Next handler in chain
+
+    Returns:
+        Handler result
+    """
+    correlation_id = str(uuid4())
+    correlation_id_var.set(correlation_id)
+
+    logger.info(
+        "MCP request received",
+        extra={
+            "correlation_id": correlation_id,
+            "method": request.get("method"),
+            "request_id": request.get("id")
+        }
+    )
+
+    result = await next_handler(request)
+    return result
+
+async def token_budget_middleware(tool_name: str, result: dict) -> dict:
+    """Check token budget and warn/error on large responses.
+
+    Args:
+        tool_name: Name of tool being executed
+        result: Tool result dict
+
+    Returns:
+        Result with optional warnings
+
+    Raises:
+        TokenBudgetExceededError: If response exceeds error threshold
+    """
+    estimated_tokens = result.get("_meta", {}).get("estimated_tokens", 0)
+
+    if estimated_tokens > TOKEN_ERROR_THRESHOLD:
+        raise TokenBudgetExceededError(
+            code=-32000,
+            message="Response exceeds token budget",
+            data={
+                "tool_name": tool_name,
+                "estimated_tokens": estimated_tokens,
+                "threshold": TOKEN_ERROR_THRESHOLD,
+                "suggested_action": "Use pagination or filtering to reduce response size"
+            }
+        )
+
+    if estimated_tokens > TOKEN_WARNING_THRESHOLD:
+        result["_meta"]["token_warning"] = (
+            f"Response size ({estimated_tokens} tokens) exceeds recommended limit "
+            f"({TOKEN_WARNING_THRESHOLD} tokens). Consider using pagination."
+        )
+
+    return result
+
+async def authorization_middleware(
+    user: User,
+    device: Device,
+    tool_name: str,
+    tool_tier: str
+) -> None:
+    """Check authorization before tool execution.
+
+    Args:
+        user: Current user
+        device: Target device
+        tool_name: Tool being executed
+        tool_tier: Tool tier
+
+    Raises:
+        McpError: If authorization fails
+    """
+    authz_service = get_authz_service()
+    authz_service.check_tool_access(
+        user=user,
+        device=device,
+        tool_name=tool_name,
+        tool_tier=tool_tier
+    )
+
+async def audit_logging_middleware(
+    user: User,
+    tool_name: str,
+    device_id: str,
+    result: dict
+) -> None:
+    """Log tool invocation for audit trail.
+
+    Args:
+        user: Current user
+        tool_name: Tool executed
+        device_id: Target device
+        result: Tool result
+    """
+    audit_service = get_audit_service()
+    await audit_service.log_tool_invocation(
+        user_sub=user.sub,
+        tool_name=tool_name,
+        device_id=device_id,
+        success=not result.get("isError", False),
+        correlation_id=correlation_id_var.get()
+    )
+```
+
+---
+
 Due to length constraints, this document provides the essential patterns and specifications. Additional modules follow the same structure with:
 
 - Clear type hints for all parameters and returns
@@ -644,4 +1298,4 @@ Due to length constraints, this document provides the essential patterns and spe
 - Comprehensive docstrings
 - Error handling with domain exceptions
 
-See `docs/11-implementation-architecture-and-module-layout.md` for complete module list and `docs/14-mcp-protocol-integration-and-transport-design.md` for MCP-specific implementations.
+See [docs/11-implementation-architecture-and-module-layout.md](11-implementation-architecture-and-module-layout.md) for complete module list and [docs/14-mcp-protocol-integration-and-transport-design.md](14-mcp-protocol-integration-and-transport-design.md) for MCP-specific implementations.

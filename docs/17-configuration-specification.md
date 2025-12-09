@@ -893,12 +893,394 @@ All defaults are production-safe except `encryption_key` in lab mode.
 
 ---
 
+## MCP Best Practices Integration
+
+### Startup Validation (Fail-Fast Principle)
+
+Following MCP best practice B10 (Deployment and Configuration Management), the service performs comprehensive validation at startup rather than failing during operation:
+
+```python
+# routeros_mcp/startup.py
+
+from routeros_mcp.config import Settings
+import sys
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+async def validate_startup_config(settings: Settings) -> None:
+    """Validate configuration at startup and fail fast if invalid.
+
+    Following MCP best practices:
+    - Fail fast on missing required configuration
+    - Validate external dependencies are reachable
+    - Check security requirements before starting
+    - Provide actionable error messages
+
+    Raises:
+        RuntimeError: If configuration is invalid
+    """
+    errors = []
+
+    # 1. Required fields validation
+    if settings.environment in ["staging", "prod"]:
+        if not settings.encryption_key or settings.encryption_key == "INSECURE_LAB_KEY_DO_NOT_USE_IN_PRODUCTION":
+            errors.append(
+                "❌ ENCRYPTION_KEY is required for staging/prod environments. "
+                "Generate one with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+            )
+
+    # 2. OIDC validation for HTTP transport in production
+    if settings.mcp_transport == "http" and settings.environment == "prod":
+        if not settings.oidc_enabled:
+            errors.append(
+                "⚠️  HTTP transport in production without OIDC is not recommended. "
+                "Set OIDC_ENABLED=true or use STDIO transport."
+            )
+        else:
+            # Validate OIDC configuration
+            missing_oidc = []
+            if not settings.oidc_issuer:
+                missing_oidc.append("OIDC_ISSUER")
+            if not settings.oidc_client_id:
+                missing_oidc.append("OIDC_CLIENT_ID")
+            if not settings.oidc_client_secret:
+                missing_oidc.append("OIDC_CLIENT_SECRET")
+
+            if missing_oidc:
+                errors.append(
+                    f"❌ OIDC enabled but missing required fields: {', '.join(missing_oidc)}"
+                )
+
+    # 3. Database URL validation
+    try:
+        if settings.is_postgresql:
+            # Check that asyncpg or psycopg is available
+            if "asyncpg" in settings.database_url:
+                try:
+                    import asyncpg
+                except ImportError:
+                    errors.append(
+                        "❌ PostgreSQL with asyncpg selected but asyncpg not installed. "
+                        "Install with: uv pip install asyncpg"
+                    )
+        elif settings.is_sqlite:
+            try:
+                import aiosqlite
+            except ImportError:
+                errors.append(
+                    "❌ SQLite selected but aiosqlite not installed. "
+                    "Install with: uv pip install aiosqlite"
+                )
+    except Exception as e:
+        errors.append(f"❌ Database configuration validation failed: {e}")
+
+    # 4. Transport validation (MCP Best Practice A5)
+    if settings.mcp_transport == "stdio":
+        # CRITICAL: No logging to stdout for STDIO transport
+        logger.info("✅ STDIO transport selected - logs will be sent to stderr only")
+    elif settings.mcp_transport == "http":
+        # Validate HTTP configuration
+        if settings.mcp_http_port < 1 or settings.mcp_http_port > 65535:
+            errors.append(
+                f"❌ Invalid HTTP port {settings.mcp_http_port}. Must be 1-65535."
+            )
+
+    # 5. Rate limit sanity checks
+    if settings.routeros_max_concurrent_per_device > 10:
+        logger.warning(
+            f"⚠️  High concurrency limit ({settings.routeros_max_concurrent_per_device}) "
+            "may overwhelm RouterOS devices. Consider reducing to 3-5."
+        )
+
+    # Report all errors
+    if errors:
+        logger.error("\n=== Configuration Validation Failed ===")
+        for error in errors:
+            logger.error(error)
+        logger.error("=== Fix these issues and restart ===\n")
+        sys.exit(1)
+
+    logger.info("✅ Configuration validation passed")
+```
+
+### Security Best Practices (MCP Section A6)
+
+Following MCP security guidelines:
+
+#### 1. Credential Management
+
+**Never accept credentials as tool parameters:**
+```python
+# ❌ BAD: Accepting credentials as parameters
+@mcp.tool()
+async def connect_device(host: str, username: str, password: str):
+    """NEVER DO THIS - credentials in tool parameters"""
+    pass
+
+# ✅ GOOD: Load from environment at startup
+settings = get_settings()
+# Credentials loaded from ROUTEROS_MCP_ENCRYPTION_KEY
+```
+
+**Never echo secrets in tool results:**
+```python
+# routeros_mcp/domain/security.py
+
+def sanitize_for_logging(data: dict) -> dict:
+    """Remove sensitive fields from data before logging."""
+    sensitive_keys = {
+        "password", "secret", "token", "key", "credential",
+        "encrypted_secret", "encryption_key", "oidc_client_secret"
+    }
+
+    sanitized = {}
+    for key, value in data.items():
+        if any(sensitive in key.lower() for sensitive in sensitive_keys):
+            sanitized[key] = "***REDACTED***"
+        elif isinstance(value, dict):
+            sanitized[key] = sanitize_for_logging(value)
+        else:
+            sanitized[key] = value
+
+    return sanitized
+```
+
+#### 2. OAuth 2.1 for HTTP Transport
+
+As of March 2025, OAuth 2.1 is mandatory for HTTP-based transports:
+
+```yaml
+# config/prod.yaml
+
+# OIDC Authentication (OAuth 2.1)
+oidc_enabled: true
+oidc_issuer: https://idp.example.com
+oidc_client_id: routeros-mcp-prod
+oidc_client_secret: ${OIDC_CLIENT_SECRET}
+oidc_audience: routeros-mcp
+
+# Session security
+oidc_session_timeout: 3600  # 1 hour
+oidc_require_https: true
+```
+
+#### 3. Transport Security Rules
+
+**STDIO Transport:**
+- Inherits OS-level security (process isolation)
+- Only protocol messages to stdout
+- All logs to stderr or files
+- No network exposure
+
+**HTTP Transport:**
+- Requires OAuth 2.1 (OIDC)
+- Non-predictable session IDs
+- Token passthrough forbidden
+- HTTPS required in production
+
+### MCP Transport Configuration (Section A5)
+
+#### STDIO Transport (Default)
+
+**When to use:**
+- Claude Desktop, VS Code, Cursor, IDEs
+- Local development
+- Single-user scenarios
+- Maximum compatibility
+
+**Critical rule:**
+```python
+# routeros_mcp/main.py
+
+import sys
+import logging
+
+if settings.mcp_transport == "stdio":
+    # ONLY protocol messages to stdout
+    # ALL logs to stderr
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        stream=sys.stderr  # CRITICAL: stderr only
+    )
+```
+
+#### HTTP Transport (Streamable)
+
+**When to use:**
+- ChatGPT (cannot connect to localhost)
+- Web-based clients
+- Remote access
+- Streaming results
+
+**Configuration:**
+```python
+# For long-running operations, stream incremental results
+@mcp.tool()
+async def large_config_export(device_id: str):
+    """Export large configuration with streaming."""
+    # Stream chunks instead of buffering entire response
+    for chunk in export_config_chunks(device_id):
+        yield {
+            "type": "text",
+            "text": chunk,
+            "partial": True  # Indicate partial result
+        }
+```
+
+### Observability Configuration (Section A9)
+
+Following MCP instrumentation guidelines:
+
+```python
+# routeros_mcp/config.py
+
+class Settings(BaseSettings):
+    # ... existing fields ...
+
+    # ========================================
+    # Observability (MCP Section A9)
+    # ========================================
+
+    metrics_enabled: bool = Field(
+        default=True,
+        description="Enable metrics collection"
+    )
+
+    metrics_export_interval_seconds: int = Field(
+        default=60,
+        ge=10,
+        le=3600,
+        description="Metrics export interval"
+    )
+
+    structured_logging: bool = Field(
+        default=True,
+        description="Use structured JSON logging with correlation IDs"
+    )
+
+    log_request_id: bool = Field(
+        default=True,
+        description="Include JSON-RPC request ID in all logs"
+    )
+
+    trace_tool_calls: bool = Field(
+        default=True,
+        description="Trace all tool calls with latency and payload sizes"
+    )
+
+    # Metrics to track (MCP Section A9)
+    track_token_costs: bool = Field(
+        default=False,
+        description="Track estimated token consumption (requires AI service integration)"
+    )
+```
+
+### Configuration File Templates
+
+#### Minimal Development Configuration
+
+```yaml
+# config/dev-minimal.yaml
+# Fastest startup for development
+
+environment: lab
+debug: true
+log_level: DEBUG
+log_format: text
+
+# SQLite for simplicity
+database_url: sqlite:///./dev.db
+
+# STDIO for IDE integration
+mcp_transport: stdio
+
+# Permissive for testing
+routeros_retry_attempts: 1
+```
+
+#### Production-Ready Configuration
+
+```yaml
+# config/prod-secure.yaml
+# Security-hardened production config
+
+environment: prod
+debug: false
+log_level: INFO
+log_format: json
+
+# PostgreSQL with connection pooling
+database_url: postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:5432/${DB_NAME}
+database_pool_size: 10
+database_max_overflow: 20
+database_echo: false
+
+# HTTP with OAuth
+mcp_transport: http
+mcp_http_host: 0.0.0.0
+mcp_http_port: 8080
+
+# OAuth 2.1 required
+oidc_enabled: true
+oidc_issuer: ${OIDC_ISSUER}
+oidc_client_id: ${OIDC_CLIENT_ID}
+oidc_client_secret: ${OIDC_CLIENT_SECRET}
+oidc_audience: routeros-mcp
+
+# Security
+encryption_key: ${ENCRYPTION_KEY}  # Required
+
+# Rate limiting (MCP Section A6)
+routeros_max_concurrent_per_device: 3
+routeros_rest_timeout_seconds: 5.0
+routeros_retry_attempts: 3
+
+# Observability (MCP Section A9)
+metrics_enabled: true
+structured_logging: true
+trace_tool_calls: true
+```
+
+---
+
+## Configuration Checklist (MCP Compliance)
+
+### Pre-Deployment Checklist
+
+- [ ] `encryption_key` set and secure (not default)
+- [ ] Database URL validated and driver installed
+- [ ] Transport mode selected appropriately (stdio for local, http for remote)
+- [ ] OIDC configured if using HTTP in production
+- [ ] Secrets loaded from environment variables (not hardcoded)
+- [ ] Log level appropriate for environment (INFO for prod, DEBUG for dev)
+- [ ] Log format set to JSON for production
+- [ ] Rate limits configured per MCP guidelines (3-5 concurrent per device)
+- [ ] Health check intervals set
+- [ ] Startup validation passes without warnings
+
+### Runtime Validation
+
+- [ ] No secrets appear in logs
+- [ ] Structured logging includes correlation IDs
+- [ ] Metrics collection working
+- [ ] Database connections pooled correctly
+- [ ] HTTP transport uses HTTPS in production
+- [ ] OAuth tokens validated on each request
+
+---
+
 This configuration system provides:
 
-✅ **Sensible defaults** for quick development start
-✅ **Environment variables** for container deployments
-✅ **CLI arguments** for operational flexibility
-✅ **Config files** for complex deployments
-✅ **Validation** to catch misconfigurations early
-✅ **Security warnings** for insecure configurations
-✅ **SQLite and PostgreSQL** support out of the box
+✅ **Sensible defaults** for quick development start (MCP Section B10)
+✅ **Environment variables** for container deployments (MCP Section B10)
+✅ **CLI arguments** for operational flexibility (MCP Section B10)
+✅ **Config files** for complex deployments (MCP Section B10)
+✅ **Fail-fast validation** to catch misconfigurations at startup (MCP Section B10)
+✅ **Security warnings** for insecure configurations (MCP Section A6)
+✅ **SQLite and PostgreSQL** support out of the box (MCP Section B2)
+✅ **Transport-aware logging** (stdout for protocol, stderr for logs) (MCP Section A5, B3)
+✅ **OAuth 2.1 support** for HTTP transport (MCP Section A6)
+✅ **Observability configuration** for metrics and tracing (MCP Section A9)

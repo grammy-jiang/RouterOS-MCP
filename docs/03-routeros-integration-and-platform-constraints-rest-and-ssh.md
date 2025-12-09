@@ -6,6 +6,101 @@ Specify how the service interacts with RouterOS v7 via REST API as the primary c
 
 ---
 
+## RouterOS REST Endpoint Summary
+
+This section provides a comprehensive summary of all RouterOS v7 REST API endpoints used by the MCP service, organized by topic.
+
+**Related Documents:**
+- [Doc 04: MCP Tools Interface](04-mcp-tools-interface-and-json-schema-specification.md) - Tool-to-endpoint mapping
+- [Doc 06: System Information & Metrics Collection](06-system-information-and-metrics-collection-module-design.md) - Metrics collection patterns
+
+### Complete Endpoint Catalog
+
+| Method | Endpoint | Topic | Purpose | MCP Tier | Phase |
+|--------|----------|-------|---------|----------|-------|
+| **System** |
+| GET | `/rest/system/resource` | System | CPU, memory, uptime, version | Fundamental | 1 |
+| GET | `/rest/system/identity` | System | Device name/identity | Fundamental | 1 |
+| PUT/PATCH | `/rest/system/identity` | System | Change device name | Advanced | 2 |
+| GET | `/rest/system/routerboard` | System | Hardware model, serial | Fundamental | 1 |
+| GET | `/rest/system/package` | System | Installed packages | Fundamental | 1 |
+| GET | `/rest/system/clock` | System | Current time and timezone | Fundamental | 1 |
+| **Interface** |
+| GET | `/rest/interface` | Interface | List all interfaces | Fundamental | 1 |
+| GET | `/rest/interface/{id}` | Interface | Get specific interface | Fundamental | 1 |
+| PATCH | `/rest/interface/{id}` | Interface | Update interface (comment, disable) | Advanced | 2 |
+| GET | `/rest/interface/monitor-traffic` | Interface | Real-time traffic stats | Fundamental | 1 |
+| **IP Address** |
+| GET | `/rest/ip/address` | IP | List all IP addresses | Fundamental | 1 |
+| GET | `/rest/ip/address/{id}` | IP | Get specific address | Fundamental | 1 |
+| PUT | `/rest/ip/address` | IP | Add new IP address | Advanced | 3 |
+| DELETE | `/rest/ip/address/{id}` | IP | Remove IP address | Professional | 3 |
+| GET | `/rest/ip/arp` | IP | ARP table | Fundamental | 1 |
+| **DNS** |
+| GET | `/rest/ip/dns` | DNS | DNS server configuration | Fundamental | 1 |
+| PUT/PATCH | `/rest/ip/dns` | DNS | Update DNS servers | Advanced | 2 |
+| GET | `/rest/ip/dns/cache` | DNS | View DNS cache | Fundamental | 1 |
+| POST | `/rest/ip/dns/cache/flush` | DNS | Clear DNS cache | Advanced | 2 |
+| **NTP** |
+| GET | `/rest/system/ntp/client` | NTP | NTP configuration | Fundamental | 1 |
+| PUT/PATCH | `/rest/system/ntp/client` | NTP | Update NTP servers | Advanced | 2 |
+| GET | `/rest/system/ntp/client/monitor` | NTP | NTP sync status | Fundamental | 1 |
+| **Routing** |
+| GET | `/rest/ip/route` | Routing | Routing table | Fundamental | 1 |
+| GET | `/rest/ip/route/{id}` | Routing | Get specific route | Fundamental | 1 |
+| PUT | `/rest/ip/route` | Routing | Add static route | Professional | 4 |
+| DELETE | `/rest/ip/route/{id}` | Routing | Delete route | Professional | 4 |
+| **Firewall** |
+| GET | `/rest/ip/firewall/filter` | Firewall | Firewall filter rules | Fundamental | 1 |
+| GET | `/rest/ip/firewall/nat` | Firewall | NAT rules | Fundamental | 1 |
+| GET | `/rest/ip/firewall/address-list` | Firewall | Address lists | Fundamental | 1 |
+| PUT | `/rest/ip/firewall/address-list` | Firewall | Add address-list entry | Advanced | 2 |
+| DELETE | `/rest/ip/firewall/address-list/{id}` | Firewall | Remove address-list entry | Advanced | 2 |
+| **Logging** |
+| GET | `/rest/log` | Logging | System logs (bounded) | Fundamental | 1 |
+| GET | `/rest/system/logging` | Logging | Logging configuration | Fundamental | 1 |
+| **Diagnostics** |
+| POST | `/rest/tool/ping` | Tool | ICMP ping (bounded) | Fundamental | 1 |
+| POST | `/rest/tool/traceroute` | Tool | Network traceroute | Fundamental | 1 |
+| POST | `/rest/tool/bandwidth-test` | Tool | Speed test | Fundamental | 1 |
+
+**Total: 41 endpoints** (25 read-only fundamental, 10 advanced writes, 6 professional/high-risk)
+
+### Endpoint Categories
+
+**Fundamental Tier (Read-Only):** 25 endpoints
+- Safe for broad access
+- No device configuration changes
+- Diagnostic operations are bounded (max ping count, max traceroute hops)
+
+**Advanced Tier (Single-Device Writes):** 10 endpoints
+- Low-risk configuration changes
+- Single-device scope
+- Includes DNS/NTP updates, interface comments, address-list management
+
+**Professional Tier (High-Risk):** 6 endpoints
+- High-risk operations requiring plan/apply workflow
+- Routing changes, IP address deletion
+- Requires human approval in production
+
+### Topic Distribution
+
+| Topic | Endpoints | Read-Only | Write Operations |
+|-------|-----------|-----------|------------------|
+| System | 6 | 5 | 1 |
+| Interface | 4 | 3 | 1 |
+| IP Address | 5 | 3 | 2 |
+| DNS | 4 | 2 | 2 |
+| NTP | 3 | 2 | 1 |
+| Routing | 4 | 2 | 2 |
+| Firewall | 5 | 3 | 2 |
+| Logging | 2 | 2 | 0 |
+| Diagnostics | 3 | 3 | 0 |
+
+**Note:** MCP device management operations (device registration, updates) have no RouterOS endpoint - they are MCP-internal operations stored in the PostgreSQL database.
+
+---
+
 ## RouterOS REST client design (HTTP library, retries, timeouts, auth)
 
 - **HTTP client responsibilities**:
@@ -23,8 +118,117 @@ Specify how the service interacts with RouterOS v7 via REST API as the primary c
   - No retries on clear 4xx errors (auth failure, forbidden, validation errors).
 
 - **Per-device concurrency and rate limiting**:
-  - Centralized per-device concurrency control: at most N in-flight REST calls per device (N default 2–3).  
+  - Centralized per-device concurrency control: at most N in-flight REST calls per device (N default 2–3).
   - Per-device rate limiting to avoid overwhelming small routers, especially for health checks and metrics.
+
+- **Connection pooling**:
+  - Use `httpx.AsyncClient` with connection pooling for efficient HTTP/2 or HTTP/1.1 persistent connections.
+  - Configure per-device pool limits (max connections per host) to prevent connection exhaustion.
+  - Enable keep-alive for reduced handshake overhead on sequential requests.
+
+**Implementation Example:**
+
+```python
+import httpx
+from contextlib import asynccontextmanager
+
+class RouterOSRestClient:
+    """Async HTTP client for RouterOS REST API."""
+
+    def __init__(self, device: Device):
+        self.device = device
+        self._client: httpx.AsyncClient | None = None
+
+        # Connection pool settings
+        self.limits = httpx.Limits(
+            max_connections=5,        # Max total connections per device
+            max_keepalive_connections=3,  # Max idle keep-alive connections
+            keepalive_expiry=30.0     # Keep-alive timeout in seconds
+        )
+
+        # Timeout settings
+        self.timeout = httpx.Timeout(
+            connect=5.0,   # Connection timeout
+            read=30.0,     # Read timeout
+            write=10.0,    # Write timeout
+            pool=5.0       # Pool acquisition timeout
+        )
+
+    @asynccontextmanager
+    async def get_client(self) -> httpx.AsyncClient:
+        """Get or create HTTP client with connection pooling."""
+        if self._client is None:
+            auth = await self._get_device_credentials()
+            self._client = httpx.AsyncClient(
+                base_url=f"https://{self.device.host}:{self.device.port}",
+                auth=auth,
+                limits=self.limits,
+                timeout=self.timeout,
+                verify=self.device.verify_ssl,
+                follow_redirects=False
+            )
+
+        try:
+            yield self._client
+        finally:
+            # Keep client alive for connection reuse
+            pass
+
+    async def close(self):
+        """Close HTTP client and cleanup connections."""
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+
+    async def get(self, path: str) -> dict:
+        """Execute GET request with retries and error handling."""
+        async with self.get_client() as client:
+            for attempt in range(3):  # Max 3 retries
+                try:
+                    response = await client.get(path)
+                    response.raise_for_status()
+                    return response.json()
+
+                except httpx.TimeoutException as e:
+                    if attempt == 2:  # Last attempt
+                        raise RouterOSTimeoutError(f"Timeout calling {path}") from e
+                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
+
+                except httpx.HTTPStatusError as e:
+                    # Don't retry on 4xx errors
+                    if 400 <= e.response.status_code < 500:
+                        raise RouterOSClientError(
+                            f"Client error: {e.response.status_code}"
+                        ) from e
+
+                    # Retry on 5xx errors
+                    if attempt == 2:
+                        raise RouterOSServerError(
+                            f"Server error: {e.response.status_code}"
+                        ) from e
+                    await asyncio.sleep(2 ** attempt)
+
+                except httpx.NetworkError as e:
+                    if attempt == 2:
+                        raise RouterOSNetworkError(
+                            f"Network error connecting to {self.device.host}"
+                        ) from e
+                    await asyncio.sleep(2 ** attempt)
+
+    async def patch(self, path: str, data: dict) -> dict:
+        """Execute PATCH request for updates."""
+        async with self.get_client() as client:
+            response = await client.patch(path, json=data)
+            response.raise_for_status()
+            return response.json()
+
+    async def put(self, path: str, data: dict) -> dict:
+        """Execute PUT request for creates."""
+        async with self.get_client() as client:
+            response = await client.put(path, json=data)
+            response.raise_for_status()
+            return response.json()
+```
 
 ---
 
@@ -309,6 +513,11 @@ Specify how the service interacts with RouterOS v7 via REST API as the primary c
 # - limit: Max 1000 entries (MCP enforced)
 # - topics: Filter by topics
 # - No free-form log streaming (use bounded tail)
+
+# Token budget consideration:
+# Each log entry ~50-200 tokens depending on message length
+# Max 1000 entries = ~50,000-200,000 tokens
+# Recommend default limit of 100 entries (~5,000-20,000 tokens)
 ```
 
 ---
@@ -438,13 +647,395 @@ The design should explicitly record any RouterOS `/rest` quirks discovered durin
 
 ---
 
+## Error Handling & MCP Error Mapping
+
+**Mapping RouterOS errors to MCP JSON-RPC error responses:**
+
+The integration layer must translate RouterOS-specific errors into standardized MCP JSON-RPC error responses that LLM clients can understand and handle.
+
+### HTTP Status Code Mapping
+
+| RouterOS Status | HTTP Code | MCP Error Code | Error Type | Retry? |
+|----------------|-----------|----------------|------------|--------|
+| Success | 200-299 | N/A | N/A | N/A |
+| Authentication failure | 401 | -32001 | AuthenticationError | No |
+| Insufficient permissions | 403 | -32002 | AuthorizationError | No |
+| Endpoint not found | 404 | -32003 | NotFoundError | No |
+| Invalid parameters | 400 | -32602 | InvalidParams | No |
+| Resource conflict | 409 | -32004 | ConflictError | No |
+| Rate limited | 429 | -32005 | RateLimitError | Yes (with backoff) |
+| Server error | 500-599 | -32000 | InternalError | Yes (3 attempts) |
+| Timeout | N/A | -32006 | TimeoutError | Yes (3 attempts) |
+| Network error | N/A | -32007 | NetworkError | Yes (3 attempts) |
+
+### RouterOS Error Response Format
+
+**RouterOS error responses typically include:**
+
+```json
+{
+  "error": "failure: item not found",
+  "detail": "No such item (*99)"
+}
+```
+
+**MCP JSON-RPC error response format:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-123",
+  "error": {
+    "code": -32003,
+    "message": "RouterOS resource not found",
+    "data": {
+      "routeros_error": "failure: item not found",
+      "routeros_detail": "No such item (*99)",
+      "device_id": "dev-001",
+      "correlation_id": "corr-456",
+      "endpoint": "/rest/ip/address/*99"
+    }
+  }
+}
+```
+
+### Error Mapping Implementation
+
+```python
+import httpx
+from typing import Any
+from enum import IntEnum
+
+class MCPErrorCode(IntEnum):
+    """MCP JSON-RPC error codes."""
+
+    # Standard JSON-RPC errors
+    PARSE_ERROR = -32700
+    INVALID_REQUEST = -32600
+    METHOD_NOT_FOUND = -32601
+    INVALID_PARAMS = -32602
+    INTERNAL_ERROR = -32603
+
+    # MCP-specific errors (custom range: -32000 to -32099)
+    ROUTEROS_INTERNAL_ERROR = -32000
+    AUTHENTICATION_ERROR = -32001
+    AUTHORIZATION_ERROR = -32002
+    NOT_FOUND_ERROR = -32003
+    CONFLICT_ERROR = -32004
+    RATE_LIMIT_ERROR = -32005
+    TIMEOUT_ERROR = -32006
+    NETWORK_ERROR = -32007
+
+
+class RouterOSError(Exception):
+    """Base exception for RouterOS integration errors."""
+
+    mcp_error_code: int = MCPErrorCode.INTERNAL_ERROR
+    retryable: bool = False
+
+    def __init__(
+        self,
+        message: str,
+        routeros_error: str | None = None,
+        device_id: str | None = None,
+        endpoint: str | None = None
+    ):
+        super().__init__(message)
+        self.message = message
+        self.routeros_error = routeros_error
+        self.device_id = device_id
+        self.endpoint = endpoint
+
+    def to_mcp_error(self, correlation_id: str | None = None) -> dict[str, Any]:
+        """Convert to MCP JSON-RPC error response."""
+        error_data = {
+            "device_id": self.device_id,
+            "endpoint": self.endpoint,
+            "correlation_id": correlation_id
+        }
+
+        if self.routeros_error:
+            error_data["routeros_error"] = self.routeros_error
+
+        return {
+            "code": self.mcp_error_code,
+            "message": self.message,
+            "data": error_data
+        }
+
+
+class RouterOSAuthenticationError(RouterOSError):
+    """Authentication failed (401)."""
+    mcp_error_code = MCPErrorCode.AUTHENTICATION_ERROR
+    retryable = False
+
+
+class RouterOSAuthorizationError(RouterOSError):
+    """Insufficient permissions (403)."""
+    mcp_error_code = MCPErrorCode.AUTHORIZATION_ERROR
+    retryable = False
+
+
+class RouterOSNotFoundError(RouterOSError):
+    """Resource not found (404)."""
+    mcp_error_code = MCPErrorCode.NOT_FOUND_ERROR
+    retryable = False
+
+
+class RouterOSConflictError(RouterOSError):
+    """Resource conflict (409)."""
+    mcp_error_code = MCPErrorCode.CONFLICT_ERROR
+    retryable = False
+
+
+class RouterOSRateLimitError(RouterOSError):
+    """Rate limit exceeded (429)."""
+    mcp_error_code = MCPErrorCode.RATE_LIMIT_ERROR
+    retryable = True
+
+
+class RouterOSServerError(RouterOSError):
+    """Server error (5xx)."""
+    mcp_error_code = MCPErrorCode.ROUTEROS_INTERNAL_ERROR
+    retryable = True
+
+
+class RouterOSTimeoutError(RouterOSError):
+    """Request timeout."""
+    mcp_error_code = MCPErrorCode.TIMEOUT_ERROR
+    retryable = True
+
+
+class RouterOSNetworkError(RouterOSError):
+    """Network connectivity error."""
+    mcp_error_code = MCPErrorCode.NETWORK_ERROR
+    retryable = True
+
+
+class RouterOSClientError(RouterOSError):
+    """Client error (4xx, excluding auth/authz/not-found)."""
+    mcp_error_code = MCPErrorCode.INVALID_PARAMS
+    retryable = False
+
+
+def map_httpx_exception_to_routeros_error(
+    exc: Exception,
+    device_id: str,
+    endpoint: str
+) -> RouterOSError:
+    """Map httpx exceptions to RouterOS error types.
+
+    Args:
+        exc: httpx exception
+        device_id: Device identifier
+        endpoint: REST endpoint path
+
+    Returns:
+        Appropriate RouterOSError subclass
+    """
+    if isinstance(exc, httpx.TimeoutException):
+        return RouterOSTimeoutError(
+            message=f"Request to {endpoint} timed out",
+            device_id=device_id,
+            endpoint=endpoint
+        )
+
+    if isinstance(exc, httpx.NetworkError):
+        return RouterOSNetworkError(
+            message=f"Network error connecting to device {device_id}",
+            device_id=device_id,
+            endpoint=endpoint
+        )
+
+    if isinstance(exc, httpx.HTTPStatusError):
+        status_code = exc.response.status_code
+
+        # Try to extract RouterOS error message
+        routeros_error = None
+        try:
+            error_body = exc.response.json()
+            routeros_error = error_body.get("error") or error_body.get("detail")
+        except Exception:
+            routeros_error = exc.response.text[:200]  # Truncate
+
+        # Map status codes to error types
+        if status_code == 401:
+            return RouterOSAuthenticationError(
+                message=f"Authentication failed for device {device_id}",
+                routeros_error=routeros_error,
+                device_id=device_id,
+                endpoint=endpoint
+            )
+
+        if status_code == 403:
+            return RouterOSAuthorizationError(
+                message=f"Insufficient permissions for {endpoint}",
+                routeros_error=routeros_error,
+                device_id=device_id,
+                endpoint=endpoint
+            )
+
+        if status_code == 404:
+            return RouterOSNotFoundError(
+                message=f"Resource not found: {endpoint}",
+                routeros_error=routeros_error,
+                device_id=device_id,
+                endpoint=endpoint
+            )
+
+        if status_code == 409:
+            return RouterOSConflictError(
+                message=f"Resource conflict at {endpoint}",
+                routeros_error=routeros_error,
+                device_id=device_id,
+                endpoint=endpoint
+            )
+
+        if status_code == 429:
+            return RouterOSRateLimitError(
+                message=f"Rate limit exceeded for device {device_id}",
+                routeros_error=routeros_error,
+                device_id=device_id,
+                endpoint=endpoint
+            )
+
+        if 500 <= status_code < 600:
+            return RouterOSServerError(
+                message=f"RouterOS server error ({status_code})",
+                routeros_error=routeros_error,
+                device_id=device_id,
+                endpoint=endpoint
+            )
+
+        if 400 <= status_code < 500:
+            return RouterOSClientError(
+                message=f"Invalid request to {endpoint} ({status_code})",
+                routeros_error=routeros_error,
+                device_id=device_id,
+                endpoint=endpoint
+            )
+
+    # Fallback for unknown errors
+    return RouterOSError(
+        message=f"Unexpected error: {str(exc)}",
+        device_id=device_id,
+        endpoint=endpoint
+    )
+```
+
+### Using Error Mapping in MCP Tools
+
+```python
+from contextvars import ContextVar
+
+correlation_id_var: ContextVar[str] = ContextVar("correlation_id")
+
+@mcp.tool()
+async def system_get_status(device_id: str) -> dict:
+    """Get system status for a RouterOS device."""
+    try:
+        # Business logic
+        client = get_routeros_client(device_id)
+        resource = await client.get("/rest/system/resource")
+        identity = await client.get("/rest/system/identity")
+
+        return {
+            "device_id": device_id,
+            "system_identity": identity["name"],
+            "uptime_seconds": parse_duration(resource["uptime"]),
+            "cpu_usage_percent": float(resource["cpu-load"]),
+            "memory_free_bytes": int(resource["free-memory"])
+        }
+
+    except RouterOSError as e:
+        # Convert to MCP JSON-RPC error
+        correlation_id = correlation_id_var.get(None)
+        raise MCPToolError(
+            error=e.to_mcp_error(correlation_id)
+        ) from e
+
+    except Exception as e:
+        # Unexpected error
+        correlation_id = correlation_id_var.get(None)
+        raise MCPToolError(
+            error={
+                "code": MCPErrorCode.INTERNAL_ERROR,
+                "message": "Unexpected error executing tool",
+                "data": {
+                    "device_id": device_id,
+                    "correlation_id": correlation_id,
+                    "error_type": type(e).__name__
+                }
+            }
+        ) from e
+```
+
+### Error Recovery Strategies
+
+**For retryable errors:**
+
+```python
+async def execute_with_retry(
+    func: Callable,
+    max_attempts: int = 3,
+    backoff_base: float = 2.0
+) -> Any:
+    """Execute function with exponential backoff retry.
+
+    Args:
+        func: Async function to execute
+        max_attempts: Maximum retry attempts
+        backoff_base: Exponential backoff base (seconds)
+
+    Returns:
+        Function result
+
+    Raises:
+        RouterOSError: If all retries exhausted
+    """
+    last_error = None
+
+    for attempt in range(max_attempts):
+        try:
+            return await func()
+
+        except RouterOSError as e:
+            last_error = e
+
+            # Don't retry non-retryable errors
+            if not e.retryable:
+                raise
+
+            # Last attempt - don't backoff
+            if attempt == max_attempts - 1:
+                raise
+
+            # Exponential backoff
+            backoff_seconds = backoff_base ** attempt
+            logger.warning(
+                f"Retryable error, attempt {attempt + 1}/{max_attempts}, "
+                f"retrying in {backoff_seconds}s",
+                extra={
+                    "error_type": type(e).__name__,
+                    "device_id": e.device_id,
+                    "endpoint": e.endpoint
+                }
+            )
+            await asyncio.sleep(backoff_seconds)
+
+    # Should never reach here, but safeguard
+    raise last_error
+```
+
+---
+
 ## SSH/CLI Integration Strategy
 
 ### When SSH is Used
 
 **SSH as last resort** for operations not available via REST API:
 
-- **Export operations**: `/export` command for full config backups
+- **Export operations**: `/export` command for full config backups (Note: Large configs may generate 10,000-100,000 tokens)
 - **Specific diagnostics**: Commands not exposed via `/rest/tool`
 - **Feature gaps**: RouterOS features without REST API parity (rare in v7.10+)
 
@@ -742,9 +1333,16 @@ def audit_ssh_command(
         rendered_command: Actual command executed
         result: Command output (may be truncated)
     """
+    from contextvars import ContextVar
+
+    # Get correlation ID from context (propagated from MCP request)
+    correlation_id_var: ContextVar[str] = ContextVar("correlation_id")
+    correlation_id = correlation_id_var.get(None)
+
     audit_event = AuditEvent(
         id=generate_id(),
         timestamp=datetime.utcnow(),
+        correlation_id=correlation_id,  # Link to MCP request
         device_id=device.id,
         environment=device.environment,
         action="SSH_COMMAND",
@@ -762,6 +1360,17 @@ def audit_ssh_command(
 
     # Save to audit_events table
     save_audit_event(audit_event)
+
+    # Also log to structured logger with correlation ID
+    logger.info(
+        "SSH command executed",
+        extra={
+            "correlation_id": correlation_id,
+            "device_id": device.id,
+            "command_id": template.id,
+            "result": audit_event.result
+        }
+    )
 ```
 
 ### SSH Command Restrictions

@@ -655,8 +655,11 @@ async def test_dns_update_on_real_device(lab_device):
 - Full MCP protocol flows (initialize, tools/list, tools/call)
 - OAuth authentication (in test IdP environment)
 - MCP client → MCP server → Domain → RouterOS
-- Resource subscriptions and notifications
-- Prompt templates and workflows
+- Resource subscriptions and notifications (Phase 2)
+- Prompt templates and workflows (Phase 2)
+- MCP transport modes (stdio, HTTP/SSE)
+- JSON-RPC 2.0 protocol compliance
+- MCP schema validation
 
 **Characteristics:**
 - Test MCP compliance
@@ -664,8 +667,9 @@ async def test_dns_update_on_real_device(lab_device):
 - Test authorization at MCP layer
 - Cover Phase 0-2 features initially, expand as phases implement
 - Use MCP Inspector for manual E2E testing
+- Test both stdio and HTTP/SSE transports
 
-**Example:**
+**Example - Basic MCP Workflow:**
 
 ```python
 # E2E MCP test
@@ -674,23 +678,381 @@ async def test_dns_update_on_real_device(lab_device):
 async def test_mcp_tool_call_full_workflow(mcp_client):
     """Test complete MCP tool invocation workflow."""
     # Initialize MCP session
-    init_response = await mcp_client.initialize()
-    assert init_response["result"]["serverInfo"]["name"] == "routeros-mcp"
-
-    # List tools
-    tools_response = await mcp_client.list_tools()
-    tool_names = [t["name"] for t in tools_response["result"]["tools"]]
-    assert "system/get-overview" in tool_names
-
-    # Call tool
-    call_response = await mcp_client.call_tool(
-        "system/get-overview",
-        {"device_id": "dev-lab-01"}
+    init_response = await mcp_client.initialize(
+        protocol_version="2024-11-05",
+        capabilities={"tools": {}},
+        client_info={"name": "test-client", "version": "1.0.0"}
     )
 
-    assert call_response["result"]["isError"] is False
-    assert "_meta" in call_response["result"]
-    assert "routeros_version" in call_response["result"]["_meta"]
+    # Verify server response
+    assert init_response["jsonrpc"] == "2.0"
+    assert "result" in init_response
+    assert init_response["result"]["protocolVersion"] == "2024-11-05"
+    assert init_response["result"]["serverInfo"]["name"] == "routeros-mcp"
+    assert "capabilities" in init_response["result"]
+    assert "tools" in init_response["result"]["capabilities"]
+
+    # List tools
+    tools_response = await mcp_client.call_method("tools/list")
+    assert "result" in tools_response
+    assert "tools" in tools_response["result"]
+
+    tool_names = [t["name"] for t in tools_response["result"]["tools"]]
+    assert "system.get_overview" in tool_names
+
+    # Validate tool schemas
+    for tool in tools_response["result"]["tools"]:
+        assert "name" in tool
+        assert "description" in tool
+        assert "inputSchema" in tool
+        # Validate JSON Schema is well-formed
+        from jsonschema import Draft7Validator
+        Draft7Validator.check_schema(tool["inputSchema"])
+
+    # Call tool
+    call_response = await mcp_client.call_method(
+        "tools/call",
+        {
+            "name": "system.get_overview",
+            "arguments": {"device_id": "dev-lab-01"}
+        }
+    )
+
+    # Verify response structure
+    assert call_response["jsonrpc"] == "2.0"
+    assert "result" in call_response
+    result = call_response["result"]
+    assert "content" in result
+    assert len(result["content"]) > 0
+    assert result["content"][0]["type"] == "text"
+
+    # Verify metadata
+    assert "_meta" in result
+    assert "estimated_tokens" in result["_meta"]
+    assert "routeros_version" in result["_meta"]
+```
+
+**MCP Protocol Compliance Tests:**
+
+```python
+# Test JSON-RPC 2.0 compliance
+@pytest.mark.e2e
+@pytest.mark.asyncio
+async def test_mcp_jsonrpc_compliance(mcp_client):
+    """Verify MCP server follows JSON-RPC 2.0 specification."""
+
+    # Test 1: Valid request returns valid response
+    response = await mcp_client.call_method("tools/list")
+    assert response["jsonrpc"] == "2.0"
+    assert "result" in response or "error" in response
+    assert "id" in response
+
+    # Test 2: Malformed JSON returns error
+    try:
+        await mcp_client.send_raw('{"invalid": "json"')
+    except Exception as e:
+        # Should get parse error
+        assert "parse error" in str(e).lower()
+
+    # Test 3: Unknown method returns error
+    response = await mcp_client.call_method("unknown/method")
+    assert "error" in response
+    assert response["error"]["code"] == -32601  # Method not found
+
+    # Test 4: Invalid params return error
+    response = await mcp_client.call_method(
+        "tools/call",
+        {"invalid": "params"}  # Missing required "name" field
+    )
+    assert "error" in response
+    assert response["error"]["code"] == -32602  # Invalid params
+
+# Test MCP initialization sequence
+@pytest.mark.e2e
+@pytest.mark.asyncio
+async def test_mcp_initialization_sequence(mcp_client):
+    """Test MCP initialization handshake."""
+
+    # Test 1: Initialize must be called first
+    # Calling tools/list before initialize should fail
+    try:
+        await mcp_client.call_method("tools/list")
+        assert False, "Should require initialization first"
+    except Exception:
+        pass  # Expected
+
+    # Test 2: Initialize with valid params
+    init_response = await mcp_client.initialize(
+        protocol_version="2024-11-05",
+        capabilities={"tools": {}},
+        client_info={"name": "test-client", "version": "1.0.0"}
+    )
+
+    assert init_response["result"]["protocolVersion"] == "2024-11-05"
+    assert "serverInfo" in init_response["result"]
+    assert init_response["result"]["serverInfo"]["name"] == "routeros-mcp"
+    assert init_response["result"]["serverInfo"]["version"]  # Has version
+
+    # Test 3: Re-initialization should be idempotent
+    init_response2 = await mcp_client.initialize(
+        protocol_version="2024-11-05",
+        capabilities={"tools": {}},
+        client_info={"name": "test-client", "version": "1.0.0"}
+    )
+    assert init_response2["result"] == init_response["result"]
+
+    # Test 4: After initialization, tools/list should work
+    tools_response = await mcp_client.call_method("tools/list")
+    assert "result" in tools_response
+
+# Test MCP capability negotiation
+@pytest.mark.e2e
+@pytest.mark.asyncio
+async def test_mcp_capability_negotiation(mcp_client):
+    """Test MCP capability negotiation between client and server."""
+
+    # Test 1: Client requests only tools capability
+    init_response = await mcp_client.initialize(
+        protocol_version="2024-11-05",
+        capabilities={"tools": {}},
+        client_info={"name": "tools-only-client", "version": "1.0.0"}
+    )
+
+    server_caps = init_response["result"]["capabilities"]
+    assert "tools" in server_caps
+
+    # Test 2: Client requests tools + resources (Phase 2)
+    init_response = await mcp_client.initialize(
+        protocol_version="2024-11-05",
+        capabilities={"tools": {}, "resources": {"subscribe": True}},
+        client_info={"name": "full-client", "version": "1.0.0"}
+    )
+
+    server_caps = init_response["result"]["capabilities"]
+    assert "tools" in server_caps
+
+    # Resources may or may not be supported depending on phase
+    if "resources" in server_caps:
+        assert "subscribe" in server_caps["resources"]
+
+# Test MCP tool schema validation
+@pytest.mark.e2e
+@pytest.mark.asyncio
+async def test_mcp_tool_schema_validation(mcp_client):
+    """Verify all MCP tool schemas are valid JSON Schema."""
+    await mcp_client.initialize()
+
+    tools_response = await mcp_client.call_method("tools/list")
+    tools = tools_response["result"]["tools"]
+
+    from jsonschema import Draft7Validator, ValidationError
+
+    for tool in tools:
+        # Verify required fields
+        assert "name" in tool, f"Tool missing 'name' field: {tool}"
+        assert "description" in tool, f"Tool {tool.get('name')} missing 'description'"
+        assert "inputSchema" in tool, f"Tool {tool['name']} missing 'inputSchema'"
+
+        # Verify schema is valid JSON Schema
+        try:
+            Draft7Validator.check_schema(tool["inputSchema"])
+        except ValidationError as e:
+            pytest.fail(f"Tool {tool['name']} has invalid JSON Schema: {e}")
+
+        # Verify schema has required properties
+        schema = tool["inputSchema"]
+        assert schema.get("type") == "object", f"Tool {tool['name']} schema must be object type"
+        assert "properties" in schema, f"Tool {tool['name']} schema must have properties"
+
+        # Verify tier metadata
+        if "_meta" in tool:
+            assert "tier" in tool["_meta"], f"Tool {tool['name']} missing tier in _meta"
+            assert tool["_meta"]["tier"] in ["free", "basic", "professional"]
+
+# Test MCP transport modes
+@pytest.mark.e2e
+@pytest.mark.parametrize("transport", ["stdio", "http"])
+async def test_mcp_transport_modes(transport):
+    """Test MCP server works with both stdio and HTTP transports."""
+
+    if transport == "stdio":
+        client = MCPClient(
+            transport="stdio",
+            command=["python", "-m", "routeros_mcp.server"],
+            env={"MCP_TRANSPORT_MODE": "stdio"}
+        )
+    else:  # http
+        client = MCPClient(
+            transport="http",
+            base_url="http://localhost:8080/mcp"
+        )
+
+    await client.initialize()
+
+    # Both transports should support same operations
+    tools_response = await client.call_method("tools/list")
+    assert "result" in tools_response
+    assert len(tools_response["result"]["tools"]) > 0
+
+    # Call a tool
+    call_response = await client.call_method(
+        "tools/call",
+        {"name": "system.get_overview", "arguments": {"device_id": "dev-lab-01"}}
+    )
+    assert "result" in call_response
+
+    await client.close()
+
+# Test MCP error responses
+@pytest.mark.e2e
+@pytest.mark.asyncio
+async def test_mcp_error_responses(mcp_client):
+    """Test MCP error response format."""
+    await mcp_client.initialize()
+
+    # Test 1: Tool not found
+    response = await mcp_client.call_method(
+        "tools/call",
+        {"name": "nonexistent.tool", "arguments": {}}
+    )
+    assert "error" in response
+    error = response["error"]
+    assert error["code"] == -32602  # Invalid params or tool not found
+    assert "message" in error
+
+    # Test 2: Invalid arguments
+    response = await mcp_client.call_method(
+        "tools/call",
+        {"name": "system.get_overview", "arguments": {}}  # Missing device_id
+    )
+    assert "error" in response
+    error = response["error"]
+    assert error["code"] in [-32602, -32603]  # Invalid params or internal error
+    assert "device_id" in error["message"].lower()
+
+    # Test 3: Device not found
+    response = await mcp_client.call_method(
+        "tools/call",
+        {"name": "system.get_overview", "arguments": {"device_id": "invalid-device"}}
+    )
+    assert "error" in response
+    error = response["error"]
+    assert "message" in error
+    assert "not found" in error["message"].lower()
+
+# Test token budget estimation
+@pytest.mark.e2e
+@pytest.mark.asyncio
+async def test_token_budget_estimation(mcp_client):
+    """Test that tool responses include estimated token counts."""
+    await mcp_client.initialize()
+
+    # Call a tool that returns data
+    response = await mcp_client.call_method(
+        "tools/call",
+        {"name": "system.get_overview", "arguments": {"device_id": "dev-lab-01"}}
+    )
+
+    result = response["result"]
+
+    # Verify estimated_tokens is present
+    assert "_meta" in result
+    assert "estimated_tokens" in result["_meta"]
+
+    # Token count should be reasonable
+    token_count = result["_meta"]["estimated_tokens"]
+    assert isinstance(token_count, int)
+    assert token_count > 0, "Token count should be positive"
+    assert token_count < 100000, "Token count seems unreasonably high"
+
+    # For small responses, token count should be < 5000 (warning threshold)
+    # Larger responses may exceed this
+    if len(str(result["content"])) < 2000:  # Small response
+        assert token_count < 5000, "Small response should have low token count"
+
+# Test MCP client compatibility matrix
+@pytest.mark.e2e
+@pytest.mark.parametrize("protocol_version", ["2024-11-05"])
+async def test_protocol_version_compatibility(protocol_version, mcp_client):
+    """Test compatibility with different MCP protocol versions."""
+
+    init_response = await mcp_client.initialize(
+        protocol_version=protocol_version,
+        capabilities={"tools": {}},
+        client_info={"name": "test-client", "version": "1.0.0"}
+    )
+
+    # Server should accept this protocol version
+    assert "result" in init_response
+    assert init_response["result"]["protocolVersion"] == protocol_version
+```
+
+**MCP-Specific Test Fixtures:**
+
+```python
+# conftest.py - MCP test fixtures
+
+import pytest
+from routeros_mcp.mcp.client import MCPClient
+from routeros_mcp.mcp.server import MCPServer
+
+@pytest.fixture
+async def mcp_client():
+    """Create MCP client for E2E testing."""
+    client = MCPClient(
+        transport="stdio",
+        command=["python", "-m", "routeros_mcp.server"],
+        env={
+            "MCP_ENV": "test",
+            "DATABASE_URL": "sqlite:///:memory:",
+            "MCP_TRANSPORT_MODE": "stdio"
+        }
+    )
+
+    yield client
+
+    await client.close()
+
+@pytest.fixture
+async def mock_mcp_server():
+    """Create mock MCP server for testing."""
+    server = MCPServer(
+        routeros_client=MockRouterOSClient(),
+        device_service=MockDeviceService(),
+        auth_service=MockAuthService()
+    )
+
+    await server.start()
+
+    yield server
+
+    await server.stop()
+
+@pytest.fixture
+def mock_tool_schema():
+    """Provide valid MCP tool schema for testing."""
+    return {
+        "name": "test.example_tool",
+        "description": "Example tool for testing",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "device_id": {
+                    "type": "string",
+                    "description": "Device identifier"
+                },
+                "parameter": {
+                    "type": "string",
+                    "description": "Example parameter"
+                }
+            },
+            "required": ["device_id"]
+        },
+        "_meta": {
+            "tier": "free",
+            "estimated_tokens": 500
+        }
+    }
 ```
 
 ---
@@ -1397,6 +1759,624 @@ async def monitor_fleet_health():
 
 ---
 
+## MCP-Specific Safety Nets
+
+### MCP Protocol-Level Safety
+
+**Rate Limiting for Tool Calls:**
+
+```python
+# Rate limiting for tool execution
+from datetime import datetime, timedelta
+from collections import defaultdict
+
+class MCPRateLimiter:
+    """Rate limiter for MCP tool calls."""
+
+    def __init__(self):
+        self.call_counts = defaultdict(list)  # user_id -> list of timestamps
+        self.limits = {
+            "free": 100,  # 100 calls per hour
+            "basic": 500,
+            "professional": 2000
+        }
+
+    async def check_rate_limit(self, user_id: str, tool_tier: str):
+        """Check if user has exceeded rate limit for tier."""
+        limit = self.limits.get(tool_tier, 100)
+        now = datetime.utcnow()
+        one_hour_ago = now - timedelta(hours=1)
+
+        # Remove old timestamps
+        self.call_counts[user_id] = [
+            ts for ts in self.call_counts[user_id]
+            if ts > one_hour_ago
+        ]
+
+        # Check limit
+        if len(self.call_counts[user_id]) >= limit:
+            raise RateLimitExceededError(
+                f"Rate limit exceeded: {limit} calls per hour for {tool_tier} tier"
+            )
+
+        # Record this call
+        self.call_counts[user_id].append(now)
+
+# Test rate limiting
+@pytest.mark.asyncio
+async def test_rate_limiting_enforced(mcp_client, rate_limiter):
+    """Test that rate limiting prevents excessive tool calls."""
+    await mcp_client.initialize()
+
+    # Make calls up to limit
+    for i in range(100):
+        response = await mcp_client.call_method(
+            "tools/call",
+            {"name": "system.get_overview", "arguments": {"device_id": "dev-001"}}
+        )
+        assert "result" in response
+
+    # Next call should fail
+    response = await mcp_client.call_method(
+        "tools/call",
+        {"name": "system.get_overview", "arguments": {"device_id": "dev-001"}}
+    )
+    assert "error" in response
+    assert "rate limit" in response["error"]["message"].lower()
+```
+
+**Concurrent Tool Execution Limits:**
+
+```python
+# Limit concurrent tool executions
+import asyncio
+from asyncio import Semaphore
+
+class MCPConcurrencyLimiter:
+    """Limit concurrent tool executions."""
+
+    def __init__(self, max_concurrent: int = 10):
+        self.semaphore = Semaphore(max_concurrent)
+        self.active_tools = {}
+
+    async def execute_with_limit(self, tool_name: str, executor_func, *args, **kwargs):
+        """Execute tool with concurrency limit."""
+        async with self.semaphore:
+            # Record active execution
+            execution_id = str(uuid.uuid4())
+            self.active_tools[execution_id] = {
+                "tool_name": tool_name,
+                "started_at": datetime.utcnow()
+            }
+
+            try:
+                result = await executor_func(*args, **kwargs)
+                return result
+            finally:
+                # Remove from active
+                del self.active_tools[execution_id]
+
+# Test concurrency limits
+@pytest.mark.asyncio
+async def test_concurrent_execution_limit(mcp_server):
+    """Test that server limits concurrent tool executions."""
+    limiter = MCPConcurrencyLimiter(max_concurrent=5)
+
+    # Start 10 concurrent tool calls
+    tasks = []
+    for i in range(10):
+        task = limiter.execute_with_limit(
+            "system.get_overview",
+            slow_tool_executor,  # Takes 2 seconds
+            device_id=f"dev-{i:03d}"
+        )
+        tasks.append(task)
+
+    # Only 5 should run concurrently
+    results = await asyncio.gather(*tasks)
+    assert len(results) == 10
+
+    # Verify max 5 concurrent
+    assert max(len(limiter.active_tools) for _ in range(10)) <= 5
+```
+
+**Malformed Request Handling:**
+
+```python
+# Test malformed MCP requests
+@pytest.mark.e2e
+@pytest.mark.asyncio
+async def test_malformed_request_handling(mcp_client):
+    """Test that server gracefully handles malformed requests."""
+
+    test_cases = [
+        # Missing jsonrpc field
+        ('{"method": "tools/list", "id": 1}', -32600),  # Invalid Request
+
+        # Invalid JSON
+        ('{"incomplete": ', -32700),  # Parse error
+
+        # Wrong jsonrpc version
+        ('{"jsonrpc": "1.0", "method": "tools/list", "id": 1}', -32600),
+
+        # Missing method field
+        ('{"jsonrpc": "2.0", "id": 1}', -32600),
+
+        # Invalid method type
+        ('{"jsonrpc": "2.0", "method": 123, "id": 1}', -32600),
+
+        # Params not object/array
+        ('{"jsonrpc": "2.0", "method": "tools/list", "params": "invalid", "id": 1}', -32600)
+    ]
+
+    for malformed_request, expected_code in test_cases:
+        try:
+            response = await mcp_client.send_raw(malformed_request)
+            # Should return error response
+            assert "error" in response
+            assert response["error"]["code"] == expected_code
+        except Exception:
+            # Connection may be closed on invalid JSON
+            pass
+```
+
+**Timeout Protection:**
+
+```python
+# Test tool execution timeouts
+@pytest.mark.asyncio
+async def test_tool_execution_timeout(mcp_client):
+    """Test that tool executions timeout after maximum duration."""
+
+    # Configure timeout
+    mcp_server.config.TOOL_EXECUTION_TIMEOUT_SECONDS = 30
+
+    # Call a tool that takes too long (mocked to sleep 60 seconds)
+    with patch('routeros_mcp.tools.system.get_overview') as mock_tool:
+        async def slow_execution(*args, **kwargs):
+            await asyncio.sleep(60)
+            return {"result": "never reached"}
+
+        mock_tool.side_effect = slow_execution
+
+        response = await mcp_client.call_method(
+            "tools/call",
+            {"name": "system.get_overview", "arguments": {"device_id": "dev-001"}}
+        )
+
+        # Should timeout and return error
+        assert "error" in response
+        assert "timeout" in response["error"]["message"].lower()
+```
+
+### MCP Client Compatibility Testing
+
+**Client Compatibility Matrix:**
+
+```markdown
+| MCP Client | Protocol Version | Tools | Resources | Prompts | Tested |
+|------------|-----------------|-------|-----------|---------|--------|
+| Claude Desktop | 2024-11-05 | ✅ | ✅ | ✅ | ✅ |
+| MCP Inspector | 2024-11-05 | ✅ | ✅ | ✅ | ✅ |
+| Custom Client | 2024-11-05 | ✅ | ⚠️ Phase 2 | ⚠️ Phase 2 | ✅ |
+```
+
+**Client Compatibility Tests:**
+
+```python
+# Test against different MCP clients
+@pytest.mark.e2e
+@pytest.mark.parametrize("client_name,client_version", [
+    ("claude-desktop", "1.0.0"),
+    ("mcp-inspector", "0.1.0"),
+    ("custom-client", "1.0.0")
+])
+async def test_client_compatibility(client_name, client_version):
+    """Test MCP server works with different clients."""
+
+    client = MCPClient(
+        transport="stdio",
+        command=["python", "-m", "routeros_mcp.server"]
+    )
+
+    # Initialize with client info
+    init_response = await client.initialize(
+        protocol_version="2024-11-05",
+        capabilities={"tools": {}},
+        client_info={"name": client_name, "version": client_version}
+    )
+
+    # Server should accept any client
+    assert "result" in init_response
+    assert init_response["result"]["serverInfo"]["name"] == "routeros-mcp"
+
+    # Tools should work regardless of client
+    tools_response = await client.call_method("tools/list")
+    assert len(tools_response["result"]["tools"]) > 0
+
+    await client.close()
+```
+
+---
+
+## LLM-in-the-Loop Testing Strategy
+
+### Overview
+
+Following MCP best practices, test not just functionality but also **LLM usability** - whether AI models can discover, understand, and correctly use the tools.
+
+### Tool Selection Testing
+
+**Purpose:** Verify LLMs select the correct tool for user intents
+
+```python
+# tests/llm/test_tool_selection.py
+
+import pytest
+from routeros_mcp.testing.llm_simulator import LLMSimulator
+
+@pytest.mark.asyncio
+async def test_llm_selects_correct_tool_for_device_list():
+    """Verify LLM chooses registry/list for 'show me all devices'."""
+    simulator = LLMSimulator()
+
+    user_intent = "Show me all devices"
+    selected_tool = await simulator.select_tool(user_intent, available_tools=all_mcp_tools)
+
+    assert selected_tool.name == "registry/list"
+    assert "device_id" not in selected_tool.parameters  # Should not ask for device_id
+
+
+@pytest.mark.asyncio
+async def test_llm_selects_correct_tool_for_interface_stats():
+    """Verify LLM chooses interface/list for interface information."""
+    simulator = LLMSimulator()
+
+    user_intent = "What interfaces does dev-lab-01 have?"
+    selected_tool = await simulator.select_tool(user_intent, available_tools=all_mcp_tools)
+
+    assert selected_tool.name == "interface/list"
+    assert selected_tool.parameters["device_id"] == "dev-lab-01"
+```
+
+### Tool Description Quality Testing
+
+**Purpose:** Validate intent-based descriptions guide LLM correctly
+
+```python
+@pytest.mark.asyncio
+async def test_tool_description_clarity():
+    """Verify tool descriptions are clear and intent-based."""
+    tools = await mcp_server.list_tools()
+
+    for tool in tools:
+        description = tool["description"]
+
+        # Must include "Use when" guidance
+        assert "Use when:" in description or "use when" in description.lower(), \
+            f"Tool {tool['name']} missing 'Use when' guidance"
+
+        # Must not be overly verbose (token-conscious)
+        assert len(description) < 2000, \
+            f"Tool {tool['name']} description too long ({len(description)} chars)"
+
+        # Must include return value description
+        assert "Returns:" in description or "returns" in description.lower(), \
+            f"Tool {tool['name']} missing return value description"
+```
+
+### Synthetic Workload Generation
+
+**Purpose:** Generate realistic user scenarios to test tool chain execution
+
+```python
+# tests/llm/test_workflows.py
+
+@pytest.mark.asyncio
+async def test_workflow_device_onboarding():
+    """Test complete device onboarding workflow."""
+    simulator = LLMSimulator()
+
+    user_request = "Add a new lab router at 192.168.1.10 named lab-router-01"
+
+    # LLM should execute this tool chain:
+    expected_chain = [
+        ("registry/add", {"name": "lab-router-01", "management_address": "192.168.1.10:443", ...}),
+        ("system/get-overview", {"device_id": "lab-router-01"}),
+        ("health/check", {"device_id": "lab-router-01"})
+    ]
+
+    actual_chain = await simulator.execute_workflow(user_request, mcp_server)
+
+    assert len(actual_chain) == len(expected_chain)
+    for (expected_tool, _), (actual_tool, _) in zip(expected_chain, actual_chain):
+        assert actual_tool == expected_tool
+
+
+@pytest.mark.asyncio
+async def test_workflow_troubleshooting():
+    """Test troubleshooting workflow."""
+    simulator = LLMSimulator()
+
+    user_request = "Why is dev-lab-01 not responding?"
+
+    # Expected tool chain for troubleshooting
+    actual_chain = await simulator.execute_workflow(user_request, mcp_server)
+
+    # Should check health first
+    assert actual_chain[0][0] == "health/get"
+
+    # Should check device overview
+    assert "system/get-overview" in [tool for tool, _ in actual_chain]
+
+    # Should not attempt writes (tier enforcement)
+    write_tools = ["interface/configure", "system/reboot", "config/apply"]
+    for tool, _ in actual_chain:
+        assert tool not in write_tools
+```
+
+### Tool Parameter Validation Testing
+
+**Purpose:** Verify LLMs provide valid parameters based on schema
+
+```python
+@pytest.mark.asyncio
+async def test_llm_respects_parameter_types():
+    """Verify LLM provides correctly typed parameters."""
+    simulator = LLMSimulator()
+
+    user_request = "List interfaces on dev-lab-01"
+
+    tool_call = await simulator.select_tool_with_params(user_request, all_mcp_tools)
+
+    # Verify correct types
+    assert isinstance(tool_call.parameters["device_id"], str)
+    if "disabled" in tool_call.parameters:
+        assert isinstance(tool_call.parameters["disabled"], bool)
+
+
+@pytest.mark.asyncio
+async def test_llm_handles_required_vs_optional_params():
+    """Verify LLM distinguishes required from optional parameters."""
+    simulator = LLMSimulator()
+
+    user_request = "Check health of dev-lab-01"
+
+    tool_call = await simulator.select_tool_with_params(user_request, all_mcp_tools)
+
+    # Required parameter must be present
+    assert "device_id" in tool_call.parameters
+
+    # Optional parameters may or may not be present
+    if "include_history" in tool_call.parameters:
+        assert isinstance(tool_call.parameters["include_history"], bool)
+```
+
+### Error Recovery Testing
+
+**Purpose:** Verify LLMs can recover from errors with actionable error messages
+
+```python
+@pytest.mark.asyncio
+async def test_llm_recovers_from_not_found_error():
+    """Verify LLM handles device not found and retries correctly."""
+    simulator = LLMSimulator()
+
+    # Initial request with wrong device ID
+    user_request = "Get overview of dev-nonexistent"
+
+    result = await simulator.execute_with_recovery(user_request, mcp_server)
+
+    # Should get NOT_FOUND error with suggestions
+    assert result.first_error.code == -32003
+    assert "registry/list" in result.first_error.suggestions
+
+    # Should recover by listing available devices
+    assert result.recovery_action == "list_devices"
+    assert result.second_attempt_tool == "registry/list"
+
+    # Should succeed on second attempt with correct device
+    assert result.final_success is True
+
+
+@pytest.mark.asyncio
+async def test_llm_recovers_from_forbidden_error():
+    """Verify LLM handles tier permission errors."""
+    simulator = LLMSimulator()
+
+    user_request = "Reboot dev-prod-01"
+
+    result = await simulator.execute_with_recovery(user_request, mcp_server)
+
+    # Should get FORBIDDEN error
+    assert result.first_error.code == -32002
+    assert "allow_advanced_writes" in result.first_error.details
+
+    # Should understand it needs different device or permission change
+    assert result.recovery_action in ["choose_different_device", "request_permission"]
+```
+
+### Prompt Engineering Validation
+
+**Purpose:** Validate prompts guide LLMs through complex workflows
+
+```python
+@pytest.mark.asyncio
+async def test_prompt_guides_firmware_upgrade_workflow():
+    """Verify firmware upgrade prompt provides clear guidance."""
+    simulator = LLMSimulator()
+
+    prompt = await mcp_server.get_prompt("device_firmware_upgrade")
+
+    # Simulate LLM following prompt
+    result = await simulator.follow_prompt(
+        prompt=prompt,
+        context={"device_id": "dev-lab-01"},
+        mcp_server=mcp_server
+    )
+
+    # Verify workflow steps executed in correct order
+    expected_steps = [
+        "snapshot/create-pre-upgrade",
+        "system/get-packages",
+        "firmware/check-compatibility",
+        "plan/create",
+        "plan/apply"
+    ]
+
+    assert len(result.steps) == len(expected_steps)
+    for expected, actual in zip(expected_steps, result.steps):
+        assert expected in actual.tool_name
+
+
+@pytest.mark.asyncio
+async def test_prompt_includes_safety_warnings():
+    """Verify prompts include appropriate safety warnings."""
+    simulator = LLMSimulator()
+
+    prompt = await mcp_server.get_prompt("device_firmware_upgrade")
+
+    # Check for safety warnings in prompt
+    assert "backup" in prompt.content.lower()
+    assert "lab" in prompt.content.lower() or "testing" in prompt.content.lower()
+    assert "rollback" in prompt.content.lower()
+
+    # Verify LLM respects warnings
+    result = await simulator.follow_prompt(prompt, {"device_id": "dev-prod-01"})
+
+    # Should create backup before upgrade
+    assert any("snapshot/create" in step.tool_name for step in result.steps)
+```
+
+### Tool Description Metrics
+
+Track and improve tool description quality:
+
+```python
+# tests/llm/test_description_metrics.py
+
+@pytest.mark.asyncio
+async def test_tool_discovery_accuracy():
+    """Measure how often LLM selects correct tool for intent."""
+    simulator = LLMSimulator()
+
+    test_scenarios = [
+        ("Show all devices", "registry/list"),
+        ("Get health of dev-lab-01", "health/get"),
+        ("List interfaces on dev-lab-01", "interface/list"),
+        ("Check logs on dev-lab-01", "system/get-logs"),
+        # ... 40+ more scenarios
+    ]
+
+    correct = 0
+    total = len(test_scenarios)
+
+    for user_intent, expected_tool in test_scenarios:
+        selected_tool = await simulator.select_tool(user_intent, all_mcp_tools)
+        if selected_tool.name == expected_tool:
+            correct += 1
+
+    accuracy = correct / total
+    assert accuracy >= 0.90, f"Tool selection accuracy {accuracy:.2%} below 90% threshold"
+
+
+@pytest.mark.asyncio
+async def test_parameter_inference_accuracy():
+    """Measure how often LLM provides correct parameters."""
+    simulator = LLMSimulator()
+
+    test_scenarios = [
+        ("Get health of dev-lab-01", {"device_id": "dev-lab-01"}),
+        ("List disabled interfaces on dev-lab-01", {"device_id": "dev-lab-01", "disabled": True}),
+        # ... more scenarios
+    ]
+
+    correct = 0
+    total = len(test_scenarios)
+
+    for user_intent, expected_params in test_scenarios:
+        tool_call = await simulator.select_tool_with_params(user_intent, all_mcp_tools)
+        if tool_call.parameters == expected_params:
+            correct += 1
+
+    accuracy = correct / total
+    assert accuracy >= 0.85, f"Parameter inference accuracy {accuracy:.2%} below 85% threshold"
+```
+
+### LLM Testing Infrastructure
+
+```python
+# routeros_mcp/testing/llm_simulator.py
+
+from typing import List, Dict, Any
+import anthropic
+
+class LLMSimulator:
+    """Simulate LLM behavior for testing MCP tools.
+
+    Uses real LLM (Claude) to test tool selection and usage.
+    """
+
+    def __init__(self, model: str = "claude-3-5-sonnet-20241022"):
+        self.client = anthropic.Anthropic()
+        self.model = model
+
+    async def select_tool(self, user_intent: str, available_tools: List[Dict]) -> Dict:
+        """Let LLM select tool for user intent."""
+        response = await self.client.messages.create(
+            model=self.model,
+            max_tokens=1024,
+            tools=available_tools,
+            messages=[{"role": "user", "content": user_intent}]
+        )
+
+        # Extract tool selection from response
+        if response.stop_reason == "tool_use":
+            tool_use = next(block for block in response.content if block.type == "tool_use")
+            return {
+                "name": tool_use.name,
+                "parameters": tool_use.input
+            }
+
+        raise ValueError(f"LLM did not select a tool. Response: {response}")
+
+    async def execute_workflow(
+        self,
+        user_request: str,
+        mcp_server
+    ) -> List[tuple[str, Dict[str, Any]]]:
+        """Execute complete workflow with tool chaining."""
+        # Implementation: Let LLM execute multi-step workflow
+        pass
+
+    async def execute_with_recovery(self, user_request: str, mcp_server):
+        """Execute request and test error recovery."""
+        # Implementation: Test error handling and recovery
+        pass
+```
+
+### LLM Testing Best Practices
+
+1. **Use Real LLMs**: Test with actual Claude/GPT models, not mocks
+2. **Measure Metrics**: Track tool selection accuracy, parameter accuracy, workflow success rate
+3. **Iterate on Descriptions**: Improve descriptions based on LLM behavior
+4. **Test Error Recovery**: Verify LLMs understand actionable error messages
+5. **Validate Prompts**: Ensure prompts guide LLMs through complex workflows
+6. **Test Multiple Models**: Validate across Claude, GPT-4, and other LLMs
+
+### Implementation Checklist
+
+- [ ] LLM simulator implemented for testing
+- [ ] Tool selection accuracy tests (target: 90%+)
+- [ ] Parameter inference accuracy tests (target: 85%+)
+- [ ] Workflow execution tests for common scenarios
+- [ ] Error recovery tests with actionable error messages
+- [ ] Prompt engineering validation tests
+- [ ] Description quality metrics tracked
+- [ ] Multi-model compatibility tests (Claude, GPT-4, Mistral)
+
+---
+
 ## Summary: TDD and Testing Best Practices
 
 ### TDD Workflow Checklist
@@ -1418,11 +2398,50 @@ async def monitor_fleet_health():
 ✅ **Integration tests** - Components working together
 ✅ **Lab tests** - Real RouterOS devices
 ✅ **E2E tests** - Complete MCP workflows
-✅ **Mocks** - External dependencies only
+✅ **MCP protocol tests** - JSON-RPC 2.0 compliance, capability negotiation, schema validation
+✅ **MCP transport tests** - Stdio and HTTP/SSE modes
+✅ **MCP safety tests** - Rate limiting, concurrency limits, timeouts, malformed requests
+✅ **Client compatibility** - Multiple MCP clients, protocol versions
+✅ **Mocks** - External dependencies only (RouterOS, OAuth, MCP clients)
 ✅ **Coverage** - 85% overall, 100% core modules
 ✅ **TDD** - Test-first development
-✅ **Regression** - Version compatibility matrix
+✅ **Regression** - RouterOS version compatibility matrix
 ✅ **Smoke tests** - Post-deployment validation
 ✅ **Health checks** - Continuous monitoring
 
-**This testing strategy ensures confidence in correctness, safety, and reliability of the RouterOS MCP service.**
+### MCP-Specific Testing Highlights
+
+**MCP Protocol Compliance:**
+- JSON-RPC 2.0 message format validation
+- Initialize handshake sequencing
+- Capability negotiation (tools, resources, prompts)
+- Error code mapping (-32600 to -32603)
+- Tool schema validation (JSON Schema Draft 7)
+
+**MCP Tool Testing:**
+- Schema validation for all tools
+- Token estimation accuracy
+- Tool tier enforcement (free, basic, professional)
+- Metadata validation (tier, estimated_tokens)
+- Input validation and error responses
+
+**MCP Transport Testing:**
+- Stdio transport (process lifecycle, stdio buffering)
+- HTTP/SSE transport (concurrent connections, session management)
+- Transport mode switching
+- Graceful degradation
+
+**MCP Safety Nets:**
+- Rate limiting (per-tier limits)
+- Concurrent execution limits (prevent resource exhaustion)
+- Tool execution timeouts (prevent hanging)
+- Malformed request handling (parse errors, invalid JSON-RPC)
+- Token budget warnings (prevent LLM context overflow)
+
+**Cross-references:**
+- See [Doc 04 (MCP Tools Interface)](04-mcp-tools-interface-and-json-schema-specification.md) for tool JSON schemas
+- See [Doc 08 (Observability)](08-observability-logging-metrics-and-diagnostics.md) for test metrics and monitoring
+- See [Doc 09 (Operations)](09-operations-deployment-self-update-and-runbook.md) for CI/CD testing integration
+- See [Doc 00 (Overview)](00-overview-and-objectives.md) for MCP protocol architecture
+
+**This comprehensive testing strategy ensures confidence in correctness, safety, and reliability of the RouterOS MCP service across all MCP protocol features and operational scenarios.**

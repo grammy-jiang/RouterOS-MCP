@@ -25,9 +25,117 @@ Describe the high-level architecture, components, and deployment topology of the
 
 ### Non-goals
 
-- Multi-tenant isolation in a single instance (v1 is single-tenant per deployment).  
-- Full network management or orchestration beyond RouterOS devices in scope.  
-- Providing a general “RouterOS-as-a-service” or full CLI abstraction layer; this is focused on carefully curated operations.
+- Multi-tenant isolation in a single instance (v1 is single-tenant per deployment).
+- Full network management or orchestration beyond RouterOS devices in scope.
+- Providing a general "RouterOS-as-a-service" or full CLI abstraction layer; this is focused on carefully curated operations.
+
+---
+
+## Phased Architecture Evolution
+
+The MCP service architecture evolves across phases, with careful staging of complexity and risk:
+
+### Phase 1: Foundation (Tools + STDIO + OS-Level Security)
+
+**Goal:** Universal MCP client compatibility with safe read/write operations
+
+**Architecture Components:**
+- **Transport:** STDIO only (stdin/stdout for protocol, stderr for logs)
+- **MCP Primitives:** Tools only (40 tools across fundamental/advanced/professional tiers)
+- **Security:** OS-level isolation (process sandboxing, file permissions)
+- **Deployment:** Single Linux process, systemd service or container
+- **Database:** Postgres for devices, plans, audit logs
+- **Background Jobs:** APScheduler for health checks and metrics collection
+
+**What's Included:**
+- Device registration and lifecycle management
+- Read-only fundamental tools (inventory, health, diagnostics)
+- Advanced tools for low-risk single-device writes (DNS/NTP, identity, comments)
+- Professional tools for multi-device plan/apply workflows
+- Phase-1 fallback tools for resource data (device health, configs)
+- Audit logging for all writes and sensitive reads
+
+**What's NOT Included:**
+- Resources and Prompts (deferred to Phase 2)
+- HTTP transport for MCP (deferred to Phase 4)
+- OAuth flows (OIDC token validation only, no OAuth Authorization Code flow)
+
+**Client Compatibility:** 100% of MCP clients (tools-only and full MCP clients)
+
+---
+
+### Phase 2: Enhanced Workflows (Resources + Prompts)
+
+**Goal:** Richer user experience for capable MCP clients
+
+**Architecture Additions:**
+- **MCP Primitives:**
+  - **Resources:** 12 resource URIs (device health, configs, fleet summaries)
+  - **Prompts:** 8 workflow templates (dns_ntp_rollout, troubleshoot_dns_ntp, etc.)
+- **Infrastructure:**
+  - **Resource Cache:** In-memory cache with TTL for device health/config
+  - **Background Refresh:** Periodic job to update resource cache (every 60s)
+  - **Prompt Loader:** YAML parser + Jinja2 template renderer
+- **API Layer:**
+  - `resources/list` handler (discovery)
+  - `resources/read` handler (read from cache)
+  - `prompts/list` handler (enumerate available prompts)
+  - `prompts/get` handler (render template with arguments)
+
+**What's Included:**
+- Efficient resource access for capable clients (Claude, VS Code)
+- Workflow guidance via prompts (DNS/NTP rollout, troubleshooting)
+- Backward compatibility: Phase-1 fallback tools still available for tools-only clients
+
+**What's NOT Included:**
+- HTTP transport (still STDIO only)
+- OAuth Authorization Code flow (still token validation only)
+
+**Client Compatibility:**
+- **Full MCP clients** (40%): Get resources + prompts + tools
+- **Tools-only clients** (60%): Get tools only (including fallbacks)
+
+---
+
+### Phase 4: Remote/Enterprise (HTTP Transport + OAuth)
+
+**Goal:** Support remote MCP clients and OAuth-based authentication flows
+
+**Architecture Additions:**
+- **Transport:**
+  - **HTTP/SSE:** MCP protocol over HTTP (in addition to STDIO)
+  - **WebSocket (optional):** For bidirectional streaming
+- **Security:**
+  - **OAuth Authorization Code + PKCE:** Full OAuth flow for browser-based clients
+  - **Token endpoint:** Issue short-lived access tokens for MCP API
+- **Deployment:**
+  - Cloudflare Tunnel can terminate at HTTP endpoint (not just forward STDIO)
+  - Load balancer can distribute HTTP/SSE requests across instances
+
+**What's Included:**
+- MCP protocol over HTTP for remote clients (not just local STDIO)
+- OAuth login flow for admin UI and remote MCP clients
+- Approval token generation UI (for professional tools)
+
+**What's Unchanged:**
+- STDIO transport still supported (for backward compatibility)
+- All Phase 1 and Phase 2 features remain
+
+**Client Compatibility:** 100% (STDIO or HTTP/SSE, client choice)
+
+---
+
+### Architectural Invariants (Across All Phases)
+
+These principles remain constant regardless of phase:
+
+1. **3-Layer Architecture:** API → Domain → Infrastructure separation never violated
+2. **Zero Trust for Clients:** All safety controls enforced server-side, never client-side
+3. **Single Responsibility:** MCP server manages RouterOS only (no scope creep)
+4. **Stateless API Layer:** Horizontal scaling always possible (state in DB/cache)
+5. **Audit Everything:** All writes and sensitive reads logged with correlation ID
+6. **Environment/Capability Flags:** Always enforced, even for admin users
+7. **Per-Device Rate Limiting:** RouterOS clients never overload devices
 
 ---
 
@@ -35,12 +143,132 @@ Describe the high-level architecture, components, and deployment topology of the
 
 At a high level, the system is split into three layers:
 
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      EXTERNAL SYSTEMS                            │
+├──────────────┬──────────────┬──────────────┬────────────────────┤
+│ MCP Clients  │ RouterOS     │ OIDC Provider│ Cloudflare Tunnel  │
+│ (ChatGPT,    │ Devices      │ (Azure AD,   │                    │
+│  Claude,     │ (v7 REST API)│  Okta)       │                    │
+│  VS Code)    │              │              │                    │
+└──────┬───────┴──────────────┴──────┬───────┴─────────┬──────────┘
+       │ STDIO (Phase 1)             │ HTTPS           │ HTTPS
+       │ HTTP/SSE (Phase 4)          │                 │
+       ▼                              ▼                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    MCP SERVER (Linux Host/Container)             │
+│ ┌─────────────────────────────────────────────────────────────┐ │
+│ │                     API & MCP LAYER                         │ │
+│ │  ┌──────────────┐  ┌─────────────┐  ┌──────────────┐       │ │
+│ │  │ MCP Protocol │  │  HTTP API   │  │ Auth Handler │       │ │
+│ │  │ (STDIO/HTTP) │  │ (Admin/UI)  │  │ (OIDC Token) │       │ │
+│ │  │              │  │             │  │              │       │ │
+│ │  │ - Tools      │  │ - Devices   │  │ - Validate   │       │ │
+│ │  │ - Resources  │  │ - Plans     │  │ - Map roles  │       │ │
+│ │  │ - Prompts    │  │ - Approvals │  │ - Scope      │       │ │
+│ │  └──────┬───────┘  └──────┬──────┘  └──────┬───────┘       │ │
+│ │         │                 │                 │               │ │
+│ │         └─────────────────┼─────────────────┘               │ │
+│ └───────────────────────────┼─────────────────────────────────┘ │
+│                             ▼                                   │
+│ ┌─────────────────────────────────────────────────────────────┐ │
+│ │                   DOMAIN & SERVICE LAYER                    │ │
+│ │  ┌──────────────┐ ┌─────────────┐ ┌──────────────┐         │ │
+│ │  │   Device     │ │  RouterOS   │ │  Plan/Job    │         │ │
+│ │  │   Registry   │ │  Operations │ │ Orchestration│         │ │
+│ │  │              │ │             │ │              │         │ │
+│ │  │ - Manage     │ │ - DNS/NTP   │ │ - Plan gen   │         │ │
+│ │  │   devices    │ │ - System    │ │ - Multi-dev  │         │ │
+│ │  │ - Env/caps   │ │ - Interface │ │ - Rollback   │         │ │
+│ │  │ - Credentials│ │ - Firewall  │ │              │         │ │
+│ │  └──────┬───────┘ └──────┬──────┘ └──────┬───────┘         │ │
+│ │         │                │                │                 │ │
+│ │  ┌──────┴────────────────┴────────────────┴──────┐          │ │
+│ │  │          Audit & Policy Service               │          │ │
+│ │  │  - Environment/capability checks              │          │ │
+│ │  │  - Audit event logging                        │          │ │
+│ │  └───────────────────────┬───────────────────────┘          │ │
+│ └──────────────────────────┼──────────────────────────────────┘ │
+│                            ▼                                    │
+│ ┌─────────────────────────────────────────────────────────────┐ │
+│ │                   INFRASTRUCTURE LAYER                      │ │
+│ │  ┌──────────────┐ ┌─────────────┐ ┌──────────────┐         │ │
+│ │  │  RouterOS    │ │ Persistence │ │ Background   │         │ │
+│ │  │  REST/SSH    │ │  (Database) │ │  Jobs        │         │ │
+│ │  │   Clients    │ │             │ │              │         │ │
+│ │  │              │ │ - Devices   │ │ - Health     │         │ │
+│ │  │ - Connection │ │ - Plans     │ │   checks     │         │ │
+│ │  │   pooling    │ │ - Audit log │ │ - Metrics    │         │ │
+│ │  │ - Retries    │ │ - Snapshots │ │ - Cache      │         │ │
+│ │  │ - Rate limit │ │ - Encrypted │ │   refresh    │         │ │
+│ │  │              │ │   credentials│ │              │         │ │
+│ │  └──────────────┘ └─────────────┘ └──────────────┘         │ │
+│ │                                                              │ │
+│ │  ┌──────────────────────────────────────────────┐           │ │
+│ │  │        Observability Stack                   │           │ │
+│ │  │  - Prometheus metrics                        │           │ │
+│ │  │  - Structured logging (stderr)               │           │ │
+│ │  │  - OpenTelemetry traces                      │           │ │
+│ │  └──────────────────────────────────────────────┘           │ │
+│ └─────────────────────────────────────────────────────────────┘ │
+└───────────────────────────────────────────────────────────────── ┘
+        │                            │                     │
+        ▼                            ▼                     ▼
+  ┌──────────┐               ┌──────────┐         ┌──────────────┐
+  │ Postgres │               │Prometheus│         │ Log Collector│
+  │ Database │               │  Metrics │         │   (stderr)   │
+  └──────────┘               └──────────┘         └──────────────┘
+
+Legend:
+  ──────▶  Data flow
+  ───────  Layer boundary
+  ┌─────┐  Component
+```
+
+**Request Flow Example (numbered steps):**
+
+1. **MCP Client** sends `tools/call` request with `tool="dns/get-status"` via STDIO
+2. **API Layer** receives request, validates OIDC token, checks user role
+3. **API Layer** dispatches to **Domain Layer** `dns_service.get_status(device_id)`
+4. **Domain Layer** checks **Audit Service** for environment/capability flags
+5. **Domain Layer** calls **Infrastructure Layer** RouterOS REST client
+6. **RouterOS Client** makes HTTP GET to `https://router-01/rest/ip/dns`
+7. **RouterOS** returns DNS configuration JSON
+8. **Infrastructure Layer** maps RouterOS response to domain model
+9. **Domain Layer** writes audit event via **Audit Service**
+10. **API Layer** sends JSON-RPC response via stdout to **MCP Client**
+
+---
+
 1. **API & MCP layer**
-   - **MCP server / HTTP API**:  
-     - Exposes MCP tools and possibly a REST/JSON HTTP API for human-oriented UIs.  
-     - Handles request authentication (OIDC tokens) and maps identities to internal user roles and device scopes.  
+   - **MCP server / HTTP API**:
+     - Exposes MCP tools and possibly a REST/JSON HTTP API for human-oriented UIs.
+     - Handles request authentication (OIDC tokens) and maps identities to internal user roles and device scopes.
      - Implements request validation, rate limiting, and basic per-tool authorization before invoking domain services.
-   - **Admin/UI endpoints (optional)**:  
+     - **MCP Protocol Lifecycle**:
+       1. **Initialize**: Client sends `initialize` request with client info and capabilities
+          - Server responds with server info, protocol version, MCP primitives supported
+          - Example response:
+            ```json
+            {
+              "protocolVersion": "2024-11-05",
+              "serverInfo": {
+                "name": "RouterOS-MCP",
+                "version": "1.0.0"
+              },
+              "capabilities": {
+                "tools": {"listChanged": true},
+                "resources": {"subscribe": true, "listChanged": true},
+                "prompts": {"listChanged": true}
+              }
+            }
+            ```
+       2. **Capability Negotiation**: Server adapts based on client capabilities
+          - **Tools-only clients** (ChatGPT, Mistral): Server exposes all 40 tools (including fallbacks)
+          - **Full MCP clients** (Claude, VS Code): Server exposes tools + resources + prompts
+       3. **Operation**: Client makes `tools/call`, `resources/read`, `prompts/get` requests
+       4. **Shutdown**: Client sends `shutdown` notification, server closes STDIO streams cleanly
+   - **Admin/UI endpoints (optional)**:
      - Web console or HTTP endpoints for human operators to manage devices, review plans, approve changes, and inspect audit logs.
 
 2. **Domain & service layer**
@@ -58,16 +286,152 @@ At a high level, the system is split into three layers:
      - Writes structured audit events for sensitive reads and all writes.
 
 3. **Infrastructure layer**
-   - **RouterOS REST clients** (and limited SSH client):  
-     - Performs actual HTTP/REST calls (and, where required, whitelisted SSH commands) to RouterOS devices.  
-     - Handles connection pooling, timeouts, retries, and error mapping.  
-   - **Persistence**:  
-     - Relational or document database for devices, credentials (encrypted), plans, jobs, audit logs, configuration snapshots.  
-     - Optional time-series or metrics store for counters and performance data.  
-   - **Messaging / background processing**:  
-     - Job queue or task runner for scheduled health checks, metrics collection, and long-running workflows.  
-   - **Observability stack**:  
+   - **RouterOS REST clients** (and limited SSH client):
+     - Performs actual HTTP/REST calls (and, where required, whitelisted SSH commands) to RouterOS devices.
+     - Handles connection pooling, timeouts, retries, and error mapping.
+   - **Persistence**:
+     - Relational or document database for devices, credentials (encrypted), plans, jobs, audit logs, configuration snapshots.
+     - Optional time-series or metrics store for counters and performance data.
+   - **Messaging / background processing**:
+     - Job queue or task runner for scheduled health checks, metrics collection, and long-running workflows.
+     - **Background Job Scheduler Architecture:**
+       - **Technology:** APScheduler (Advanced Python Scheduler) for Phase 1
+         - Lightweight, no external dependencies (in-process scheduling)
+         - Cron-like and interval-based job triggers
+         - Job persistence via DB (resume jobs after restart)
+       - **Job Types:**
+         1. **Health Checks:** Per-device health polling (every 60s with jitter)
+         2. **Metrics Collection:** System resource metrics (every 30s)
+         3. **Resource Cache Refresh:** Update device health/config cache (every 60s)
+         4. **Plan Execution:** Long-running multi-device apply workflows (async jobs)
+       - **Concurrency:** asyncio-based (non-blocking I/O for RouterOS calls)
+       - **Persistence:** Job state and schedule stored in Postgres (survive restarts)
+       - **Scaling:** Each MCP instance runs its own scheduler; DB-based locking prevents duplicate execution
+       - **Alternative (Phase 4+):** Celery with Redis/RabbitMQ for distributed task queue (if needed for > 100 devices)
+   - **Observability stack**:
      - Logging, metrics, and tracing sinks (e.g., OpenTelemetry exporters, log collectors, dashboards).
+
+### MCP Transport Layer Architecture
+
+The MCP service uses different transports across phases, balancing universal client compatibility with deployment flexibility:
+
+**Phase 1: STDIO Transport (Universal Client Compatibility)**
+
+- **Primary transport**: STDIO (stdin/stdout) for MCP JSON-RPC protocol
+- **Why STDIO**: Ensures compatibility with 100% of MCP clients:
+  - Tools-only clients: ChatGPT, Mistral, Zed, Continue.dev
+  - Full MCP clients: Claude Desktop, VS Code Copilot
+- **Transport isolation**:
+  - `stdin`: Receive MCP JSON-RPC requests from client
+  - `stdout`: Send MCP JSON-RPC responses (tools, resources, prompts)
+  - `stderr`: Application logs, errors, diagnostics (NEVER protocol messages)
+- **Logging discipline**: All application logs, debug output, and error messages MUST go to stderr to avoid corrupting stdout protocol stream
+- **Process model**: Single process handling both MCP protocol (STDIO) and optional HTTP admin API (separate port)
+
+**Admin/UI HTTP API (Coexists with STDIO)**
+
+- **Separate concern**: HTTP API for human operators to manage devices, review plans, generate approval tokens
+- **Port binding**: Listens on a different port (e.g., :8080) than any MCP transport
+- **Not MCP protocol**: This is standard REST/JSON for UIs, not MCP JSON-RPC
+- **Security**: Protected by OIDC, typically behind Cloudflare Tunnel
+
+**Phase 4: HTTP Transport for MCP Protocol (Remote/Enterprise)**
+
+- **Future evolution**: MCP protocol over HTTP/SSE (not STDIO)
+- **When needed**: Remote clients, cloud deployments, OAuth flows
+- **Phase 1 compatibility**: STDIO remains supported even after HTTP is added
+- **Implementation note**: FastMCP supports both STDIO and HTTP transports; Phase 1 uses STDIO exclusively
+
+**Transport Selection Logic**
+
+```
+Phase 1 deployment:
+  MCP protocol: STDIO (universal client support)
+  Admin API: HTTP on :8080 (human operators)
+  Logging: stderr only
+
+Phase 4 deployment:
+  MCP protocol: STDIO OR HTTP/SSE (client choice)
+  Admin API: HTTP on :8080
+  Logging: stderr (STDIO mode) or structured JSON logs (HTTP mode)
+```
+
+**Critical STDIO best practices:**
+- Never use `print()` for debugging (use `logging.error()` to stderr)
+- Never write to stdout except via MCP protocol handler
+- Test STDIO transport by piping sample requests: `echo '{"jsonrpc":"2.0",...}' | ./mcp-server`
+- Monitor stderr separately from stdout in production
+
+---
+
+### MCP Primitive Architectural Placement
+
+MCP exposes three primitives (Tools, Resources, Prompts), each with different architectural placement and lifecycle:
+
+**1. Tools (Model-Controlled, Request-Driven Operations)**
+
+- **Placement**: API layer (MCP server) dispatches to Domain layer (services)
+- **Lifecycle**: Invoked on-demand by LLM client via `tools/call` JSON-RPC request
+- **Flow**:
+  1. Client sends `tools/call` request via STDIO
+  2. API layer validates OIDC token, authorization, tool parameters
+  3. API layer dispatches to domain service (e.g., `dns_service.get_status()`)
+  4. Domain service calls Infrastructure layer (RouterOS REST client)
+  5. Domain service returns result to API layer
+  6. API layer sends JSON-RPC response via stdout
+- **State**: Stateless; each tool invocation is independent
+- **Examples**: `dns/get-status`, `config/plan-dns-ntp-rollout`, `tool/ping`
+
+**2. Resources (Application-Controlled, Read-Only Context)**
+
+- **Placement**: Infrastructure layer (cached data) + API layer (resource handler)
+- **Lifecycle**:
+  - **Discovery**: Client lists available resources via `resources/list`
+  - **Access**: Client reads resource content via `resources/read` with URI
+  - **Refresh**: MCP server updates resource cache periodically (background job)
+- **Flow**:
+  1. Background job periodically fetches device health via RouterOS REST
+  2. Infrastructure layer caches result with TTL (e.g., 60 seconds)
+  3. Client sends `resources/read` with URI `device://router-01/health`
+  4. API layer reads from cache, returns resource content
+  5. No RouterOS call needed (cache hit)
+- **Caching strategy**:
+  - Device health: 60-second TTL (refreshed by background job)
+  - Device config snapshots: 5-minute TTL (expensive to fetch)
+  - Fleet summaries: 2-minute TTL (aggregated data)
+- **Token budget**: Resources include `metadata.estimated_tokens` to help LLM manage context
+- **Examples**: `device://{id}/health`, `fleet://{env}/summary`, `plan://{id}`
+
+**3. Prompts (User-Controlled, Workflow Templates)**
+
+- **Placement**: API layer (YAML files loaded at startup, rendered on-demand)
+- **Lifecycle**:
+  1. Server startup: Load all YAML files from `prompts/` directory
+  2. Client requests `prompts/list` → Server returns available prompts
+  3. Client invokes `prompts/get` with prompt name and arguments
+  4. API layer renders Jinja2 template with arguments
+  5. API layer returns rendered prompt text to client
+- **Flow**:
+  1. User selects `dns_ntp_rollout` prompt in Claude Desktop
+  2. Client sends `prompts/get` with `name=dns_ntp_rollout, args={environment: "prod"}`
+  3. API layer loads `prompts/dns_ntp_rollout.yaml`
+  4. API layer renders template with environment-specific content
+  5. Client receives multi-step workflow guide
+- **State**: Immutable templates; only arguments vary per invocation
+- **Examples**: `dns_ntp_rollout`, `troubleshoot_dns_ntp`, `device_onboarding`
+
+**Architectural Separation Benefits**
+
+- **Tools**: Dynamic, request-driven, full CRUD capabilities
+- **Resources**: Cached, efficient, read-only, optimized for LLM context windows
+- **Prompts**: Static templates, user-controlled, provide consistency across workflows
+
+**Phase-1 Fallback Pattern**
+
+For clients that don't support Resources (ChatGPT, tools-only clients), Phase-1 fallback tools provide equivalent functionality:
+- `device/get-health-data` tool → `device://{id}/health` resource
+- `fleet/get-summary` tool → `fleet://{env}/summary` resource
+- Each fallback tool includes `resource_uri` hint for migration to Phase 2
 
 ---
 
@@ -173,8 +537,88 @@ The typical request path from a user or AI client:
 
 In this pipeline:
 
-- Cloudflare Tunnel primarily handles secure connectivity and optional access policies.  
+- Cloudflare Tunnel primarily handles secure connectivity and optional access policies.
 - OAuth/OIDC handles identity; internal authorization logic enforces roles/scopes/tier/environment.
+
+### Security Zones & Trust Boundaries
+
+The architecture enforces multiple security zones with explicit trust boundaries:
+
+```
+┌───────────────────────────────────────────────────────────────────┐
+│                      UNTRUSTED ZONE                                │
+│  - Public Internet                                                 │
+│  - MCP Clients (AI assistants, browsers)                           │
+│  - Assumption: Potentially malicious, can generate arbitrary       │
+│    tool calls, ignore system prompts                               │
+└───────────────────────────┬───────────────────────────────────────┘
+                            │
+                            │ HTTPS (TLS-encrypted)
+                            │
+                            ▼
+┌───────────────────────────────────────────────────────────────────┐
+│                       EDGE ZONE                                    │
+│  Cloudflare Tunnel                                                 │
+│  - TLS termination                                                 │
+│  - DDoS protection                                                 │
+│  - Optional Cloudflare Access (additional OIDC gate)               │
+│  - Trust: Cloudflare-managed, no application logic                 │
+└───────────────────────────┬───────────────────────────────────────┘
+                            │
+                            │ Forwarded to private origin
+                            │
+                            ▼
+┌───────────────────────────────────────────────────────────────────┐
+│                    MANAGEMENT ZONE                                 │
+│  MCP Server (API Layer)                                            │
+│  - OIDC token validation (signature, issuer, expiry)               │
+│  - Role mapping (groups → read_only / ops_rw / admin)              │
+│  - Device scope enforcement                                        │
+│  - Environment/capability checks                                   │
+│  - Approval token validation (for professional tools)              │
+│  - ALL SAFETY CONTROLS ENFORCED HERE (zero trust for clients)      │
+│  Trust: Application-enforced, cryptographic validation             │
+└───────────────────────────┬───────────────────────────────────────┘
+                            │
+                            │ Internal API calls (authenticated)
+                            │
+                            ▼
+┌───────────────────────────────────────────────────────────────────┐
+│                     INTERNAL ZONE                                  │
+│  - Database (Postgres)                                             │
+│  - Job queue (background tasks)                                    │
+│  - Secrets store (encrypted RouterOS credentials)                  │
+│  - Metrics/logging backends                                        │
+│  Trust: Fully trusted, no external access, credentials encrypted   │
+│         at rest                                                    │
+└───────────────────────────┬───────────────────────────────────────┘
+                            │
+                            │ RouterOS REST API calls (HTTPS)
+                            │ with per-device credentials
+                            │
+                            ▼
+┌───────────────────────────────────────────────────────────────────┐
+│                      DEVICE ZONE                                   │
+│  RouterOS Devices (v7)                                             │
+│  - REST API endpoints (HTTPS on device-specific ports)             │
+│  - SSH endpoints (fallback, whitelisted commands only)             │
+│  - Per-device credentials (NOT shared across devices)              │
+│  Trust: Managed devices, authenticated with credentials, network-  │
+│         isolated from untrusted zone                               │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+**Trust Boundary Enforcement:**
+
+1. **Untrusted → Edge**: TLS encryption, DDoS mitigation, no application trust
+2. **Edge → Management**: Cloudflare forwards to private origin, MCP validates OIDC token
+3. **Management → Internal**: Authenticated API calls, audit logging, no user-controlled input to DB
+4. **Internal → Device**: Per-device credentials, rate-limited API calls, retries/backoff
+5. **Cross-zone breaches**: If edge or management zones compromised:
+   - Internal zone: Database credentials separate, master encryption key in secret manager
+   - Device zone: Per-device credentials limit blast radius (compromise of MCP doesn't auto-compromise all devices)
+
+**Security Principle:** Each zone trusts the previous zone only after explicit validation. **No security decisions are delegated to clients** (MCP clients are always untrusted, even with valid OIDC tokens).
 
 ---
 

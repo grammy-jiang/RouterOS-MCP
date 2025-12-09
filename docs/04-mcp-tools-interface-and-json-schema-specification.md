@@ -5,9 +5,8 @@
 Define the MCP-facing API—tool taxonomy, capability tiers (fundamental/advanced/professional), input/output JSON schemas, and safety guardrails that map cleanly to RouterOS operations. This document is the contract between MCP clients (including AI tools) and the RouterOS MCP service.
 
 **Related Documents:**
-- [Doc 03: RouterOS Integration & Endpoint Mappings](03-routeros-integration-and-platform-constraints-rest-and-ssh.md)
-- [Doc 19: JSON-RPC Error Codes & MCP Protocol](19-json-rpc-error-codes-and-mcp-protocol-specification.md)
-- [ENDPOINT-TOOL-MAPPING.md](ENDPOINT-TOOL-MAPPING.md) - Cross-reference analysis
+- [Doc 03: RouterOS Integration & Endpoint Mappings](03-routeros-integration-and-platform-constraints-rest-and-ssh.md) - Complete endpoint catalog with 41 REST API endpoints
+- [Doc 19: JSON-RPC Error Codes & MCP Protocol](19-json-rpc-error-codes-and-mcp-protocol-specification.md) - Error taxonomy and protocol compliance
 
 ---
 
@@ -138,7 +137,21 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `device/list-devices`
 
-**Description**: List all registered devices in MCP (does not contact RouterOS).
+**Description:**
+```
+List all registered RouterOS devices in the MCP service.
+
+Use when:
+- User asks "what devices are available?" or "show me all routers"
+- Beginning device selection workflows (user needs to choose a target)
+- Filtering devices by environment (lab/staging/prod) or tags (site, role, region)
+- Checking device health status across the fleet
+- Auditing device inventory
+
+Returns: List of devices with ID, name, management address, environment, status, RouterOS version, tags, and capability flags.
+
+Tip: Use tags parameter to narrow results (e.g., {"site": "datacenter-1"}).
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -197,7 +210,21 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `device/check-connectivity`
 
-**Description**: Check connectivity to a device (lightweight health check).
+**Description:**
+```
+Verify if a device is reachable and responsive.
+
+Use when:
+- User asks "is device X reachable?" or "can you ping this router?"
+- Troubleshooting connectivity issues before attempting configuration changes
+- Validating device registration (checking if new device responds)
+- Quick health check without full system overview
+- Pre-flight check before plan execution
+
+Returns: Reachability status, response time, RouterOS version.
+
+Note: Lightweight check (only tests API connectivity, not full health).
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -247,7 +274,22 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `system/get-overview`
 
-**Description**: Get comprehensive system overview (resources, identity, routerboard info).
+**Description:**
+```
+Get comprehensive system information including identity, hardware, resource usage, and health metrics.
+
+Use when:
+- User asks "show me system status" or "what's the router's health?"
+- Troubleshooting performance issues (CPU, memory usage)
+- Gathering device information for documentation or inventory
+- Checking hardware specs (model, serial number, firmware version)
+- Verifying system uptime or recent reboots
+- Initial device assessment before configuration changes
+
+Returns: Identity, RouterOS version, uptime, hardware model, serial number, CPU usage, memory usage, temperature, voltage.
+
+Tip: This is the primary "health dashboard" tool - use it as a starting point for most device interactions.
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -314,7 +356,21 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `system/get-packages`
 
-**Description**: Get installed packages and versions.
+**Description:**
+```
+List all installed RouterOS packages and their versions.
+
+Use when:
+- User asks "what packages are installed?" or "what version is wireless package?"
+- Verifying software capabilities before attempting feature-specific operations
+- Troubleshooting missing features (checking if required package is installed)
+- Auditing software inventory across fleet
+- Planning package upgrades
+
+Returns: List of packages with name, version, build time, and disabled status.
+
+Note: Does not show available upgrades (use RouterOS upgrade tools for that).
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -374,7 +430,21 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `system/get-clock`
 
-**Description**: Get system time and timezone information.
+**Description:**
+```
+Get current system time, timezone, and time configuration.
+
+Use when:
+- User asks "what time is it on the router?" or "what timezone is configured?"
+- Troubleshooting time-related issues (logs, certificates, scheduled tasks)
+- Verifying NTP synchronization indirectly (check if time is accurate)
+- Diagnosing time drift problems
+- Before/after NTP configuration changes
+
+Returns: Current time (ISO 8601), timezone name, autodetect status.
+
+Tip: Compare with ntp/get-status to verify time synchronization health.
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -425,7 +495,22 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `interface/list-interfaces`
 
-**Description**: List all interfaces with status and statistics.
+**Description:**
+```
+List all network interfaces with operational status and metadata.
+
+Use when:
+- User asks "show me all interfaces" or "what's the interface status?"
+- Finding interfaces by type (ether, vlan, bridge, wireless)
+- Identifying disabled or down interfaces
+- Discovering interface names for other operations
+- Auditing interface inventory and comments
+- Troubleshooting connectivity (checking running status)
+
+Returns: List of interfaces with ID, name, type, running status, disabled status, comment, MTU, MAC address.
+
+Tip: Use this first to discover interface names/IDs, then use interface/get-interface for details.
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -493,7 +578,21 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `interface/get-interface`
 
-**Description**: Get detailed information about a specific interface.
+**Description:**
+```
+Get detailed information about a specific interface.
+
+Use when:
+- User asks about a specific interface ("tell me about ether1")
+- Need complete interface configuration details
+- Checking interface-specific settings before making changes
+- Verifying last link up/down events
+- Detailed troubleshooting of single interface
+
+Returns: Complete interface configuration including all fields from interface list plus additional details.
+
+Note: Requires interface ID (from interface/list-interfaces) or name.
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -550,7 +649,21 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `interface/get-stats`
 
-**Description**: Get real-time traffic statistics for interfaces.
+**Description:**
+```
+Get real-time traffic statistics for network interfaces.
+
+Use when:
+- User asks "how much traffic on ether1?" or "show bandwidth usage"
+- Monitoring current network load (bits/packets per second)
+- Troubleshooting performance issues (identifying saturated links)
+- Verifying traffic flow after configuration changes
+- Capacity planning (understanding current utilization)
+
+Returns: Real-time RX/TX rates in bits per second and packets per second.
+
+Tip: This is a snapshot at the time of the call. For trends, compare multiple calls over time.
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -614,7 +727,22 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `ip/list-addresses`
 
-**Description**: List all IP addresses configured on the device.
+**Description:**
+```
+List all IP addresses configured on the device.
+
+Use when:
+- User asks "what IPs are configured?" or "show me all addresses"
+- Finding which interfaces have which IP addresses
+- Auditing IP address assignments
+- Planning IP address additions (checking for conflicts)
+- Troubleshooting IP connectivity issues
+- Verifying address configuration after changes
+
+Returns: List of IP addresses with CIDR notation, network, interface, disabled status, and comment.
+
+Tip: Returns both primary and secondary addresses on all interfaces.
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -678,7 +806,20 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `ip/get-address`
 
-**Description**: Get details of a specific IP address.
+**Description:**
+```
+Get details of a specific IP address configuration.
+
+Use when:
+- User asks about a specific IP address
+- Verifying address properties (network, interface binding)
+- Checking if address is dynamic or static
+- Detailed investigation of address configuration
+
+Returns: Complete IP address details including network, interface, disabled/dynamic/invalid flags.
+
+Note: Requires address ID (from ip/list-addresses).
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -734,7 +875,21 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `ip/get-arp-table`
 
-**Description**: Get ARP table entries.
+**Description:**
+```
+Get ARP (Address Resolution Protocol) table entries.
+
+Use when:
+- User asks "what devices are on the network?" or "show me ARP table"
+- Troubleshooting connectivity to specific hosts (verifying MAC address resolution)
+- Identifying connected devices by MAC address
+- Detecting IP/MAC conflicts
+- Network discovery (seeing active hosts)
+
+Returns: List of ARP entries with IP address, MAC address, interface, status, and comment.
+
+Tip: Only shows devices that have recently communicated with the router.
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -791,7 +946,22 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `dns/get-status`
 
-**Description**: Get DNS configuration and cache status.
+**Description:**
+```
+Get DNS server configuration and cache statistics.
+
+Use when:
+- User asks "what DNS servers are configured?" or "is DNS working?"
+- Troubleshooting DNS resolution issues
+- Verifying DNS configuration after changes
+- Checking DNS cache utilization
+- Before planning DNS server updates
+- Auditing DNS settings across fleet
+
+Returns: DNS server list, remote request allowance, cache size/usage.
+
+Tip: Use with tool/ping to verify DNS server reachability.
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -840,7 +1010,21 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `dns/get-cache`
 
-**Description**: Get DNS cache entries.
+**Description:**
+```
+View DNS cache entries (recently resolved domains).
+
+Use when:
+- User asks "what's in the DNS cache?" or "has domain X been resolved?"
+- Troubleshooting DNS resolution (verifying cache entries)
+- Checking TTL values for cached records
+- Investigating DNS-related connectivity issues
+- Before/after flushing DNS cache
+
+Returns: List of cached DNS records with name, type (A/AAAA/CNAME), data (IP), and TTL.
+
+Note: Limited to 1000 entries max. Use limit parameter to control result size.
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -898,7 +1082,22 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `ntp/get-status`
 
-**Description**: Get NTP client configuration and sync status.
+**Description:**
+```
+Get NTP client configuration and synchronization status.
+
+Use when:
+- User asks "is NTP working?" or "what time servers are configured?"
+- Troubleshooting time synchronization issues
+- Verifying NTP configuration after changes
+- Checking sync status (synchronized vs not synchronized)
+- Diagnosing time drift problems
+- Before planning NTP server updates
+
+Returns: Enabled status, NTP server list, mode, sync status, stratum, time offset.
+
+Tip: Check offset_ms - large values indicate sync problems. Compare with system/get-clock.
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -953,7 +1152,22 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `routing/get-summary`
 
-**Description**: Get routing table summary and route counts.
+**Description:**
+```
+Get routing table summary with route counts and key routes.
+
+Use when:
+- User asks "show me routes" or "what's the default gateway?"
+- Overview of routing configuration
+- Counting routes by type (static, connected, dynamic)
+- Finding default route quickly
+- Before planning routing changes
+- Troubleshooting routing issues (verifying routes exist)
+
+Returns: Total route count, counts by type (static/connected/dynamic), list of routes with destination, gateway, distance, comment.
+
+Tip: For detailed single route info, use routing/get-route.
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -1011,7 +1225,20 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `routing/get-route`
 
-**Description**: Get details of a specific route.
+**Description:**
+```
+Get detailed information about a specific route.
+
+Use when:
+- User asks about a specific route destination
+- Investigating route properties (scope, distance, active/inactive status)
+- Verifying route configuration
+- Detailed troubleshooting of routing behavior
+
+Returns: Complete route details including destination, gateway, distance, scope, active status, dynamic flag.
+
+Note: Requires route ID (from routing/get-summary).
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -1070,7 +1297,22 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `firewall/list-filter-rules`
 
-**Description**: List firewall filter rules (read-only).
+**Description:**
+```
+List firewall filter rules (input/forward/output chains).
+
+Use when:
+- User asks "what firewall rules are configured?" or "show me filter rules"
+- Auditing firewall security configuration
+- Troubleshooting blocked connections (finding which rule blocks traffic)
+- Verifying firewall rule order
+- Before planning firewall changes
+- Security compliance checks
+
+Returns: List of filter rules with ID, chain, action, protocol, ports, comment, disabled status.
+
+Note: Read-only in Phase 1. Modification requires Phase 2+.
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -1127,7 +1369,21 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `firewall/list-nat-rules`
 
-**Description**: List NAT rules (read-only).
+**Description:**
+```
+List NAT (Network Address Translation) rules.
+
+Use when:
+- User asks "show me NAT config" or "what masquerade rules exist?"
+- Troubleshooting NAT issues (port forwarding, masquerading)
+- Auditing NAT configuration
+- Verifying srcnat/dstnat rules
+- Before planning NAT changes
+
+Returns: List of NAT rules with ID, chain, action, interfaces, comment, disabled status.
+
+Note: Read-only in Phase 1.
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -1183,7 +1439,22 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `firewall/list-address-lists`
 
-**Description**: List firewall address-list entries (read-only).
+**Description:**
+```
+List firewall address-list entries (IP-based allow/deny lists).
+
+Use when:
+- User asks "show me address lists" or "what IPs are in list X?"
+- Auditing firewall IP whitelists/blacklists
+- Verifying address-list entries
+- Troubleshooting access control (checking if IP is in list)
+- Before adding/removing address-list entries
+- Checking MCP-managed lists (prefix: mcp-)
+
+Returns: List of address-list entries with ID, list name, address, comment, timeout.
+
+Tip: Filter by list_name parameter to view specific list. Only MCP-managed lists (prefix: mcp-) can be modified.
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -1241,7 +1512,27 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `logs/get-recent`
 
-**Description**: Get recent system logs (bounded query).
+**Description:**
+```
+Retrieve recent system logs with optional filtering.
+
+Use when:
+- User asks "show me recent logs" or "check logs for errors"
+- Troubleshooting issues (looking for error messages)
+- Auditing system events
+- Investigating security incidents
+- Verifying recent configuration changes
+- Checking specific topics (system, error, warning, firewall, etc.)
+
+Returns: List of log entries with ID, timestamp, topics, and message.
+
+Constraints:
+- Max 1000 entries per call (use limit parameter)
+- Filter by topics to narrow results (e.g., ["system", "error"])
+- Bounded query - cannot stream unlimited logs
+
+Tip: Start with small limit (e.g., 100) and specific topics to avoid overwhelming response.
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -1297,7 +1588,21 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `logs/get-config`
 
-**Description**: Get logging configuration (topics and actions).
+**Description:**
+```
+Get logging configuration (which topics log to which destinations).
+
+Use when:
+- User asks "what logging is configured?" or "where do logs go?"
+- Auditing logging configuration
+- Troubleshooting missing logs (verifying topic is logged)
+- Understanding log architecture
+- Before modifying logging configuration (Phase 2+)
+
+Returns: List of logging actions with topics, action type (memory/disk/remote), and prefix.
+
+Note: Configuration is read-only in Phase 1.
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -1352,7 +1657,26 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `tool/ping`
 
-**Description**: Run ICMP ping diagnostic.
+**Description:**
+```
+Run ICMP ping test from the router to a target address.
+
+Use when:
+- User asks "can you ping X?" or "is host Y reachable?"
+- Testing network connectivity
+- Verifying routing to destination
+- Measuring latency/round-trip time
+- Troubleshooting packet loss
+- Verifying DNS resolution (can use hostname)
+
+Returns: Packets sent/received, packet loss percentage, min/avg/max RTT.
+
+Constraints:
+- Max 10 pings per call (count parameter)
+- Results are snapshot, not continuous monitoring
+
+Tip: Use interval_ms parameter to control ping frequency.
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -1407,7 +1731,25 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `tool/traceroute`
 
-**Description**: Run network traceroute diagnostic.
+**Description:**
+```
+Run traceroute to show network path to destination.
+
+Use when:
+- User asks "trace route to X" or "show me path to Y"
+- Troubleshooting routing issues (finding where packets go)
+- Identifying network hops
+- Measuring latency per hop
+- Diagnosing routing loops or suboptimal paths
+
+Returns: List of hops with hop number, IP address, and RTT.
+
+Constraints:
+- Max 30 hops
+- Max 3 probes per hop (count parameter)
+
+Tip: Some hops may not respond (shown as * in results).
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -1468,7 +1810,26 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `tool/bandwidth-test`
 
-**Description**: Run bandwidth test to measure throughput.
+**Description:**
+```
+Run bandwidth test between router and target RouterOS device.
+
+Use when:
+- User asks "test bandwidth to X" or "how fast is the link?"
+- Measuring actual throughput (not just interface speed)
+- Troubleshooting performance issues
+- Verifying link capacity
+- Testing after configuration changes
+
+Returns: TX/RX throughput in bits per second.
+
+Constraints:
+- Max 60 second duration
+- Target must be another RouterOS device with bandwidth-test enabled
+- Generates traffic load (use carefully in production)
+
+Note: This is an active test that consumes bandwidth.
+```
 
 **Tier**: Fundamental
 **Phase**: Phase 1
@@ -1518,7 +1879,458 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ---
 
-### Phase 2: Single-Device Writes (Advanced Tier)
+#### Phase-1 Resource Fallback Tools
+
+**Purpose:** These tools provide Phase-1 compatibility for Phase-2 MCP resources. Tools-only clients (ChatGPT, Mistral) can use these tools to access resource data, while resource-aware clients (Claude Desktop, VS Code) can use the more efficient resource URIs directly.
+
+**Best Practice:** Each fallback tool includes a `resource_uri` hint in its response to enable migration to resource-based workflows.
+
+---
+
+##### `device/get-health-data`
+
+**Description:**
+```
+Get complete device health data including current metrics and historical trends.
+
+Use when:
+- User asks "show me device X health history" or "what's the health trend?"
+- Need detailed health context for analysis
+- Troubleshooting intermittent issues (checking historical data)
+- Generating health reports
+
+Returns: Health data with resource URI hint for Phase-2 clients.
+
+Note: Phase-1 fallback for device://{device_id}/health resource.
+In clients supporting Resources, use the resource URI directly for more efficient context loading.
+```
+
+**Tier**: Fundamental
+**Phase**: 1 (Fallback for Phase 2 resource)
+
+**Request**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-fb-001",
+  "method": "tools/call",
+  "params": {
+    "name": "device/get-health-data",
+    "arguments": {
+      "device_id": "dev-lab-01",
+      "include_history": true,
+      "history_hours": 24
+    }
+  }
+}
+```
+
+**Response**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-fb-001",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Device health data for router-lab-01"
+      }
+    ],
+    "isError": false,
+    "_meta": {
+      "device_id": "dev-lab-01",
+      "current_health": {
+        "status": "healthy",
+        "cpu_usage_percent": 5.2,
+        "memory_usage_percent": 45.0,
+        "temperature_celsius": 42.0,
+        "uptime_seconds": 864000
+      },
+      "history": [
+        {
+          "timestamp": "2025-01-15T10:00:00Z",
+          "status": "healthy",
+          "cpu_usage_percent": 4.8,
+          "memory_usage_percent": 43.0
+        }
+      ],
+      "resource_uri": "device://dev-lab-01/health",
+      "resource_hint": "In clients supporting MCP Resources, use resource_uri for efficient context access"
+    }
+  }
+}
+```
+
+---
+
+##### `device/get-config-snapshot`
+
+**Description:**
+```
+Get device configuration snapshot (export).
+
+Use when:
+- User asks "show me device config" or "export configuration"
+- Need configuration as context for analysis
+- Comparing configurations across devices
+- Backup/documentation purposes
+
+Returns: Configuration export with resource URI hint.
+
+Note: Phase-1 fallback for device://{device_id}/config resource.
+```
+
+**Tier**: Fundamental
+**Phase**: 1 (Fallback)
+
+**Request**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-fb-002",
+  "method": "tools/call",
+  "params": {
+    "name": "device/get-config-snapshot",
+    "arguments": {
+      "device_id": "dev-lab-01",
+      "format": "compact"
+    }
+  }
+}
+```
+
+**Response**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-fb-002",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Configuration snapshot for router-lab-01"
+      }
+    ],
+    "isError": false,
+    "_meta": {
+      "device_id": "dev-lab-01",
+      "format": "compact",
+      "config_text": "/system identity\nset name=router-lab-01\n/ip address\nadd address=192.168.1.1/24 interface=ether1\n...",
+      "size_bytes": 2048,
+      "snapshot_time": "2025-01-15T14:30:00Z",
+      "resource_uri": "device://dev-lab-01/config",
+      "resource_hint": "Use resource_uri in MCP Resources-compatible clients"
+    }
+  }
+}
+```
+
+---
+
+##### `fleet/get-summary`
+
+**Description:**
+```
+Get fleet-wide summary and health status.
+
+Use when:
+- User asks "show me fleet status" or "how many devices are healthy?"
+- Fleet-wide health dashboard
+- Auditing device inventory
+- Identifying unhealthy devices for investigation
+
+Returns: Fleet summary with resource URI hint.
+
+Note: Phase-1 fallback for fleet://{environment}/summary resource.
+```
+
+**Tier**: Fundamental
+**Phase**: 1 (Fallback)
+
+**Request**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-fb-003",
+  "method": "tools/call",
+  "params": {
+    "name": "fleet/get-summary",
+    "arguments": {
+      "environment": "lab"
+    }
+  }
+}
+```
+
+**Response**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-fb-003",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Fleet summary: 10 devices, 8 healthy, 2 degraded"
+      }
+    ],
+    "isError": false,
+    "_meta": {
+      "environment": "lab",
+      "total_devices": 10,
+      "health_breakdown": {
+        "healthy": 8,
+        "degraded": 2,
+        "unreachable": 0
+      },
+      "routeros_versions": {
+        "7.10.1": 8,
+        "7.9.2": 2
+      },
+      "devices_summary": [
+        {
+          "device_id": "dev-lab-01",
+          "name": "router-lab-01",
+          "status": "healthy",
+          "routeros_version": "7.10.1"
+        }
+      ],
+      "resource_uri": "fleet://lab/summary",
+      "resource_hint": "Use resource_uri for efficient fleet context access"
+    }
+  }
+}
+```
+
+---
+
+##### `plan/get-details`
+
+**Description:**
+```
+Get complete plan details including all target devices and proposed changes.
+
+Use when:
+- User asks "show me plan X" or "what does this plan do?"
+- Reviewing plan before approval
+- Auditing planned changes
+- Understanding plan scope and impact
+
+Returns: Complete plan data with resource URI hint.
+
+Note: Phase-1 fallback for plan://{plan_id} resource.
+```
+
+**Tier**: Fundamental
+**Phase**: 1 (Fallback)
+
+**Request**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-fb-004",
+  "method": "tools/call",
+  "params": {
+    "name": "plan/get-details",
+    "arguments": {
+      "plan_id": "plan-20250115-001"
+    }
+  }
+}
+```
+
+**Response**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-fb-004",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Plan plan-20250115-001: Update DNS/NTP on 3 devices"
+      }
+    ],
+    "isError": false,
+    "_meta": {
+      "plan_id": "plan-20250115-001",
+      "status": "approved",
+      "summary": "Update DNS/NTP to Cloudflare on 3 lab devices",
+      "risk_level": "low",
+      "created_at": "2025-01-15T14:00:00Z",
+      "expires_at": "2025-01-16T14:00:00Z",
+      "total_devices": 3,
+      "devices": [
+        {
+          "device_id": "dev-lab-01",
+          "environment": "lab",
+          "changes": [
+            {
+              "topic": "dns",
+              "action": "update_servers",
+              "old_value": ["8.8.8.8", "8.8.4.4"],
+              "new_value": ["1.1.1.1", "1.0.0.1"]
+            }
+          ]
+        }
+      ],
+      "resource_uri": "plan://plan-20250115-001",
+      "resource_hint": "Use resource_uri for efficient plan context access"
+    }
+  }
+}
+```
+
+---
+
+##### `audit/get-events`
+
+**Description:**
+```
+Get audit events with optional filtering.
+
+Use when:
+- User asks "show me audit trail" or "what changes were made?"
+- Security auditing and compliance
+- Investigating who did what when
+- Tracking configuration changes
+- Troubleshooting issues (finding recent changes)
+
+Returns: Audit events with resource URI hint.
+
+Note: Phase-1 fallback for audit://{device_id}?start_time={ts}&action={action} resource.
+```
+
+**Tier**: Fundamental
+**Phase**: 1 (Fallback)
+
+**Request**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-fb-005",
+  "method": "tools/call",
+  "params": {
+    "name": "audit/get-events",
+    "arguments": {
+      "device_id": "dev-lab-01",
+      "action": "WRITE",
+      "start_time": "2025-01-14T00:00:00Z",
+      "limit": 100
+    }
+  }
+}
+```
+
+**Response**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-fb-005",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Found 15 audit events for dev-lab-01"
+      }
+    ],
+    "isError": false,
+    "_meta": {
+      "device_id": "dev-lab-01",
+      "total_count": 15,
+      "events": [
+        {
+          "id": "audit-001",
+          "timestamp": "2025-01-15T10:30:00Z",
+          "action": "WRITE",
+          "tool_name": "dns/update-servers",
+          "tool_tier": "advanced",
+          "result": "success",
+          "metadata": {
+            "old_servers": ["8.8.8.8"],
+            "new_servers": ["1.1.1.1"]
+          }
+        }
+      ],
+      "resource_uri": "audit://dev-lab-01?action=WRITE&start_time=2025-01-14T00:00:00Z",
+      "resource_hint": "Use resource_uri for efficient audit context access"
+    }
+  }
+}
+```
+
+---
+
+##### `snapshot/get-content`
+
+**Description:**
+```
+Get configuration snapshot content by snapshot ID.
+
+Use when:
+- User asks "show me snapshot X" or "what's in this backup?"
+- Reviewing configuration snapshots
+- Comparing pre/post-change configs
+- Rollback planning (viewing old configuration)
+
+Returns: Snapshot content with resource URI hint.
+
+Note: Phase-1 fallback for snapshot://{snapshot_id} resource.
+```
+
+**Tier**: Fundamental
+**Phase**: 1 (Fallback)
+
+**Request**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-fb-006",
+  "method": "tools/call",
+  "params": {
+    "name": "snapshot/get-content",
+    "arguments": {
+      "snapshot_id": "snap-20250115-001"
+    }
+  }
+}
+```
+
+**Response**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-fb-006",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Snapshot snap-20250115-001: DNS configuration before change"
+      }
+    ],
+    "isError": false,
+    "_meta": {
+      "snapshot_id": "snap-20250115-001",
+      "device_id": "dev-lab-01",
+      "kind": "dns_ntp",
+      "timestamp": "2025-01-15T10:25:00Z",
+      "size_bytes": 512,
+      "content": {
+        "dns_servers": ["8.8.8.8", "8.8.4.4"],
+        "ntp_servers": ["pool.ntp.org"],
+        "allow_remote_requests": true
+      },
+      "resource_uri": "snapshot://snap-20250115-001",
+      "resource_hint": "Use resource_uri for efficient snapshot access"
+    }
+  }
+}
+```
+
+---
+
+###Phase 2: Single-Device Writes (Advanced Tier)
 
 ---
 
@@ -1526,7 +2338,26 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `system/update-identity`
 
-**Description**: Update system identity and related fields.
+**Description:**
+```
+Update the system identity (device hostname).
+
+Use when:
+- User asks "rename this device to X" or "change hostname"
+- Standardizing device naming across fleet
+- Correcting misconfigured device names
+- Preparing device for production deployment
+
+Side effects:
+- Changes device identity immediately
+- May require reconnection (if using hostname for management)
+- Audit logged
+- Pre-change snapshot taken
+
+Returns: Changed status, old identity, new identity.
+
+Safety: Requires allow_advanced_writes=true on device. Use dry_run=true to preview.
+```
 
 **Tier**: Advanced
 **Phase**: Phase 2
@@ -1578,7 +2409,24 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `interface/update-comment`
 
-**Description**: Update interface comment (description).
+**Description:**
+```
+Update interface comment (description field).
+
+Use when:
+- User asks "add comment to ether1" or "label interface as WAN"
+- Documenting interface purposes
+- Standardizing interface descriptions across fleet
+- Adding context for troubleshooting
+
+Side effects:
+- Changes interface comment only (no operational impact)
+- Audit logged
+
+Returns: Changed status, old comment, new comment.
+
+Safety: Low-risk operation. Requires allow_advanced_writes=true.
+```
 
 **Tier**: Advanced
 **Phase**: Phase 2
@@ -1633,7 +2481,30 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `ip/add-secondary-address`
 
-**Description**: Add secondary IP address to an interface.
+**Description:**
+```
+Add a secondary IP address to an interface.
+
+Use when:
+- User asks "add secondary IP X to interface Y"
+- Configuring multiple IPs on single interface
+- Adding temporary address for migration
+- Setting up multi-subnet configurations
+
+Side effects:
+- Adds new IP address immediately
+- Does not remove existing addresses
+- Pre-change snapshot taken
+- Audit logged
+
+Returns: Changed status, new address ID, address, interface.
+
+Safety:
+- Validates no overlapping networks
+- Requires allow_advanced_writes=true
+- Use dry_run=true to preview
+- Does not allow modifying primary management address
+```
 
 **Tier**: Advanced
 **Phase**: Phase 2
@@ -1686,7 +2557,28 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `ip/remove-secondary-address`
 
-**Description**: Remove secondary IP address (with safety checks).
+**Description:**
+```
+Remove a secondary IP address (with safety checks).
+
+Use when:
+- User asks "remove IP X" or "delete secondary address"
+- Cleaning up unused addresses
+- Decommissioning services
+
+Side effects:
+- Removes IP address immediately
+- Pre-change snapshot taken
+- Audit logged
+
+Safety:
+- Blocks removal of primary management address
+- Blocks removal if only address on interface
+- Requires allow_advanced_writes=true
+- Use dry_run=true to preview
+
+Returns: Changed status, removed address.
+```
 
 **Tier**: Advanced
 **Phase**: Phase 2
@@ -1736,7 +2628,32 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `ip/update-address-list-entry`
 
-**Description**: Add or remove entries from MCP-managed address lists.
+**Description:**
+```
+Add or remove entries from MCP-managed firewall address lists.
+
+Use when:
+- User asks "add IP X to whitelist Y" or "remove IP from blacklist"
+- Managing dynamic access control lists
+- Adding/removing hosts from firewall rules
+- Implementing temporary access grants (with timeout)
+
+Side effects:
+- Adds or removes address-list entry immediately
+- Affects firewall rule matching
+- Pre-change snapshot taken
+- Audit logged
+
+Safety:
+- Only allows modification of MCP-managed lists (prefix: mcp-)
+- Blocks changes to system address lists
+- Requires allow_advanced_writes=true
+- Use dry_run=true to preview
+
+Returns: Changed status, action (add/remove), list name, address, entry ID.
+
+Tip: Use timeout parameter for temporary entries (e.g., "7d" for 7 days).
+```
 
 **Tier**: Advanced
 **Phase**: Phase 2
@@ -1796,7 +2713,32 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `dns/update-servers`
 
-**Description**: Update DNS server configuration.
+**Description:**
+```
+Update DNS server configuration.
+
+Use when:
+- User asks "change DNS servers to X,Y" or "update DNS config"
+- Migrating to new DNS infrastructure
+- Fixing DNS resolution issues
+- Standardizing DNS across fleet (use multi-device workflow for this)
+
+Side effects:
+- Updates DNS servers immediately
+- May cause brief DNS resolution disruption
+- Pre-change snapshot taken
+- Audit logged
+
+Safety:
+- Validates server reachability before applying (ping test)
+- Requires allow_advanced_writes=true
+- Lab/staging environments only by default (prod requires explicit approval)
+- Use dry_run=true to preview
+
+Returns: Changed status, old servers, new servers.
+
+Tip: For multi-device changes, use config/plan-dns-ntp-rollout (Professional tier).
+```
 
 **Tier**: Advanced
 **Phase**: Phase 2
@@ -1846,7 +2788,27 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `dns/flush-cache`
 
-**Description**: Flush DNS cache.
+**Description:**
+```
+Flush (clear) DNS cache.
+
+Use when:
+- User asks "flush DNS cache" or "clear DNS"
+- Troubleshooting stale DNS entries
+- After DNS server changes
+- Forcing fresh DNS resolution
+- Resolving DNS-related connectivity issues
+
+Side effects:
+- Clears all cached DNS entries immediately
+- Next DNS query will require upstream resolution
+- Slight increase in DNS resolution latency temporarily
+- Audit logged
+
+Returns: Changed status, number of entries flushed.
+
+Safety: Low-risk operation. Requires allow_advanced_writes=true.
+```
 
 **Tier**: Advanced
 **Phase**: Phase 2
@@ -1895,7 +2857,33 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `ntp/update-servers`
 
-**Description**: Update NTP server configuration.
+**Description:**
+```
+Update NTP server configuration.
+
+Use when:
+- User asks "change NTP servers to X" or "update time servers"
+- Migrating to new NTP infrastructure
+- Fixing time synchronization issues
+- Standardizing NTP across fleet (use multi-device workflow for this)
+
+Side effects:
+- Updates NTP configuration immediately
+- May cause brief time sync disruption
+- System will re-sync with new servers
+- Pre-change snapshot taken
+- Audit logged
+
+Safety:
+- Validates server reachability before applying
+- Requires allow_advanced_writes=true
+- Lab/staging environments only by default
+- Use dry_run=true to preview
+
+Returns: Changed status, old servers, new servers.
+
+Tip: For multi-device changes, use config/plan-dns-ntp-rollout (Professional tier).
+```
 
 **Tier**: Advanced
 **Phase**: Phase 2
@@ -1952,7 +2940,30 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `config/plan-dns-ntp-rollout`
 
-**Description**: Create plan for multi-device DNS/NTP configuration update.
+**Description:**
+```
+Create execution plan for updating DNS/NTP servers across multiple devices.
+
+Use when:
+- User asks "update DNS/NTP on all lab devices" or "rollout new time servers"
+- Standardizing DNS/NTP infrastructure across fleet
+- Migrating to new DNS/NTP providers
+- Need change preview before applying
+- Multi-device coordination required
+
+Pattern: This is the PLAN step (no changes applied).
+
+Returns: Plan ID, summary, list of devices with proposed changes.
+
+Next step: Review plan, then use config/apply-dns-ntp-rollout to execute.
+
+Safety:
+- No side effects (plan only)
+- Requires allow_professional_workflows=true on all target devices
+- Plan expires after 24 hours
+
+Tip: Always review plan details before applying!
+```
 
 **Tier**: Professional
 **Phase**: Phase 4
@@ -2019,7 +3030,33 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `config/apply-dns-ntp-rollout`
 
-**Description**: Execute approved DNS/NTP rollout plan.
+**Description:**
+```
+Execute approved DNS/NTP rollout plan.
+
+Use when:
+- After reviewing plan from config/plan-dns-ntp-rollout
+- User confirms "apply the plan" or "execute rollout"
+- Ready to make changes across multiple devices
+
+Pattern: This is the APPLY step (executes changes).
+
+Side effects:
+- Updates DNS/NTP on all devices in plan
+- Creates pre/post-change snapshots per device
+- Job executes asynchronously
+- Audit logged per device
+
+Safety:
+- Requires approval token (Phase 4: multi-user approval; Phase 1: self-approval)
+- Plan must be valid and not expired
+- Requires allow_professional_workflows=true on devices
+- Rollback available via snapshots
+
+Returns: Job ID, execution status, success/failure counts, per-device results.
+
+Note: Execution is sequential across devices to minimize blast radius.
+```
 
 **Tier**: Professional
 **Phase**: Phase 4
@@ -2077,7 +3114,29 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `config/plan-address-list-sync`
 
-**Description**: Create plan for multi-device address-list synchronization.
+**Description:**
+```
+Create plan for synchronizing firewall address-list entries across devices.
+
+Use when:
+- User asks "sync whitelist across fleet" or "update blacklist on all devices"
+- Maintaining consistent address lists across multiple routers
+- Deploying new access control rules fleet-wide
+- Need preview before changing firewall rules
+
+Pattern: This is the PLAN step.
+
+Returns: Plan ID, summary, list of devices with proposed address-list changes.
+
+Next step: Review, then use config/apply-address-list-sync.
+
+Safety:
+- No side effects (plan only)
+- Only syncs MCP-managed lists (prefix: mcp-)
+- Requires allow_professional_workflows=true
+
+Tip: Useful for managing distributed firewall policies.
+```
 
 **Tier**: Professional
 **Phase**: Phase 4
@@ -2144,7 +3203,32 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `config/apply-address-list-sync`
 
-**Description**: Execute approved address-list sync plan.
+**Description:**
+```
+Execute approved address-list synchronization plan.
+
+Use when:
+- After reviewing plan from config/plan-address-list-sync
+- User confirms "sync address lists" or "apply firewall update"
+
+Pattern: This is the APPLY step.
+
+Side effects:
+- Adds/removes address-list entries on all devices
+- Creates pre/post-change snapshots
+- May affect active firewall rules
+- Audit logged per device
+
+Safety:
+- Requires approval token
+- Only modifies MCP-managed lists
+- Plan must be valid
+- Rollback available via snapshots
+
+Returns: Job ID, execution status, per-device results.
+
+Note: Changes may affect active connections if firewall rules reference these lists.
+```
 
 **Tier**: Professional
 **Phase**: Phase 4
@@ -2208,7 +3292,34 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `routing/add-static-route`
 
-**Description**: Add static route (high-risk, requires plan/approval in Phase 4).
+**Description:**
+```
+Add a static route (high-risk operation).
+
+Use when:
+- User asks "add route to network X via gateway Y"
+- Configuring routing to remote networks
+- Setting up site-to-site connectivity
+- Need custom routing beyond connected/dynamic routes
+
+Side effects:
+- Adds static route immediately
+- Affects routing decisions and traffic flow
+- May disrupt connectivity if misconfigured
+- Pre-change snapshot taken
+- Audit logged
+
+Safety:
+- Professional tier (requires allow_professional_workflows=true)
+- Use dry_run=true for planning
+- Validates gateway reachability
+- Warns if conflicts with existing routes
+- Phase 4: Requires plan/apply pattern for production
+
+Returns: Changed status, planned route details.
+
+Warning: Routing changes can cause connectivity loss. Always use dry_run first!
+```
 
 **Tier**: Professional
 **Phase**: Phase 4
@@ -2265,7 +3376,32 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `routing/remove-static-route`
 
-**Description**: Remove static route (high-risk).
+**Description:**
+```
+Remove a static route (high-risk operation).
+
+Use when:
+- User asks "delete route to X" or "remove static route"
+- Decommissioning network connectivity
+- Cleaning up obsolete routes
+- Correcting misconfigurations
+
+Side effects:
+- Removes route immediately
+- May break connectivity to destination network
+- Pre-change snapshot taken
+- Audit logged
+
+Safety:
+- Professional tier (requires allow_professional_workflows=true)
+- Use dry_run=true to preview
+- Warns if route is currently active
+- Blocks removal of default route without explicit confirmation
+
+Returns: Changed status, removed route details.
+
+Warning: Removing routes can cause connectivity loss. Verify alternate paths first!
+```
 
 **Tier**: Professional
 **Phase**: Phase 4
@@ -2321,7 +3457,35 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `device/register-device`
 
-**Description**: Register a new device in MCP.
+**Description:**
+```
+Register a new RouterOS device in the MCP service.
+
+Use when:
+- User asks "add new device" or "register router X"
+- Onboarding new hardware
+- Expanding managed device inventory
+- Setting up fresh RouterOS installation
+
+Side effects:
+- Creates device record in MCP database
+- Encrypts and stores credentials
+- Schedules initial health check
+- Audit logged
+
+Safety:
+- Validates connectivity before registration
+- Encrypts credentials at rest
+- Requires valid RouterOS credentials
+- Default capability flags are conservative (writes disabled)
+
+Returns: Device ID, registration status, initial connectivity check.
+
+Next steps:
+1. Verify connectivity with device/check-connectivity
+2. Get system info with system/get-overview
+3. Update capability flags if needed with device/update-device
+```
 
 **Tier**: Advanced
 **Phase**: Phase 1
@@ -2380,7 +3544,30 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 
 ##### `device/update-device`
 
-**Description**: Update device metadata or configuration.
+**Description:**
+```
+Update device metadata, tags, or capability flags.
+
+Use when:
+- User asks "enable advanced writes on device X" or "update device tags"
+- Changing device capability flags (allow_advanced_writes, allow_professional_workflows)
+- Updating device tags for organization (site, role, region)
+- Modifying device metadata without touching RouterOS
+
+Side effects:
+- Updates device record in MCP database
+- Changes authorization behavior (if modifying capability flags)
+- Audit logged
+
+Safety:
+- MCP-only operation (no RouterOS changes)
+- Capability flag changes affect tool authorization
+- Be cautious enabling professional workflows on production devices
+
+Returns: Changed status, updated fields, new capability flags.
+
+Tip: Use tags for flexible device grouping (e.g., {"site": "dc1", "role": "edge", "region": "us-west"}).
+```
 
 **Tier**: Advanced
 **Phase**: Phase 1
@@ -2473,7 +3660,252 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 | `config/plan-address-list-sync` | Config | Professional | 4 | N/A (plan step) |
 | `config/apply-address-list-sync` | Config | Professional | 4 | Multiple endpoints |
 
-**Total: 40 tools** (13 Phase 1, 9 Phase 2, 18 Phase 4+)
+**Total: 46 tools** (23 Phase 1 fundamental [including 6 fallback tools], 9 Phase 2 advanced, 14 Phase 4 professional)
+
+---
+
+## Tool Metadata Specification
+
+**Every tool must declare the following metadata for optimal MCP client integration:**
+
+### Required Metadata Fields
+
+```python
+class ToolMetadata(BaseModel):
+    """Complete tool metadata for MCP introspection."""
+
+    # Identity
+    name: str                        # Tool name (e.g., "system/get-overview")
+    description: str                 # Human-readable description
+    topic: str                       # Topic category
+
+    # Security & Access
+    tier: str                        # fundamental/advanced/professional
+    phase: int                       # Phase number (1-5)
+    required_role: str               # read_only/ops_rw/admin (Phase 4)
+    environments: list[str]          # Allowed environments
+    requires_approval: bool          # Approval token required (Phase 4)
+
+    # Execution Characteristics
+    timeout_seconds: int             # Maximum execution time
+    idempotent: bool                 # Can be safely retried
+    supports_dry_run: bool           # Supports dry_run parameter
+
+    # Response Characteristics
+    cacheable: bool                  # Response can be cached
+    cache_ttl_seconds: int | None    # Cache TTL (if cacheable)
+    estimated_tokens: int            # Estimated response size (tokens)
+    supports_pagination: bool        # Supports limit/offset
+
+    # Streaming Support
+    supports_streaming: bool         # Supports progress notifications
+
+    # Schemas
+    input_schema: dict               # JSON Schema for request arguments
+    output_schema: dict              # JSON Schema for response _meta
+
+    # Deprecation
+    deprecated: bool                 # Tool is deprecated
+    replacement_tool: str | None     # Replacement tool name
+    deprecation_date: str | None     # ISO 8601 date
+```
+
+### Example Tool Metadata
+
+```python
+SYSTEM_GET_OVERVIEW_METADATA = ToolMetadata(
+    name="system/get-overview",
+    description="Get comprehensive system overview (resources, identity, routerboard info)",
+    topic="system",
+    tier="fundamental",
+    phase=1,
+    required_role="read_only",
+    environments=["lab", "staging", "prod"],
+    requires_approval=False,
+    timeout_seconds=10,
+    idempotent=True,
+    supports_dry_run=False,
+    cacheable=True,
+    cache_ttl_seconds=60,
+    estimated_tokens=500,
+    supports_pagination=False,
+    supports_streaming=False,
+    input_schema={
+        "type": "object",
+        "properties": {
+            "device_id": {"type": "string"},
+            "correlation_id": {"type": "string"}
+        },
+        "required": ["device_id"]
+    },
+    output_schema={...},
+    deprecated=False,
+    replacement_tool=None,
+    deprecation_date=None
+)
+```
+
+### Metadata by Tool Category
+
+**Read-Only Fundamental Tools:**
+- `timeout_seconds`: 10-30s
+- `idempotent`: true
+- `supports_dry_run`: false (no writes)
+- `cacheable`: true (30-300s TTL)
+- `estimated_tokens`: 200-2000
+
+**Single-Device Write Tools (Advanced):**
+- `timeout_seconds`: 15-30s
+- `idempotent`: true (read-modify-write pattern)
+- `supports_dry_run`: true
+- `cacheable`: false
+- `estimated_tokens`: 100-500
+
+**Multi-Device Workflows (Professional):**
+- `timeout_seconds`: 60-300s
+- `idempotent`: false (plan/apply pattern)
+- `supports_dry_run`: N/A (plan step is dry-run)
+- `cacheable`: false
+- `estimated_tokens`: 1000-10000
+
+**Diagnostic Tools:**
+- `timeout_seconds`: 30-120s
+- `idempotent`: false (network-dependent)
+- `supports_dry_run`: false
+- `cacheable`: false
+- `supports_streaming`: true (ping, traceroute)
+- `estimated_tokens`: 200-1000
+
+---
+
+## Pagination Standard
+
+**Tools returning lists MUST support standardized pagination:**
+
+### Pagination Parameters
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-001",
+  "method": "tools/call",
+  "params": {
+    "name": "logs/get-recent",
+    "arguments": {
+      "device_id": "dev-lab-01",
+      "limit": 100,      // Max items to return (default: 100, max: 1000)
+      "offset": 0,       // Skip N items (default: 0)
+      "topics": ["system", "error"]
+    }
+  }
+}
+```
+
+### Pagination Response
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-001",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Retrieved 100 of 450 log entries"
+      }
+    ],
+    "isError": false,
+    "_meta": {
+      "device_id": "dev-lab-01",
+      "log_entries": [ ... ],
+      "pagination": {
+        "limit": 100,
+        "offset": 0,
+        "returned_count": 100,
+        "total_count": 450,
+        "has_more": true,
+        "next_offset": 100
+      }
+    }
+  }
+}
+```
+
+### Tools Supporting Pagination
+
+| Tool Name | Default Limit | Max Limit | Total Count Source |
+|-----------|---------------|-----------|-------------------|
+| `device/list-devices` | 100 | 1000 | MCP database |
+| `interface/list-interfaces` | 50 | 500 | RouterOS `/rest/interface` |
+| `ip/list-addresses` | 50 | 500 | RouterOS `/rest/ip/address` |
+| `ip/get-arp-table` | 100 | 1000 | RouterOS `/rest/ip/arp` |
+| `firewall/list-filter-rules` | 50 | 500 | RouterOS firewall API |
+| `firewall/list-nat-rules` | 50 | 500 | RouterOS firewall API |
+| `firewall/list-address-lists` | 100 | 1000 | RouterOS firewall API |
+| `logs/get-recent` | 100 | 1000 | RouterOS `/rest/log` |
+| `routing/get-summary` | 100 | 1000 | RouterOS `/rest/ip/route` |
+
+---
+
+## Token Budget Estimates
+
+**Estimated token counts for LLM context management:**
+
+### By Tool Category
+
+**Device Management:**
+- `device/list-devices`: 200-2000 tokens (depends on device count)
+- `device/check-connectivity`: 100-200 tokens
+
+**System Status:**
+- `system/get-overview`: 400-600 tokens
+- `system/get-packages`: 300-1500 tokens (12-50 packages)
+- `system/get-clock`: 100-150 tokens
+
+**Network Interfaces:**
+- `interface/list-interfaces`: 500-5000 tokens (10-100 interfaces)
+- `interface/get-interface`: 200-300 tokens
+- `interface/get-stats`: 150-250 tokens per interface
+
+**IP Configuration:**
+- `ip/list-addresses`: 300-3000 tokens (5-50 addresses)
+- `ip/get-arp-table`: 500-5000 tokens (10-100 entries)
+
+**DNS/NTP:**
+- `dns/get-status`: 150-250 tokens
+- `dns/get-cache`: 1000-10000 tokens (10-1000 entries)
+- `ntp/get-status`: 150-250 tokens
+
+**Routing:**
+- `routing/get-summary`: 800-8000 tokens (25-250 routes)
+- `routing/get-route`: 150-250 tokens
+
+**Firewall:**
+- `firewall/list-filter-rules`: 800-8000 tokens (15-150 rules)
+- `firewall/list-nat-rules`: 300-3000 tokens (3-30 rules)
+- `firewall/list-address-lists`: 500-5000 tokens (10-100 entries)
+
+**Logs:**
+- `logs/get-recent`: 5000-200000 tokens (**WARNING**: 100-1000 entries × 50-200 tokens/entry)
+  - **Recommendation**: Default limit=100, max=1000
+  - **Token budget**: ~5000-20000 tokens for 100 entries
+
+**Diagnostics:**
+- `tool/ping`: 200-400 tokens
+- `tool/traceroute`: 400-1200 tokens (8-30 hops)
+- `tool/bandwidth-test`: 200-300 tokens
+
+**Multi-Device Workflows:**
+- `config/plan-dns-ntp-rollout`: 1000-10000 tokens (depends on device count)
+- `config/apply-dns-ntp-rollout`: 1000-10000 tokens
+
+### Token Budget Recommendations
+
+1. **Always use pagination** for list operations
+2. **Default limit=100** for logs and large lists
+3. **Warn users** when response exceeds 10,000 tokens
+4. **Truncate logs** older than 24 hours
+5. **Cache read-only responses** to reduce RouterOS load
 
 ---
 
@@ -2484,11 +3916,13 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 **Common Request Fields:**
 - `device_id` (string, required for device-specific tools): MCP device identifier
 - `dry_run` (boolean, optional, default false): Plan mode without applying changes
+- `correlation_id` (string, optional): Request correlation ID for tracing
 
 **Common Response Fields in `_meta`:**
 - `device_id` (string): Device identifier
 - `changed` (boolean, for write operations): Whether configuration changed
 - `execution_time_ms` (number, optional): Tool execution time
+- `correlation_id` (string, optional): Request correlation ID (echoed from request)
 
 ### Error Handling
 
@@ -2677,6 +4111,261 @@ def check_authorization(
 
 ---
 
+## MCP Resources Primitive (Phase 2)
+
+**Phase 2 adds MCP Resources primitive for config exports and file access.**
+
+### What are MCP Resources?
+
+Resources are URI-addressable content that MCP clients can read. Unlike tools (which execute operations), resources provide direct access to configuration data.
+
+**Benefits:**
+- Full MCP clients (Claude Desktop, VS Code) can browse resources
+- Enables context attachment for LLM conversations
+- Supports large config files without tool token limits
+
+### Planned Resources (Phase 2)
+
+#### RouterOS Configuration Export
+
+**Resource URI Pattern**: `routeros://{device_id}/config/export`
+
+**Example URIs:**
+- `routeros://dev-lab-01/config/export` - Full configuration
+- `routeros://dev-lab-01/config/export?compact=true` - Compact format
+- `routeros://dev-lab-01/config/export?topic=firewall` - Firewall config only
+
+**MCP Resource Schema:**
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "resources/read",
+  "params": {
+    "uri": "routeros://dev-lab-01/config/export"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "contents": [
+      {
+        "uri": "routeros://dev-lab-01/config/export",
+        "mimeType": "text/x-routeros-script",
+        "text": "# jan/15/2025 14:30:00 by RouterOS 7.10.1\n/system identity\nset name=router-lab-01\n..."
+      }
+    ]
+  }
+}
+```
+
+**Token Considerations:**
+- Full config export: 10,000-100,000 tokens
+- Compact export: 5,000-50,000 tokens
+- Topic-filtered export: 1,000-10,000 tokens
+
+#### System Package Information
+
+**Resource URI**: `routeros://{device_id}/system/packages`
+
+**Response**: JSON array of installed packages
+
+#### Device Inventory
+
+**Resource URI**: `mcp://devices`
+
+**Response**: JSON array of all registered devices
+
+### Resource vs Tool Decision Matrix
+
+| Use Case | Use Tool | Use Resource |
+|----------|----------|--------------|
+| Execute operation (ping, change config) | ✅ | ❌ |
+| Get current status (small response) | ✅ | ❌ |
+| Export large config file | ❌ | ✅ |
+| Browse device inventory | Both | ✅ (better UX) |
+| Attach context to LLM conversation | ❌ | ✅ |
+| Stream real-time data | ✅ | ❌ |
+
+**Implementation Priority**: Phase 2 (after Phase 1 tools are stable)
+
+---
+
+## Streaming Support for Long-Running Tools (Phase 3)
+
+**Phase 3 may add JSON-RPC streaming for long-running diagnostics.**
+
+### Streaming-Compatible Tools
+
+1. `tool/ping` - Progress notifications per packet
+2. `tool/traceroute` - Progress notifications per hop
+3. `tool/bandwidth-test` - Periodic throughput updates
+4. `config/apply-dns-ntp-rollout` - Per-device completion notifications
+
+### Streaming Protocol (JSON-RPC 2.0 Notifications)
+
+**Initial Request:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-022",
+  "method": "tools/call",
+  "params": {
+    "name": "tool/ping",
+    "arguments": {
+      "device_id": "dev-lab-01",
+      "address": "8.8.8.8",
+      "count": 10,
+      "stream_progress": true  // Enable streaming
+    }
+  }
+}
+```
+
+**Progress Notifications (no id - these are notifications):**
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "tools/progress",
+  "params": {
+    "request_id": "req-022",
+    "progress": {
+      "current": 3,
+      "total": 10,
+      "message": "Ping #3: 12.5ms"
+    }
+  }
+}
+```
+
+**Final Response:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-022",
+  "result": {
+    "content": [{"type": "text", "text": "Ping completed: 10/10 packets"}],
+    "_meta": {
+      "packets_sent": 10,
+      "packets_received": 10,
+      "avg_rtt_ms": 12.0
+    }
+  }
+}
+```
+
+**Implementation Priority**: Phase 3 (after Resources are implemented)
+
+---
+
+## Tool Composition Patterns
+
+**Common workflows combining multiple tools:**
+
+### Pattern 1: Device Discovery & Health Check
+
+```python
+# 1. List all lab devices
+devices = await call_tool("device/list-devices", {
+    "environment": "lab"
+})
+
+# 2. Check connectivity for each device (parallel)
+connectivity_checks = await asyncio.gather(*[
+    call_tool("device/check-connectivity", {"device_id": d["id"]})
+    for d in devices["_meta"]["devices"]
+])
+
+# 3. Get overview for reachable devices
+reachable_ids = [
+    c["_meta"]["device_id"]
+    for c in connectivity_checks
+    if c["_meta"]["reachable"]
+]
+
+overviews = await asyncio.gather(*[
+    call_tool("system/get-overview", {"device_id": device_id})
+    for device_id in reachable_ids
+])
+```
+
+### Pattern 2: Configuration Audit
+
+```python
+# 1. Get current DNS configuration
+dns_status = await call_tool("dns/get-status", {
+    "device_id": "dev-lab-01"
+})
+
+# 2. Get NTP configuration
+ntp_status = await call_tool("ntp/get-status", {
+    "device_id": "dev-lab-01"
+})
+
+# 3. Compare with desired state
+compliance = check_compliance(dns_status, ntp_status, desired_state)
+```
+
+### Pattern 3: Safe Configuration Change
+
+```python
+# 1. Plan the change (dry-run)
+plan = await call_tool("dns/update-servers", {
+    "device_id": "dev-lab-01",
+    "dns_servers": ["1.1.1.1", "1.0.0.1"],
+    "dry_run": True
+})
+
+# 2. Review plan with user
+if plan["_meta"]["changed"]:
+    user_approval = await get_user_approval(plan)
+
+# 3. Apply change
+if user_approval:
+    result = await call_tool("dns/update-servers", {
+        "device_id": "dev-lab-01",
+        "dns_servers": ["1.1.1.1", "1.0.0.1"],
+        "dry_run": False
+    })
+
+# 4. Verify change
+verification = await call_tool("dns/get-status", {
+    "device_id": "dev-lab-01"
+})
+```
+
+### Pattern 4: Multi-Device Rollout (Professional)
+
+```python
+# 1. Create rollout plan
+plan = await call_tool("config/plan-dns-ntp-rollout", {
+    "device_ids": ["dev-lab-01", "dev-lab-02", "dev-lab-03"],
+    "dns_servers": ["1.1.1.1", "1.0.0.1"],
+    "ntp_servers": ["time.cloudflare.com"]
+})
+
+# 2. Review plan
+plan_id = plan["_meta"]["plan_id"]
+print(f"Plan {plan_id} affects {plan['_meta']['total_devices']} devices")
+
+# 3. Get approval token (Phase 4)
+approval_token = await get_approval_token(plan_id)
+
+# 4. Execute plan
+result = await call_tool("config/apply-dns-ntp-rollout", {
+    "plan_id": plan_id,
+    "approval_token": approval_token
+})
+
+# 5. Monitor execution
+print(f"Success: {result['_meta']['successful']}/{result['_meta']['total_devices']}")
+```
+
+---
+
 ## Related Documents
 
 - **[Doc 03: RouterOS Integration & Endpoint Mappings](03-routeros-integration-and-platform-constraints-rest-and-ssh.md)** - REST API endpoint details
@@ -2686,4 +4375,4 @@ def check_authorization(
 
 ---
 
-**Document Status**: ✅ Complete with 40 tools, full JSON-RPC schemas, and phase assignments
+**Document Status**: ✅ Complete with 46 tools (40 core tools + 6 Phase-1 fallback tools for resource compatibility), full JSON-RPC schemas, intent-based descriptions, and phase assignments

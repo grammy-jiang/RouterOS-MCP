@@ -355,6 +355,311 @@ async def fleet_health_summary() -> str:
 
 ---
 
+## Phase-1 Fallback Tools for Resources
+
+### Overview
+
+For MCP clients that support **tools-only** (e.g., ChatGPT, Mistral AI), Phase-1 fallback tools provide access to resource data through the tools interface.
+
+These tools mirror the functionality of Phase-2 resources and include `resource_uri` hints to enable future migration to resource-based workflows.
+
+### Device Resources - Phase-1 Fallback Tools
+
+| Resource URI | Fallback Tool | Documentation |
+|--------------|---------------|---------------|
+| `device://{id}/health` | `device/get-health-data` | [Doc 04](04-mcp-tools-interface-and-json-schema-specification.md#deviceget-health-data) |
+| `device://{id}/config` | `device/get-config-snapshot` | [Doc 04](04-mcp-tools-interface-and-json-schema-specification.md#deviceget-config-snapshot) |
+
+**Example: Device Health**
+
+```python
+# Phase-2: Resource-based (Claude Desktop, supported clients)
+health_resource = await mcp.read_resource("device://dev-lab-01/health")
+
+# Phase-1: Tool-based fallback (ChatGPT, Mistral)
+health_data = await mcp.call_tool("device/get-health-data", {"device_id": "dev-lab-01"})
+# Response includes: {"resource_uri": "device://dev-lab-01/health", ...}
+```
+
+### Fleet Resources - Phase-1 Fallback Tools
+
+| Resource URI | Fallback Tool | Documentation |
+|--------------|---------------|---------------|
+| `fleet://{env}/summary` | `fleet/get-summary` | [Doc 04](04-mcp-tools-interface-and-json-schema-specification.md#fleetget-summary) |
+
+**Example: Fleet Summary**
+
+```python
+# Phase-2: Resource-based
+fleet_summary = await mcp.read_resource("fleet://lab/summary")
+
+# Phase-1: Tool-based fallback
+fleet_data = await mcp.call_tool("fleet/get-summary", {"environment": "lab"})
+```
+
+### Plan & Audit Resources - Phase-1 Fallback Tools
+
+| Resource URI | Fallback Tool | Documentation |
+|--------------|---------------|---------------|
+| `plan://{id}` | `plan/get-details` | [Doc 04](04-mcp-tools-interface-and-json-schema-specification.md#planget-details) |
+| `audit://{id}?filters` | `audit/get-events` | [Doc 04](04-mcp-tools-interface-and-json-schema-specification.md#auditget-events) |
+
+### Snapshot Resources - Phase-1 Fallback Tools
+
+| Resource URI | Fallback Tool | Documentation |
+|--------------|---------------|---------------|
+| `snapshot://{id}` | `snapshot/get-content` | [Doc 04](04-mcp-tools-interface-and-json-schema-specification.md#snapshotget-content) |
+
+### Migration Path
+
+**Current (Phase 1):** Tools-only clients use fallback tools
+**Future (Phase 2):** Clients migrate to resource-based workflows
+**Compatibility:** Fallback tools include `resource_uri` for discovery
+
+```python
+# Tool response includes migration hint
+{
+  "resource_uri": "device://dev-lab-01/health",  # Future migration path
+  "device_id": "dev-lab-01",
+  "health_status": "healthy",
+  # ... health data
+}
+```
+
+---
+
+## Resource Metadata Enhancement
+
+### Overview
+
+Following MCP best practices, all resources include comprehensive metadata to enable clients to make informed decisions about context loading and resource usage.
+
+### Resource Metadata Structure
+
+Resources MUST return structured metadata using the `Resource` type:
+
+```python
+from fastmcp.resources import Resource
+from datetime import datetime
+
+@mcp.resource("device://{device_id}/config")
+async def device_config_resource(device_id: str) -> Resource:
+    """RouterOS configuration export with full metadata."""
+
+    # Fetch configuration
+    content = await snapshot_service.get_current_config(device_id)
+    device = await device_service.get_device(device_id)
+
+    return Resource(
+        uri=f"device://{device_id}/config",
+        name=f"Configuration: {device.name}",
+        description=f"Complete RouterOS configuration export for {device.name} ({device.environment}). "
+                    f"Includes all system settings, interfaces, routing, firewall rules. "
+                    f"Use for configuration analysis, backup, or comparison.",
+        mime_type="text/x-routeros-script",
+        text=content,
+
+        # Metadata for client decision-making
+        metadata={
+            "device_id": device_id,
+            "device_name": device.name,
+            "environment": device.environment,
+            "routeros_version": device.routeros_version,
+            "size_bytes": len(content),
+            "size_hint_kb": round(len(content) / 1024, 2),
+            "snapshot_timestamp": datetime.utcnow().isoformat(),
+            "format": "routeros_script",
+            "content_sections": [
+                "system", "interfaces", "ip", "routing",
+                "firewall", "services", "wireless"
+            ],
+            "estimated_tokens": estimate_tokens(content),  # Approx token count
+            "safe_for_context": len(content) < 50000,  # Under 50KB safe for most models
+        }
+    )
+```
+
+### Metadata Fields Standard
+
+All resources SHOULD include these metadata fields:
+
+| Field | Type | Required | Purpose |
+|-------|------|----------|---------|
+| `uri` | string | ✅ Yes | Unique resource identifier |
+| `name` | string | ✅ Yes | Human-readable title |
+| `description` | string | ✅ Yes | What the resource contains and when to use it |
+| `mime_type` | string | ✅ Yes | Content type (text/plain, application/json, etc.) |
+| `metadata.size_bytes` | integer | ✅ Yes | Exact content size |
+| `metadata.size_hint_kb` | float | ⚠️ Recommended | Size in KB for quick assessment |
+| `metadata.estimated_tokens` | integer | ⚠️ Recommended | Approximate token count for context planning |
+| `metadata.safe_for_context` | boolean | ⚠️ Recommended | Whether safe to load into typical context windows |
+| `metadata.snapshot_timestamp` | string | ⚠️ Recommended | When data was captured (ISO 8601) |
+| `metadata.content_sections` | array | Optional | Logical sections/topics in content |
+
+### Token Estimation
+
+Implement a token estimator for accurate context planning:
+
+```python
+def estimate_tokens(text: str) -> int:
+    """Estimate token count for text content.
+
+    Uses a simple heuristic: ~4 characters per token for English text.
+    For more accuracy, integrate with tiktoken library for specific models.
+
+    Args:
+        text: Content to estimate tokens for
+
+    Returns:
+        Estimated token count
+    """
+    # Simple estimation (4 chars/token average)
+    return len(text) // 4
+
+    # OR use tiktoken for accuracy:
+    # import tiktoken
+    # encoding = tiktoken.get_encoding("cl100k_base")  # GPT-4 encoding
+    # return len(encoding.encode(text))
+```
+
+### Discovery Strategy
+
+#### Static Resources
+
+Resources that always exist regardless of dynamic data:
+
+```python
+@mcp.resource("fleet://lab/schema")
+async def fleet_schema() -> Resource:
+    """Schema definition for lab environment (static resource)."""
+    schema = {
+        "device_schema": {...},
+        "tag_schema": {...}
+    }
+
+    content = json.dumps(schema, indent=2)
+
+    return Resource(
+        uri="fleet://lab/schema",
+        name="Lab Fleet Schema",
+        description="Schema definitions for lab environment devices and metadata",
+        mime_type="application/json",
+        text=content,
+        metadata={
+            "type": "static",
+            "version": "1.0",
+            "size_bytes": len(content),
+            "size_hint_kb": round(len(content) / 1024, 2),
+            "estimated_tokens": estimate_tokens(content),
+            "safe_for_context": True
+        }
+    )
+```
+
+#### Dynamic Resources (URI Templates)
+
+Resources created on-demand based on parameters:
+
+```python
+@mcp.resource("device://{device_id}/health")
+async def device_health_resource(device_id: str) -> Resource:
+    """Dynamic health resource per device."""
+    health_data = await health_service.get_health(device_id)
+    content = json.dumps(health_data, indent=2)
+
+    return Resource(
+        uri=f"device://{device_id}/health",
+        name=f"Health: {health_data['device_name']}",
+        description=f"Current health metrics and status for {health_data['device_name']}",
+        mime_type="application/json",
+        text=content,
+        metadata={
+            "type": "dynamic",
+            "device_id": device_id,
+            "health_status": health_data["status"],
+            "last_check": health_data["last_check_timestamp"],
+            "size_bytes": len(content),
+            "size_hint_kb": round(len(content) / 1024, 2),
+            "estimated_tokens": estimate_tokens(content),
+            "safe_for_context": True  # Health data is always small
+        }
+    )
+```
+
+#### Resource List Response
+
+When clients call `resources/list`, return metadata to aid discovery:
+
+```json
+{
+  "resources": [
+    {
+      "uri": "device://{device_id}/config",
+      "name": "Device Configuration",
+      "description": "RouterOS configuration export. Use for backup, analysis, or documentation.",
+      "mime_type": "text/x-routeros-script",
+      "metadata": {
+        "type": "dynamic",
+        "template": true,
+        "typical_size_kb": "20-100",
+        "safe_for_context": true
+      }
+    },
+    {
+      "uri": "fleet://lab/summary",
+      "name": "Lab Fleet Summary",
+      "description": "Aggregated health and status for all lab devices",
+      "mime_type": "application/json",
+      "metadata": {
+        "type": "static",
+        "size_bytes": 2048,
+        "safe_for_context": true
+      }
+    }
+  ]
+}
+```
+
+### Client Usage Example
+
+Clients can use metadata to make informed decisions:
+
+```python
+# Client-side logic
+async def smart_resource_load(resource_uri: str):
+    """Load resource intelligently based on metadata."""
+
+    # Get resource metadata without fetching content
+    resource_list = await mcp.list_resources()
+    resource_meta = next(r for r in resource_list if r["uri"] == resource_uri)
+
+    # Check if safe for context
+    if not resource_meta["metadata"].get("safe_for_context", True):
+        logger.warning(
+            f"Resource {resource_uri} is large "
+            f"({resource_meta['metadata']['size_hint_kb']} KB). "
+            "Consider filtering or pagination."
+        )
+
+        # Prompt user or use filtered version
+        return await mcp.read_resource(resource_uri + "?limit=100")
+
+    # Safe to load fully
+    return await mcp.read_resource(resource_uri)
+```
+
+### Implementation Checklist
+
+- [ ] All resources return `Resource` type with metadata
+- [ ] Include `size_bytes`, `size_hint_kb`, `estimated_tokens` for all resources
+- [ ] Mark `safe_for_context` based on size thresholds
+- [ ] Distinguish static vs dynamic resources in metadata
+- [ ] Implement token estimation function
+- [ ] Provide resource list with metadata for discovery
+- [ ] Document typical size ranges for dynamic resources
+
+---
+
 ## Resource Access Control
 
 ### Resource Authorization Pattern
@@ -1302,6 +1607,756 @@ After review, verify:
 - Schedule maintenance if needed
 - Update device tags/metadata if appropriate
 """
+```
+
+---
+
+## Resource Versioning and Caching
+
+### ETag-Based Resource Versioning
+
+Implement ETags for efficient resource caching and change detection:
+
+```python
+import hashlib
+from fastmcp import FastMCP
+from fastmcp.resources import ResourceResponse
+
+@mcp.resource("device://{device_id}/config")
+async def device_config(device_id: str) -> ResourceResponse:
+    """RouterOS configuration with ETag support."""
+
+    # Fetch config
+    snapshot_service = get_snapshot_service()
+    config = await snapshot_service.get_current_config(device_id)
+
+    # Generate ETag from content hash
+    etag = hashlib.sha256(config.encode()).hexdigest()[:16]
+
+    # Check if client has current version
+    context = get_context()
+    if_none_match = context.get_header("If-None-Match")
+
+    if if_none_match == etag:
+        # Client has current version
+        return ResourceResponse(
+            status=304,  # Not Modified
+            headers={"ETag": etag}
+        )
+
+    # Return config with ETag
+    return ResourceResponse(
+        content=config,
+        headers={
+            "ETag": etag,
+            "Cache-Control": "max-age=300",  # Cache for 5 minutes
+            "Last-Modified": snapshot_service.last_snapshot_time.isoformat()
+        },
+        mime_type="text/x-routeros-script"
+    )
+```
+
+### Last-Modified Timestamp Pattern
+
+```python
+from datetime import datetime
+
+@mcp.resource("device://{device_id}/health")
+async def device_health(device_id: str) -> ResourceResponse:
+    """Health metrics with last-modified timestamp."""
+
+    health_service = get_health_service()
+    health = await health_service.get_current_health(device_id)
+
+    last_check = health.get("last_check_timestamp")
+
+    # Check if-modified-since header
+    context = get_context()
+    if_modified_since = context.get_header("If-Modified-Since")
+
+    if if_modified_since:
+        if_modified_dt = datetime.fromisoformat(if_modified_since)
+        last_check_dt = datetime.fromisoformat(last_check)
+
+        if last_check_dt <= if_modified_dt:
+            return ResourceResponse(status=304)  # Not Modified
+
+    return ResourceResponse(
+        content=json.dumps(health, indent=2),
+        headers={
+            "Last-Modified": last_check,
+            "Cache-Control": "max-age=60",  # Cache for 1 minute
+            "X-Health-Status": health["status"]
+        },
+        mime_type="application/json"
+    )
+```
+
+---
+
+## Resource Pagination and Filtering
+
+### Cursor-Based Pagination
+
+Implement cursor-based pagination for large resource collections:
+
+```python
+from pydantic import BaseModel
+from typing import Optional
+import base64
+import json
+
+class PaginationCursor(BaseModel):
+    """Cursor for pagination."""
+    last_id: str
+    timestamp: str
+    offset: int
+
+@mcp.resource("audit://events/recent")
+async def audit_events_recent(
+    limit: int = 50,
+    cursor: Optional[str] = None,
+    event_type: Optional[str] = None
+) -> str:
+    """Recent audit events with cursor-based pagination.
+
+    Args:
+        limit: Number of events to return (max 500)
+        cursor: Pagination cursor from previous response
+        event_type: Filter by event type (tool_call, config_change, etc.)
+
+    Returns:
+        JSON with events and next cursor
+    """
+    if limit > 500:
+        limit = 500
+
+    # Decode cursor
+    decoded_cursor = None
+    if cursor:
+        try:
+            cursor_data = base64.b64decode(cursor).decode()
+            decoded_cursor = PaginationCursor(**json.loads(cursor_data))
+        except Exception:
+            raise ValueError("Invalid pagination cursor")
+
+    # Fetch events
+    audit_service = get_audit_service()
+    events = await audit_service.get_recent_events(
+        limit=limit,
+        after_id=decoded_cursor.last_id if decoded_cursor else None,
+        event_type=event_type
+    )
+
+    # Generate next cursor
+    next_cursor = None
+    if len(events) == limit:
+        # More results available
+        last_event = events[-1]
+        cursor_obj = PaginationCursor(
+            last_id=last_event["id"],
+            timestamp=last_event["timestamp"],
+            offset=decoded_cursor.offset + limit if decoded_cursor else limit
+        )
+        cursor_json = json.dumps(cursor_obj.model_dump())
+        next_cursor = base64.b64encode(cursor_json.encode()).decode()
+
+    result = {
+        "events": events,
+        "count": len(events),
+        "pagination": {
+            "cursor": next_cursor,
+            "has_more": next_cursor is not None,
+            "limit": limit
+        }
+    }
+
+    return json.dumps(result, indent=2)
+```
+
+### Filtering and Search Patterns
+
+```python
+@mcp.resource("device://{device_id}/interfaces")
+async def device_interfaces(
+    device_id: str,
+    status: Optional[str] = None,  # Filter: up, down, disabled
+    type: Optional[str] = None,    # Filter: ether, wlan, bridge, vlan
+    search: Optional[str] = None   # Search by name
+) -> str:
+    """Device interfaces with filtering and search.
+
+    Args:
+        device_id: Device identifier
+        status: Filter by interface status
+        type: Filter by interface type
+        search: Search interface names (case-insensitive)
+
+    Returns:
+        Filtered interface list
+    """
+    interface_service = get_interface_service()
+    interfaces = await interface_service.list_interfaces(device_id)
+
+    # Apply filters
+    if status:
+        interfaces = [i for i in interfaces if i.get("running") == (status == "up")]
+
+    if type:
+        interfaces = [i for i in interfaces if i.get("type") == type]
+
+    if search:
+        search_lower = search.lower()
+        interfaces = [i for i in interfaces if search_lower in i.get("name", "").lower()]
+
+    return json.dumps({
+        "interfaces": interfaces,
+        "count": len(interfaces),
+        "filters": {
+            "status": status,
+            "type": type,
+            "search": search
+        }
+    }, indent=2)
+```
+
+---
+
+## Resource Subscription Management
+
+### Subscription Lifecycle
+
+Implement robust subscription management:
+
+```python
+from dataclasses import dataclass, field
+from typing import Set
+from uuid import uuid4
+
+@dataclass
+class ResourceSubscription:
+    """Resource subscription state."""
+    subscription_id: str = field(default_factory=lambda: str(uuid4()))
+    resource_uri: str
+    session_id: str
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    last_notification: Optional[datetime] = None
+    notification_count: int = 0
+
+class ResourceSubscriptionManager:
+    """Manage resource subscriptions."""
+
+    def __init__(self):
+        # uri -> set of subscriptions
+        self._subscriptions: dict[str, Set[ResourceSubscription]] = defaultdict(set)
+
+        # subscription_id -> subscription
+        self._subscription_map: dict[str, ResourceSubscription] = {}
+
+    async def subscribe(
+        self,
+        resource_uri: str,
+        session_id: str
+    ) -> ResourceSubscription:
+        """Subscribe to resource updates."""
+        subscription = ResourceSubscription(
+            resource_uri=resource_uri,
+            session_id=session_id
+        )
+
+        self._subscriptions[resource_uri].add(subscription)
+        self._subscription_map[subscription.subscription_id] = subscription
+
+        logger.info(
+            "Resource subscription created",
+            extra={
+                "subscription_id": subscription.subscription_id,
+                "resource_uri": resource_uri,
+                "session_id": session_id
+            }
+        )
+
+        return subscription
+
+    async def unsubscribe(self, subscription_id: str) -> None:
+        """Unsubscribe from resource updates."""
+        subscription = self._subscription_map.pop(subscription_id, None)
+        if not subscription:
+            return
+
+        self._subscriptions[subscription.resource_uri].discard(subscription)
+
+        logger.info(
+            "Resource subscription removed",
+            extra={
+                "subscription_id": subscription_id,
+                "resource_uri": subscription.resource_uri,
+                "notifications_sent": subscription.notification_count
+            }
+        )
+
+    async def notify_subscribers(self, resource_uri: str) -> None:
+        """Notify all subscribers of resource update."""
+        subscriptions = self._subscriptions.get(resource_uri, set())
+
+        if not subscriptions:
+            return
+
+        logger.info(
+            f"Notifying {len(subscriptions)} subscribers of resource update",
+            extra={"resource_uri": resource_uri}
+        )
+
+        for subscription in subscriptions:
+            try:
+                await mcp.send_notification(
+                    session_id=subscription.session_id,
+                    method="notifications/resources/updated",
+                    params={"uri": resource_uri}
+                )
+
+                subscription.last_notification = datetime.utcnow()
+                subscription.notification_count += 1
+
+            except Exception as e:
+                logger.error(
+                    f"Failed to notify subscriber: {e}",
+                    extra={
+                        "subscription_id": subscription.subscription_id,
+                        "resource_uri": resource_uri
+                    }
+                )
+
+    async def cleanup_session_subscriptions(self, session_id: str) -> None:
+        """Remove all subscriptions for a closed session."""
+        to_remove = [
+            sub for sub in self._subscription_map.values()
+            if sub.session_id == session_id
+        ]
+
+        for subscription in to_remove:
+            await self.unsubscribe(subscription.subscription_id)
+
+        logger.info(
+            f"Cleaned up {len(to_remove)} subscriptions for closed session",
+            extra={"session_id": session_id}
+        )
+
+# Global subscription manager
+subscription_manager = ResourceSubscriptionManager()
+
+# Integration with session lifecycle
+@mcp.on_close
+async def on_session_close():
+    """Clean up subscriptions when session closes."""
+    context = get_context()
+    session_id = context.get("session_id")
+
+    if session_id:
+        await subscription_manager.cleanup_session_subscriptions(session_id)
+```
+
+---
+
+## Resource Error Handling Patterns
+
+### Partial Failure Handling
+
+Handle scenarios where some data is unavailable:
+
+```python
+@mcp.resource("fleet://health-summary")
+async def fleet_health_summary() -> str:
+    """Fleet health with graceful degradation for unreachable devices."""
+
+    device_service = get_device_service()
+    health_service = get_health_service()
+
+    devices = await device_service.list_devices()
+
+    successful = []
+    failed = []
+
+    # Fetch health for each device (with timeout)
+    for device in devices:
+        try:
+            health = await asyncio.wait_for(
+                health_service.get_current_health(device.id),
+                timeout=2.0
+            )
+            successful.append({
+                "device_id": device.id,
+                "name": device.name,
+                "health": health
+            })
+
+        except asyncio.TimeoutError:
+            failed.append({
+                "device_id": device.id,
+                "name": device.name,
+                "error": "timeout"
+            })
+
+        except Exception as e:
+            failed.append({
+                "device_id": device.id,
+                "name": device.name,
+                "error": str(e)
+            })
+
+    # Compute aggregates from successful devices only
+    total_cpu = sum(d["health"]["cpu_usage"] for d in successful)
+    avg_cpu = total_cpu / len(successful) if successful else 0
+
+    result = {
+        "summary": {
+            "total_devices": len(devices),
+            "healthy_devices": len(successful),
+            "unreachable_devices": len(failed),
+            "average_cpu_usage": avg_cpu
+        },
+        "healthy_devices": successful,
+        "unreachable_devices": failed if failed else None,
+        "_meta": {
+            "partial_failure": len(failed) > 0,
+            "completeness_percentage": (len(successful) / len(devices)) * 100
+        }
+    }
+
+    return json.dumps(result, indent=2)
+```
+
+### Resource-Specific Error Codes
+
+```python
+class ResourceError(McpError):
+    """Base error for resource operations."""
+    pass
+
+class ResourceNotFoundError(ResourceError):
+    """Resource does not exist."""
+    code = -32000
+    message = "Resource not found"
+
+class ResourceUnavailableError(ResourceError):
+    """Resource temporarily unavailable."""
+    code = -32001
+    message = "Resource unavailable"
+
+class ResourceAuthorizationError(ResourceError):
+    """User not authorized to access resource."""
+    code = -32002
+    message = "Access denied"
+
+@mcp.resource("device://{device_id}/config")
+async def device_config(device_id: str) -> str:
+    """Config with specific error handling."""
+
+    try:
+        device = await device_service.get_device(device_id)
+    except DeviceNotFoundError:
+        raise ResourceNotFoundError(
+            data={"device_id": device_id, "resource_uri": f"device://{device_id}/config"}
+        )
+
+    try:
+        config = await snapshot_service.get_current_config(device_id)
+    except DeviceUnreachableError:
+        raise ResourceUnavailableError(
+            message="Device unreachable, cannot fetch config",
+            data={
+                "device_id": device_id,
+                "suggested_action": "Check device connectivity and try again"
+            }
+        )
+
+    return config
+```
+
+---
+
+## Resource Performance and Caching
+
+### In-Memory Resource Caching
+
+```python
+from functools import lru_cache
+from datetime import timedelta
+import asyncio
+
+class ResourceCache:
+    """Simple TTL cache for resource data."""
+
+    def __init__(self, default_ttl: int = 300):
+        self._cache: dict[str, tuple[Any, datetime]] = {}
+        self._default_ttl = default_ttl
+
+    async def get_or_compute(
+        self,
+        key: str,
+        compute_fn: Callable,
+        ttl: Optional[int] = None
+    ) -> Any:
+        """Get cached value or compute if expired."""
+        ttl = ttl or self._default_ttl
+
+        # Check cache
+        if key in self._cache:
+            value, expires_at = self._cache[key]
+            if datetime.utcnow() < expires_at:
+                return value
+
+        # Compute new value
+        value = await compute_fn()
+
+        # Cache with expiry
+        expires_at = datetime.utcnow() + timedelta(seconds=ttl)
+        self._cache[key] = (value, expires_at)
+
+        return value
+
+    def invalidate(self, key: str) -> None:
+        """Invalidate cache entry."""
+        self._cache.pop(key, None)
+
+# Global cache
+resource_cache = ResourceCache(default_ttl=300)
+
+@mcp.resource("fleet://health-summary")
+async def fleet_health_summary() -> str:
+    """Fleet health with caching."""
+
+    cache_key = "fleet:health:summary"
+
+    async def compute_health_summary():
+        health_service = get_health_service()
+        return await health_service.get_fleet_summary()
+
+    summary = await resource_cache.get_or_compute(
+        cache_key,
+        compute_health_summary,
+        ttl=60  # Cache for 1 minute
+    )
+
+    return json.dumps(summary, indent=2)
+
+# Invalidate cache when health changes
+async def on_health_check_complete(device_id: str):
+    """Invalidate caches when health changes."""
+    # Invalidate device-specific cache
+    resource_cache.invalidate(f"device:{device_id}:health")
+
+    # Invalidate fleet summary cache
+    resource_cache.invalidate("fleet:health:summary")
+
+    # Notify subscribers
+    await mcp.notify_resource_updated(f"device://{device_id}/health")
+    await mcp.notify_resource_updated("fleet://health-summary")
+```
+
+---
+
+## Testing Patterns for Resources and Prompts
+
+### Resource Testing
+
+```python
+import pytest
+from fastmcp.testing import MCPTestClient
+
+@pytest.mark.asyncio
+async def test_device_overview_resource(mcp_client, mock_device_service):
+    """Test device overview resource."""
+    await mcp_client.initialize()
+
+    # Mock device data
+    mock_device_service.get_overview.return_value = {
+        "routeros_version": "7.16",
+        "uptime_seconds": 86400,
+        "cpu_usage": 15.5
+    }
+
+    # Fetch resource
+    content = await mcp_client.read_resource("device://test-device-123/overview")
+
+    # Verify content
+    assert "routeros_version" in content
+    assert "7.16" in content
+    assert "uptime_seconds" in content
+
+@pytest.mark.asyncio
+async def test_resource_authorization(mcp_client, unauthorized_user):
+    """Test resource access control."""
+    await mcp_client.initialize(user=unauthorized_user)
+
+    # Attempt to access restricted resource
+    with pytest.raises(Exception) as exc_info:
+        await mcp_client.read_resource("device://test-device/config")
+
+    error = exc_info.value
+    assert error.code == -32002  # Access denied
+    assert "access denied" in error.message.lower()
+
+@pytest.mark.asyncio
+async def test_resource_subscription(mcp_client, mock_health_service):
+    """Test resource subscription and notifications."""
+    await mcp_client.initialize()
+
+    # Subscribe to resource
+    await mcp_client.subscribe_resource("device://test-device/health")
+
+    # Trigger health update
+    await mock_health_service.update_health("test-device", {"status": "warning"})
+
+    # Wait for notification
+    notification = await mcp_client.wait_for_notification(timeout=5.0)
+
+    assert notification["method"] == "notifications/resources/updated"
+    assert notification["params"]["uri"] == "device://test-device/health"
+
+@pytest.mark.asyncio
+async def test_resource_pagination(mcp_client):
+    """Test resource pagination."""
+    await mcp_client.initialize()
+
+    # Fetch first page
+    page1 = await mcp_client.read_resource("audit://events/recent?limit=10")
+    page1_data = json.loads(page1)
+
+    assert len(page1_data["events"]) <= 10
+    assert "pagination" in page1_data
+    cursor = page1_data["pagination"]["cursor"]
+
+    # Fetch next page
+    page2 = await mcp_client.read_resource(f"audit://events/recent?limit=10&cursor={cursor}")
+    page2_data = json.loads(page2)
+
+    # Verify different results
+    assert page1_data["events"] != page2_data["events"]
+```
+
+### Prompt Testing
+
+```python
+@pytest.mark.asyncio
+async def test_workflow_prompt(mcp_client):
+    """Test workflow prompt generation."""
+    await mcp_client.initialize()
+
+    # Get prompt
+    prompt_result = await mcp_client.get_prompt(
+        "dns-ntp-rollout",
+        arguments={"environment": "lab", "dry_run": True}
+    )
+
+    # Verify structure
+    assert "DNS/NTP Rollout Workflow" in prompt_result
+    assert "Prerequisites" in prompt_result
+    assert "Workflow Steps" in prompt_result
+    assert "tool:" in prompt_result.lower()  # References tools
+
+@pytest.mark.asyncio
+async def test_troubleshooting_prompt_with_device(mcp_client, mock_device):
+    """Test troubleshooting prompt with device context."""
+    await mcp_client.initialize()
+
+    prompt_result = await mcp_client.get_prompt(
+        "troubleshoot-device",
+        arguments={"device_id": "test-device-123"}
+    )
+
+    # Verify device-specific content
+    assert "test-device-123" in prompt_result
+    assert "Connectivity Check" in prompt_result
+    assert "System Overview" in prompt_result
+
+@pytest.mark.asyncio
+async def test_parameter_completion_prompt(mcp_client):
+    """Test prompt parameter completion flow."""
+    await mcp_client.initialize()
+
+    # Call without device_id
+    step1 = await mcp_client.get_prompt("create-address-list-entry")
+
+    # Should show device list
+    assert "Select Device" in step1
+    assert "Available devices" in step1
+
+    # Call with device_id
+    step2 = await mcp_client.get_prompt(
+        "create-address-list-entry",
+        arguments={"device_id": "dev-001"}
+    )
+
+    # Should show address list selection
+    assert "Select Address List" in step2
+    assert "MCP-managed address lists" in step2
+```
+
+---
+
+## Resource and Prompt Metrics
+
+### Observability for Resources
+
+```python
+from prometheus_client import Counter, Histogram
+
+# Resource metrics
+resource_access_total = Counter(
+    "mcp_resource_access_total",
+    "Total resource accesses",
+    ["resource_uri", "status"]  # status: success, not_found, unauthorized, error
+)
+
+resource_access_duration_seconds = Histogram(
+    "mcp_resource_access_duration_seconds",
+    "Resource access duration",
+    ["resource_uri"]
+)
+
+# Prompt metrics
+prompt_invocation_total = Counter(
+    "mcp_prompt_invocation_total",
+    "Total prompt invocations",
+    ["prompt_name"]
+)
+
+# Middleware for resource metrics
+async def track_resource_access(resource_uri: str, handler: Callable):
+    """Track resource access metrics."""
+    start_time = time.time()
+    status = "success"
+
+    try:
+        result = await handler()
+        return result
+
+    except ResourceNotFoundError:
+        status = "not_found"
+        raise
+
+    except ResourceAuthorizationError:
+        status = "unauthorized"
+        raise
+
+    except Exception:
+        status = "error"
+        raise
+
+    finally:
+        duration = time.time() - start_time
+        resource_access_total.labels(resource_uri=resource_uri, status=status).inc()
+        resource_access_duration_seconds.labels(resource_uri=resource_uri).observe(duration)
+
+@mcp.resource("device://{device_id}/overview")
+async def device_overview(device_id: str) -> str:
+    """Device overview with metrics tracking."""
+    async def handler():
+        overview = await system_service.get_overview(device_id)
+        return json.dumps(overview, indent=2)
+
+    return await track_resource_access(f"device://{device_id}/overview", handler)
 ```
 
 ---

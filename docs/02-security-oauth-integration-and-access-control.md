@@ -56,16 +56,38 @@ Define the security posture, trust boundaries, authentication and authorization 
    - MCP server runs as the user's process
    - Database file (`routeros_mcp.db`) is protected by OS permissions (0600)
    - Configuration file access controlled by filesystem ACLs
+   - Each OS user gets isolated data directory (e.g., `~/.local/share/routeros-mcp/`)
 
 2. **Process Isolation**
    - MCP server process inherits user's security context
    - No network exposure (stdio transport only)
    - No HTTP API or remote access in Phase 1
+   - **STDIO Transport Security:**
+     - Claude Desktop spawns MCP server as child process
+     - Process runs with same permissions as Claude Desktop (user's OS permissions)
+     - STDIN/STDOUT provides process-level isolation (no network sockets)
+     - Multiple OS users on same machine get separate MCP instances (no cross-user access)
+     - Operating system enforces process boundaries (kernel-level security)
 
 3. **Implicit Admin User**
    - Single user who can run the MCP server has full admin privileges
    - No role-based access control (RBAC) in Phase 1
    - All tools available to the operator
+
+**Why STDIO is Secure for Phase 1:**
+
+- **No network exposure**: MCP server cannot be reached remotely (no listening sockets)
+- **OS-enforced isolation**: Only the user who started Claude Desktop can access their MCP instance
+- **No authentication needed**: OS user authentication is sufficient (already logged into workstation)
+- **Process sandboxing**: Claude Desktop can apply additional sandboxing (AppArmor, SELinux) if needed
+- **Database isolation**: Each user's database is protected by filesystem permissions (chmod 600)
+
+**Multi-User Scenarios on Same Machine:**
+
+- **User A** runs Claude Desktop → MCP server as User A → Database at `/home/userA/.local/share/routeros-mcp/`
+- **User B** runs Claude Desktop → MCP server as User B → Database at `/home/userB/.local/share/routeros-mcp/`
+- Users cannot access each other's databases (OS enforces file permissions)
+- Each MCP instance is completely isolated (separate processes, separate data)
 
 ### Authentication Flow (Phase 1)
 
@@ -174,25 +196,277 @@ def check_tool_access(device: Device, tool_name: str, tool_tier: str) -> None:
 
 **Fundamental Tier** (read-only, always allowed):
 - `system/get-overview`
-- `interface/list`
-- `ip/address/list`
-- `dns/get-config`
-- `ntp/get-config`
-- `diagnostics/ping`
-- `diagnostics/traceroute`
-- `logs/tail` (bounded)
+- `interface/list-interfaces`
+- `ip/address-list`
+- `dns/get-status`
+- `ntp/get-status`
+- `tool/ping`
+- `tool/traceroute`
+- `logs/get-recent` (bounded)
+- `device/get-health-data` (Phase-1 fallback for resource)
+- `fleet/get-summary` (Phase-1 fallback for resource)
+- `audit/get-events` (Phase-1 fallback for resource)
 
 **Advanced Tier** (low-risk writes, requires device flag):
 - `system/set-identity`
-- `interface/set-comment`
-- `dns/set-servers` (lab/staging only by default)
-- `ntp/set-servers` (lab/staging only by default)
-- `ip/address/add-secondary`
+- `interface/update-comment`
+- `dns/update-servers` (lab/staging only by default)
+- `ntp/update-servers` (lab/staging only by default)
+- `dns/flush-cache`
+- `device/get-config-snapshot` (Phase-1 fallback for resource)
 
 **Professional Tier** (high-risk, multi-device, requires device flag):
-- `config/dns-ntp-rollout` (plan/apply workflow)
-- `config/address-list-sync`
-- `fleet/health-report`
+- `config/plan-dns-ntp-rollout` (plan/apply workflow)
+- `config/apply-dns-ntp-rollout` (requires approval token)
+- `config/rollback-plan`
+- `plan/get-details` (Phase-1 fallback for resource)
+- `addresslist/plan-sync`
+- `addresslist/apply-sync`
+
+---
+
+## MCP Protocol Security
+
+### Protocol-Level Security Controls
+
+The MCP JSON-RPC protocol provides additional security layers beyond OS-level access control:
+
+#### 1. Request Validation
+
+**Every MCP tool invocation is validated before execution:**
+
+```python
+async def validate_mcp_request(request: dict) -> None:
+    """Validate MCP JSON-RPC request structure and parameters.
+
+    Raises:
+        ValidationError: If request is malformed or invalid
+    """
+    # JSON-RPC 2.0 structure validation
+    if request.get("jsonrpc") != "2.0":
+        raise ValidationError("Invalid JSON-RPC version")
+
+    if "method" not in request:
+        raise ValidationError("Missing method field")
+
+    # Tool name validation
+    tool_name = request["method"]
+    if tool_name not in REGISTERED_TOOLS:
+        raise ValidationError(f"Unknown tool: {tool_name}")
+
+    # Parameter schema validation
+    params = request.get("params", {})
+    tool_schema = TOOL_SCHEMAS[tool_name]
+    jsonschema.validate(params, tool_schema)
+
+    # Device ID existence check
+    if "device_id" in params:
+        device = await device_service.get_device(params["device_id"])
+        if not device:
+            raise ValidationError(f"Device not found: {params['device_id']}")
+
+    # Input sanitization (prevent injection)
+    for key, value in params.items():
+        if isinstance(value, str):
+            params[key] = sanitize_input(value)
+```
+
+**Validation Steps:**
+1. **JSON-RPC Schema**: Validate `jsonrpc`, `method`, `params`, `id` fields
+2. **Tool Registration**: Verify tool exists in registered tool list
+3. **Parameter Schema**: Validate parameters against JSON Schema for that tool
+4. **Entity Existence**: Verify device_id, plan_id exist in database
+5. **Input Sanitization**: Remove potentially dangerous characters before passing to RouterOS
+
+#### 2. Approval Token Mechanism (Professional Tools)
+
+**High-risk professional tools require approval tokens in addition to device capability flags:**
+
+**Phase 1 Approach (Self-Approval):**
+- Professional tools in Phase 1 do NOT require separate approval tokens
+- Device `allow_professional_workflows=true` flag is sufficient
+- Operator is implicitly trusted (OS-level authentication)
+- All operations still logged in audit trail
+
+**Phase 4 Approach (Multi-User with Approval UI):**
+
+```python
+class ApprovalToken:
+    """Short-lived approval token for professional tool execution."""
+
+    token_id: str  # UUID
+    plan_id: str  # Bound to specific plan
+    user_sub: str  # OIDC user identity
+    expires_at: datetime  # 5-minute TTL
+    used: bool  # Single-use only
+
+@mcp.tool()
+async def config_apply_dns_ntp_rollout(
+    plan_id: str,
+    approval_token: str | None = None  # Required in Phase 4
+) -> dict:
+    """Apply DNS/NTP rollout plan to devices.
+
+    Phase 1: approval_token is optional (self-approval)
+    Phase 4: approval_token is REQUIRED (human approval)
+    """
+    plan = await plan_service.get_plan(plan_id)
+
+    # Phase 4: Validate approval token
+    if settings.phase >= 4:
+        if not approval_token:
+            raise AuthorizationError("Approval token required for professional tools")
+
+        token = await approval_service.validate_token(approval_token, plan_id)
+        if token.used:
+            raise AuthorizationError("Approval token already used")
+        if token.expires_at < datetime.now():
+            raise AuthorizationError("Approval token expired")
+        if token.plan_id != plan_id:
+            raise AuthorizationError("Approval token not valid for this plan")
+
+        # Mark token as used (single-use)
+        await approval_service.mark_token_used(token.token_id)
+
+    # Execute plan
+    result = await plan_service.execute_plan(plan_id)
+    return result
+```
+
+**Approval Token Properties:**
+- **Bound to plan_id**: Cannot be reused for different plan
+- **5-minute TTL**: Short-lived to prevent token theft
+- **Single-use**: Consumed on first apply attempt
+- **User-bound**: Generated by specific OIDC user identity
+- **Stored in-memory only**: Not persisted to database (ephemeral)
+
+**Approval Workflow (Phase 4):**
+1. Operator creates plan via `config/plan-dns-ntp-rollout` → returns `plan_id`
+2. Operator reviews plan via `plan/get-details` with `plan_id`
+3. Operator uses Admin UI to generate approval token for `plan_id`
+4. Admin UI calls approval API: `POST /api/approvals/generate` with `plan_id` and OIDC token
+5. Approval service generates short-lived token, returns to operator
+6. Operator calls `config/apply-dns-ntp-rollout` with `plan_id` and `approval_token`
+7. MCP validates token, executes plan, marks token as used
+
+#### 3. Blast Radius Controls
+
+**Professional tools enforce strict blast radius limits to prevent widespread failures:**
+
+```python
+@mcp.tool()
+async def config_plan_dns_ntp_rollout(
+    device_ids: list[str],
+    dns_servers: list[str] | None = None,
+    ntp_servers: list[str] | None = None
+) -> dict:
+    """Create plan for DNS/NTP rollout across multiple devices.
+
+    Blast radius controls:
+    - Maximum 50 devices per plan
+    - Sequential execution (not parallel)
+    - Halt on first failure
+    - Automatic rollback on verification failure
+    """
+    # Blast radius limit
+    if len(device_ids) > 50:
+        raise ValidationError(
+            f"Maximum 50 devices per plan (requested: {len(device_ids)})"
+        )
+
+    # Validate all devices exist and have proper capability
+    devices = []
+    for device_id in device_ids:
+        device = await device_service.get_device(device_id)
+        if not device:
+            raise ValidationError(f"Device not found: {device_id}")
+
+        if not device.allow_professional_workflows:
+            raise AuthorizationError(
+                f"Device {device_id} does not allow professional workflows"
+            )
+
+        devices.append(device)
+
+    # Create plan with per-device change preview
+    plan = await plan_service.create_plan(
+        devices=devices,
+        dns_servers=dns_servers,
+        ntp_servers=ntp_servers,
+        execution_mode="sequential",  # Not parallel
+        halt_on_failure=True,
+        auto_rollback=True
+    )
+
+    return {
+        "plan_id": plan.id,
+        "device_count": len(devices),
+        "changes_preview": plan.changes_summary,
+        "estimated_duration": plan.estimated_duration_seconds
+    }
+```
+
+**Blast Radius Enforcement:**
+1. **Maximum batch size**: 50 devices per plan (configurable, but enforced)
+2. **Sequential execution**: Devices processed one at a time (no parallel failures)
+3. **Halt on failure**: First device failure stops entire plan (unless explicitly configured otherwise)
+4. **Automatic rollback**: Failed devices automatically rolled back to previous configuration
+5. **Per-device verification**: Each device verified after change before proceeding to next
+6. **Change preview**: Per-device change summary shown before execution
+7. **Estimated duration**: Operators know how long multi-device operations will take
+
+#### 4. Request Correlation
+
+**Every MCP request is assigned a correlation ID for end-to-end tracing:**
+
+```python
+import contextvars
+
+# Context variable for request correlation
+correlation_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("correlation_id")
+
+async def handle_mcp_request(request: dict) -> dict:
+    """Handle MCP JSON-RPC request with correlation ID."""
+    # Generate correlation ID for this request
+    correlation_id = str(uuid.uuid4())
+    correlation_id_var.set(correlation_id)
+
+    logger.info(
+        "MCP request received",
+        extra={
+            "correlation_id": correlation_id,
+            "method": request.get("method"),
+            "params": request.get("params")
+        }
+    )
+
+    try:
+        result = await dispatch_tool_call(request)
+        return {"jsonrpc": "2.0", "id": request["id"], "result": result}
+    except Exception as e:
+        logger.error(
+            "MCP request failed",
+            extra={
+                "correlation_id": correlation_id,
+                "error": str(e)
+            }
+        )
+        return {"jsonrpc": "2.0", "id": request["id"], "error": {...}}
+```
+
+**Correlation ID Flow:**
+1. **MCP Request** arrives → Assign `correlation_id`
+2. **API Layer** logs request with `correlation_id`
+3. **Domain Layer** inherits `correlation_id` from context variable
+4. **RouterOS REST Call** tagged with `correlation_id` in logs
+5. **Audit Event** includes `correlation_id`
+6. **MCP Response** includes `correlation_id` in logs
+
+**Benefits:**
+- Trace single user action through all system layers
+- Correlate MCP request → domain logic → RouterOS call → audit log
+- Debug issues by searching logs for specific `correlation_id`
+- Performance profiling (time spent in each layer)
 
 ---
 
@@ -286,6 +560,9 @@ class AuditEvent(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
+    # Request correlation (for end-to-end tracing)
+    correlation_id: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+
     # Device context
     device_id: Mapped[Optional[str]] = mapped_column(String(64), ForeignKey("devices.id"))
     environment: Mapped[Optional[str]] = mapped_column(String(32))
@@ -313,8 +590,15 @@ class AuditEvent(Base):
 - ✅ Authorization failures (tool tier vs device capabilities)
 - ✅ Plan creation and approval (even self-approved)
 - ✅ Device credential changes
+- ✅ Request correlation (correlation_id links MCP request → domain logic → RouterOS call → audit event)
 - ❌ Regular read operations (fundamental tier)
 - ❌ User information (no users in Phase 1)
+
+**Correlation ID Benefits:**
+- Trace entire request lifecycle: MCP client → API layer → domain service → RouterOS → audit log
+- Debug failures by searching all logs for single `correlation_id`
+- Performance profiling (measure time in each layer)
+- Multi-device rollout tracking (all devices in plan share same `correlation_id`)
 
 **Audit Retention:**
 - Phase 1: Retained indefinitely in SQLite

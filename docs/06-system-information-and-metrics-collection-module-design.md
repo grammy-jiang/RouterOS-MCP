@@ -213,6 +213,14 @@ class RouteInfo:
 
 **Note**: Firewall and log queries are **on-demand only** (triggered by MCP tool calls, not scheduled collection) to minimize device load.
 
+**Pagination and Token Budgets**:
+- All list operations support `limit` (default: 100, max: 1000) and `offset` parameters
+- **Token estimation**:
+  - Firewall rules: ~80 tokens per rule (complex rules can be 200+ tokens)
+  - NAT rules: ~60 tokens per rule
+  - Logs: ~40 tokens per entry
+  - **Warnings issued** when estimated response >5000 tokens (recommend filtering/pagination)
+
 ---
 
 ## Normalization and Data Model
@@ -379,15 +387,26 @@ class MetricsCollector:
                 interval_seconds=300  # Every 5 minutes
             )
 
-    async def execute_health_check(self, device_id: str):
-        """Execute health check for a single device."""
+    async def execute_health_check(
+        self,
+        device_id: str,
+        correlation_id: str | None = None,
+        trigger: str = "scheduled"
+    ):
+        """Execute health check for a single device.
+
+        Args:
+            device_id: Target device ID
+            correlation_id: Optional correlation ID from triggering MCP request
+            trigger: What initiated this check ("scheduled", "mcp_tool", "plan_validation", "manual")
+        """
         # 1. Fetch system resource metrics
         resource = await self.fetch_system_resource(device_id)
 
         # 2. Assess health status
         status = assess_health(resource, HealthThresholds())
 
-        # 3. Store health check result
+        # 3. Store health check result (MCP-compatible format in metadata)
         health_check = HealthCheck(
             id=generate_id(),
             device_id=device_id,
@@ -397,15 +416,25 @@ class MetricsCollector:
             memory_usage_percent=resource.memory_usage_percent,
             uptime_seconds=resource.uptime_seconds,
             routeros_version=resource.routeros_version,
+            correlation_id=correlation_id,  # Link to MCP request
+            check_type="resource",
+            response_time_ms=resource.response_time_ms if hasattr(resource, 'response_time_ms') else None,
             metadata={
+                "trigger": trigger,  # Track what initiated this check
                 "cpu_count": resource.cpu_count,
-                "memory_total_bytes": resource.memory_total_bytes
+                "memory_total_bytes": resource.memory_total_bytes,
+                "memory_free_bytes": resource.memory_free_bytes,
+                "disk_total_bytes": resource.disk_total_bytes,
+                "disk_free_bytes": resource.disk_free_bytes
             }
         )
         await self.health_repo.create(health_check)
 
         # 4. Update device status if changed
         await self.device_repo.update_status(device_id, status)
+
+        # 5. Update MCP resource cache (if Phase 2+)
+        await self.update_resource_cache(device_id, health_check, resource)
 ```
 
 ### Collection Intervals
@@ -701,11 +730,14 @@ Metrics and health data are exposed via read-only MCP tools (Phase 1 - Fundament
 - Lists all interfaces with status
 - Calls `/rest/interface`
 - Cached for 60s
+- **Supports pagination**: `limit` (default: 100, max: 1000), `offset` parameters
+- **Token estimation**: ~50 tokens per interface, warns if >100 interfaces
 
 **`interface/get-stats`** (Doc 04):
 - Returns real-time traffic statistics
 - Calls `/rest/interface/monitor-traffic`
 - Not cached (real-time)
+- **Bounded**: Returns stats for specified interface only (required parameter)
 
 ### Fleet Health Tools (Phase 1/2)
 
@@ -944,6 +976,101 @@ async def adjust_collection_interval(device_id: str, status: str):
     )
 ```
 
+### Coordination Between Scheduled Jobs and MCP Tool Requests
+
+**Problem**: When an MCP tool requests device metrics, we don't want to trigger a duplicate health check if one just ran 5 seconds ago via scheduled collection.
+
+**Solution**: Use resource cache as coordination mechanism (Phase 2):
+
+```python
+async def get_device_health_coordinated(
+    device_id: str,
+    correlation_id: str | None = None,
+    max_age_seconds: int = 30
+) -> dict:
+    """Get device health with coordination between scheduled and on-demand checks.
+
+    Args:
+        device_id: Target device ID
+        correlation_id: MCP request correlation ID
+        max_age_seconds: Maximum age of cached data before triggering new check
+
+    Returns:
+        Health data dict
+    """
+    resource_cache = get_resource_cache()
+
+    # 1. Check resource cache first
+    cached_health = await resource_cache.get_device_health(device_id)
+
+    if cached_health:
+        cached_at = datetime.fromisoformat(cached_health["_meta"]["cached_at"])
+        age_seconds = (datetime.utcnow() - cached_at).total_seconds()
+
+        # Use cached data if recent enough
+        if age_seconds < max_age_seconds:
+            logger.debug(
+                "Using cached health data",
+                correlation_id=correlation_id,
+                device_id=device_id,
+                age_seconds=age_seconds,
+                cached_trigger=cached_health["_meta"]["trigger"]
+            )
+            return cached_health
+
+    # 2. Acquire per-device lock to prevent duplicate checks
+    async with device_health_locks.get_lock(device_id):
+        # Double-check cache (another request may have refreshed it)
+        cached_health = await resource_cache.get_device_health(device_id)
+        if cached_health:
+            cached_at = datetime.fromisoformat(cached_health["_meta"]["cached_at"])
+            age_seconds = (datetime.utcnow() - cached_at).total_seconds()
+            if age_seconds < max_age_seconds:
+                return cached_health
+
+        # 3. Trigger on-demand health check
+        logger.info(
+            "Triggering on-demand health check",
+            correlation_id=correlation_id,
+            device_id=device_id,
+            reason="cache_miss_or_stale"
+        )
+
+        await metrics_collector.execute_health_check(
+            device_id=device_id,
+            correlation_id=correlation_id,
+            trigger="mcp_tool"
+        )
+
+        # 4. Return newly cached data
+        return await resource_cache.get_device_health(device_id)
+
+# Per-device locks to prevent duplicate checks
+from asyncio import Lock
+
+class DeviceHealthLocks:
+    """Per-device locks for coordinating health check access."""
+
+    def __init__(self):
+        self.locks: dict[str, Lock] = {}
+
+    def get_lock(self, device_id: str) -> Lock:
+        """Get or create lock for device."""
+        if device_id not in self.locks:
+            self.locks[device_id] = Lock()
+        return self.locks[device_id]
+
+device_health_locks = DeviceHealthLocks()
+```
+
+**Benefits**:
+- Scheduled health checks populate cache every 60s
+- MCP tools use cached data if <30s old (configurable)
+- On cache miss/staleness, MCP tool triggers on-demand check
+- Per-device locks prevent concurrent duplicate checks
+- All checks update resource cache for other consumers
+- Correlation ID tracks whether check was scheduled or on-demand
+
 ### Metrics Collection Safety Checklist
 
 **Before adding a new metric**:
@@ -958,6 +1085,16 @@ async def adjust_collection_interval(device_id: str, status: str):
 - [ ] **Error handling**: Graceful degradation on failures
 - [ ] **Rate limiting**: Respects per-device concurrency limits
 - [ ] **Health impact assessed**: Won't overload small routers
+
+**MCP-Specific Checklist** (Phase 2+):
+
+- [ ] **Correlation ID propagation**: Health checks link to triggering MCP requests
+- [ ] **Resource cache integration**: Metrics update MCP resource cache (Doc 05)
+- [ ] **Token budget estimated**: Large responses include token warnings
+- [ ] **Pagination support**: List operations support limit/offset parameters
+- [ ] **Trigger tracking**: Health checks record trigger source ("scheduled", "mcp_tool", etc.)
+- [ ] **MCP response format**: Tool responses use {content, _meta} structure
+- [ ] **Cache coordination**: Avoid duplicate polling when MCP tools access cached data
 
 ---
 
@@ -1024,13 +1161,19 @@ async def collect_metrics_safe(device_id: str):
 **Structured Logging** (all metrics collection events):
 
 ```python
+from contextvars import ContextVar
+
+correlation_id_var: ContextVar[str | None] = ContextVar("correlation_id", default=None)
+
 logger.info(
     "Health check completed",
+    correlation_id=correlation_id_var.get(),  # Include correlation ID for tracing
     device_id=device_id,
     status=health_status,
     cpu_usage=cpu_usage_percent,
     memory_usage=memory_usage_percent,
-    duration_ms=duration_ms
+    duration_ms=duration_ms,
+    trigger=trigger  # "scheduled", "mcp_tool", "plan_validation"
 )
 ```
 
@@ -1063,6 +1206,274 @@ device_memory_usage = Gauge(
     "Device memory usage",
     ["device_id"]
 )
+```
+
+---
+
+## MCP Resource Cache Integration (Phase 2)
+
+### Resource Cache for Metrics Data
+
+Building on the ResourceCache design from Doc 05, metrics collection integrates with the MCP resource cache to provide efficient access to device health and metrics data via MCP resources.
+
+**Resource URI Mappings**:
+
+| MCP Resource URI | Cache Key | TTL | Refresh Strategy |
+|------------------|-----------|-----|------------------|
+| `device://{id}/health` | `device_health:{id}` | 60s | Background job (health_check) |
+| `device://{id}/metrics` | `device_metrics:{id}` | 60s | Background job (collect_metrics) |
+| `device://{id}/interfaces` | `device_interfaces:{id}` | 60s | On-demand with cache |
+| `fleet://health-summary` | `fleet_health` | 120s | Background aggregation |
+
+**Integration with Health Check Execution**:
+
+```python
+async def update_resource_cache(
+    self,
+    device_id: str,
+    health_check: HealthCheck,
+    resource: SystemResource
+):
+    """Update MCP resource cache after health check.
+
+    Called from execute_health_check() to ensure resource cache reflects
+    latest metrics data.
+    """
+    resource_cache = get_resource_cache()
+
+    # Build resource-compatible health data
+    health_data = {
+        "uri": f"device://{device_id}/health",
+        "name": f"Health Status - {resource.system_identity}",
+        "description": f"Real-time health metrics for {resource.system_identity}",
+        "mimeType": "application/json",
+        "content": {
+            "device_id": device_id,
+            "status": health_check.status,
+            "timestamp": health_check.timestamp.isoformat(),
+            "uptime_seconds": health_check.uptime_seconds,
+            "routeros_version": health_check.routeros_version,
+            "cpu": {
+                "usage_percent": health_check.cpu_usage_percent,
+                "count": resource.cpu_count
+            },
+            "memory": {
+                "total_bytes": resource.memory_total_bytes,
+                "free_bytes": resource.memory_free_bytes,
+                "used_bytes": resource.memory_used_bytes,
+                "usage_percent": health_check.memory_usage_percent
+            },
+            "disk": {
+                "total_bytes": resource.disk_total_bytes,
+                "free_bytes": resource.disk_free_bytes,
+                "usage_percent": resource.disk_usage_percent
+            } if resource.disk_total_bytes else None
+        },
+        "_meta": {
+            "correlation_id": health_check.correlation_id,
+            "trigger": health_check.metadata.get("trigger", "scheduled"),
+            "cached_at": datetime.utcnow().isoformat()
+        }
+    }
+
+    # Cache with device_health:{id} key
+    await resource_cache.set_device_health(device_id, health_data)
+
+    logger.debug(
+        "Updated resource cache for device health",
+        correlation_id=health_check.correlation_id,
+        device_id=device_id,
+        status=health_check.status
+    )
+```
+
+**MCP Resource Handler for Health Status**:
+
+```python
+from routeros_mcp.mcp.server import mcp_server
+
+@mcp_server.list_resources()
+async def list_health_resources() -> list[Resource]:
+    """List available health monitoring resources."""
+    resource_cache = get_resource_cache()
+    devices = await device_repo.list_active()
+
+    resources = []
+    for device in devices:
+        # Get cached health data
+        health_data = await resource_cache.get_device_health(device.id)
+
+        if health_data:
+            resources.append(Resource(
+                uri=f"device://{device.id}/health",
+                name=f"Health Status - {device.name}",
+                description=f"Real-time health metrics for {device.name}",
+                mimeType="application/json"
+            ))
+
+    # Add fleet-wide summary
+    resources.append(Resource(
+        uri="fleet://health-summary",
+        name="Fleet Health Summary",
+        description="Aggregated health status across all devices",
+        mimeType="application/json"
+    ))
+
+    return resources
+
+@mcp_server.read_resource()
+async def read_health_resource(uri: str) -> str:
+    """Read health monitoring resource by URI."""
+    resource_cache = get_resource_cache()
+
+    if uri.startswith("device://"):
+        # Extract device_id from URI: device://{id}/health
+        parts = uri.replace("device://", "").split("/")
+        device_id = parts[0]
+
+        # Get from cache
+        health_data = await resource_cache.get_device_health(device_id)
+
+        if not health_data:
+            # Cache miss - fetch fresh data
+            device = await device_repo.get(device_id)
+            if not device:
+                raise ResourceNotFoundError(f"Device {device_id} not found")
+
+            # Trigger on-demand health check
+            await metrics_collector.execute_health_check(
+                device_id=device_id,
+                correlation_id=correlation_id_var.get(),
+                trigger="mcp_resource"
+            )
+
+            # Retrieve newly cached data
+            health_data = await resource_cache.get_device_health(device_id)
+
+        return json.dumps(health_data["content"], indent=2)
+
+    elif uri == "fleet://health-summary":
+        # Get fleet summary from cache
+        summary = await resource_cache.get_fleet_summary()
+        return json.dumps(summary, indent=2)
+
+    else:
+        raise ResourceNotFoundError(f"Unknown resource URI: {uri}")
+```
+
+### Token Budget Management for Large Responses
+
+**Token Estimation Utilities**:
+
+```python
+def estimate_metric_response_tokens(metric_type: str, count: int) -> int:
+    """Estimate token count for metric responses.
+
+    Args:
+        metric_type: Type of metric ("interface", "firewall_rule", "log_entry", etc.)
+        count: Number of items
+
+    Returns:
+        Estimated token count
+    """
+    # Token estimates per item type
+    TOKEN_ESTIMATES = {
+        "interface": 50,          # Interface with stats
+        "firewall_rule": 80,      # Typical firewall rule
+        "firewall_rule_complex": 200,  # Complex rule with multiple matchers
+        "nat_rule": 60,
+        "route": 40,
+        "ip_address": 30,
+        "log_entry": 40,
+        "arp_entry": 25,
+        "dns_cache_entry": 30
+    }
+
+    per_item = TOKEN_ESTIMATES.get(metric_type, 50)  # Default: 50 tokens/item
+    return count * per_item
+
+def check_token_budget_warning(
+    metric_type: str,
+    count: int,
+    warning_threshold: int = 5000
+) -> dict | None:
+    """Check if metric response exceeds token budget warning threshold.
+
+    Returns:
+        Warning dict if threshold exceeded, None otherwise
+    """
+    estimated_tokens = estimate_metric_response_tokens(metric_type, count)
+
+    if estimated_tokens > warning_threshold:
+        return {
+            "warning": "large_response",
+            "estimated_tokens": estimated_tokens,
+            "item_count": count,
+            "metric_type": metric_type,
+            "recommendation": f"Consider filtering or pagination (limit parameter) to reduce response size"
+        }
+
+    return None
+
+# Example usage in MCP tool
+async def list_firewall_rules(device_id: str, limit: int = 100, offset: int = 0):
+    """List firewall rules with token budget warnings."""
+    # Fetch rules
+    rules = await fetch_firewall_rules(device_id, limit=limit, offset=offset)
+    total_count = rules["total"]
+
+    # Check token budget for full result set
+    warning = check_token_budget_warning("firewall_rule", total_count)
+
+    return {
+        "content": [{"type": "text", "text": f"Found {len(rules['items'])} of {total_count} firewall rules"}],
+        "isError": False,
+        "_meta": {
+            "device_id": device_id,
+            "rules": rules["items"],
+            "total_count": total_count,
+            "limit": limit,
+            "offset": offset,
+            "token_budget_warning": warning  # Include warning if present
+        }
+    }
+```
+
+**Automatic Pagination Recommendations**:
+
+When MCP tools detect large result sets, they automatically recommend pagination:
+
+```python
+async def list_interfaces(device_id: str, limit: int = 100, offset: int = 0):
+    """List network interfaces with automatic pagination recommendations."""
+    interfaces = await fetch_interfaces(device_id)
+    total_count = len(interfaces)
+
+    # Check if pagination recommended
+    pagination_info = {}
+    if total_count > limit:
+        pagination_info = {
+            "total_count": total_count,
+            "current_page_size": limit,
+            "offset": offset,
+            "has_more": (offset + limit) < total_count,
+            "next_offset": offset + limit if (offset + limit) < total_count else None,
+            "recommendation": f"Showing {limit} of {total_count} interfaces. Use 'offset' parameter to fetch more."
+        }
+
+    # Check token budget
+    token_warning = check_token_budget_warning("interface", total_count)
+
+    return {
+        "content": [{"type": "text", "text": f"Found {total_count} interfaces on {device_id}"}],
+        "isError": False,
+        "_meta": {
+            "device_id": device_id,
+            "interfaces": interfaces[offset:offset+limit],
+            "pagination": pagination_info,
+            "token_budget_warning": token_warning
+        }
+    }
 ```
 
 ---
@@ -1109,7 +1520,17 @@ The metrics collection module provides:
 ✅ **Phase 1 focus**: Single-user, SQLite, up to 10 devices
 ✅ **Phase 4 path**: TimescaleDB, distributed jobs, 100+ devices
 
-**This module is implementation-ready for Phase 1 with a clear evolution path to Phase 4.**
+**MCP Integration Enhancements** (Phase 2):
+
+✅ **Correlation ID propagation** - Health checks link to triggering MCP requests for end-to-end tracing
+✅ **MCP Resource Cache integration** - Metrics populate resource cache for efficient MCP resource access
+✅ **Token budget management** - Automatic estimation and warnings for large metric responses
+✅ **Pagination support** - All list operations support limit/offset parameters with total_count
+✅ **Trigger tracking** - Health checks record trigger source (scheduled vs mcp_tool vs plan_validation)
+✅ **Cache coordination** - Per-device locks prevent duplicate polling between scheduled jobs and MCP tools
+✅ **Structured logging with correlation** - All metrics events include correlation_id for observability
+
+**This module is implementation-ready for Phase 1 with comprehensive MCP integration patterns for Phase 2 and a clear evolution path to Phase 4.**
 
 ---
 

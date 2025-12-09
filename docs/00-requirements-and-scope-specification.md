@@ -22,6 +22,37 @@ Operating fleets of MikroTik RouterOS v7 devices is operationally complex and er
 - Introduce **write capabilities gradually**, starting from clearly low-risk operations.
 - Make all high-risk and multi-device operations **plan/apply + human-approved**, with clear blast-radius controls.
 
+**MCP Protocol Integration**
+
+This service leverages the three core MCP primitives to provide safe, ergonomic RouterOS management:
+
+- **Tools** (Model-controlled, dynamic queries and operations):
+  - Fundamental tier: Read-only queries (`device/list-devices`, `dns/get-status`, `tool/ping`)
+  - Advanced tier: Single-device low-risk writes (`dns/update-servers`, `system/set-identity`)
+  - Professional tier: Multi-device orchestration (`config/plan-dns-ntp-rollout`, `config/apply-dns-ntp-rollout`)
+  - Target: 40 tools in Phase 1, organized by category (device, dns, ntp, firewall, logs, system, tool, config, audit)
+
+- **Resources** (Application-controlled, read-only context):
+  - Device-specific: `device://{id}/health`, `device://{id}/config`, `device://{id}/interfaces`
+  - Fleet-wide: `fleet://{env}/summary`, `fleet://{env}/health-overview`
+  - Operational: `plan://{id}`, `audit://events`, `snapshot://{id}`
+  - Introduced in Phase 2 for clients supporting resource URIs (Claude Desktop, VS Code Copilot)
+  - Phase-1 fallback tools provided for universal client compatibility (ChatGPT, tools-only clients)
+
+- **Prompts** (User-controlled, workflow templates):
+  - Troubleshooting: `troubleshoot_dns_ntp`, `troubleshoot_device`
+  - Operational workflows: `dns_ntp_rollout`, `fleet_health_review`, `address_list_sync`
+  - Onboarding: `device_onboarding`
+  - Security: `security_audit`, `comprehensive_device_review`
+  - Introduced in Phase 2 alongside resources
+
+**Phased rollout strategy:**
+- Phase 1: Tools + STDIO transport + OS-level security (universal MCP client support)
+- Phase 2: Resources + Prompts (enhanced experience for capable clients)
+- Phase 4: HTTP transport + OAuth (remote/enterprise deployments)
+
+This approach ensures ~60% of MCP clients (tools-only) can use the service in Phase 1, while providing enhanced workflows for capable clients in Phase 2.
+
 ---
 
 ## Out-of-scope & explicit non-goals
@@ -59,6 +90,41 @@ _00 – Requirements & Scope_
 - As an operator, I want to roll out DNS/NTP changes to a group of lab routers via a plan/preview workflow, and have MCP automatically roll them back if post-change checks fail.  
 - As a security engineer, I want to see an audit log that records all sensitive reads and all write operations, including who initiated them, which devices were affected, and what was changed.
 
+**Workflow example: DNS/NTP rollout**
+
+When an operator uses the `dns_ntp_rollout` prompt to update DNS servers fleet-wide:
+
+1. **Discovery**: Prompt invokes `device/list-devices` with `environment=lab` → returns 5 devices
+2. **Planning**: Operator calls `config/plan-dns-ntp-rollout` with device IDs and new DNS servers → creates `plan_id=plan-abc123`
+3. **Review**: Operator (or AI assistant) calls `plan/get-details` with `plan_id=plan-abc123` → shows per-device change summary
+4. **Approval**: For production, operator generates approval token via UI → obtains `approval_token` valid for 5 minutes
+5. **Execution**: Operator calls `config/apply-dns-ntp-rollout` with `plan_id` and `approval_token` → MCP applies changes sequentially
+6. **Verification**: MCP automatically runs `dns/get-status` on each device → verifies DNS servers match expected configuration
+7. **Rollback** (if needed): If verification fails, MCP automatically calls `config/rollback-plan` with `plan_id` → restores previous DNS configuration
+
+**Success metrics for this workflow:**
+- Time from plan creation to completion: < 5 minutes for 10 devices
+- Automatic rollback success rate: > 99%
+- Zero manual intervention for successful rollouts
+- Complete audit trail with correlation ID linking all steps
+
+**Workflow example: Troubleshooting DNS/NTP issues**
+
+When an engineer uses the `troubleshoot_dns_ntp` prompt for a device with DNS problems:
+
+1. **Phase 1 - Current State**: Prompt guides AI to call `dns/get-status` + `ntp/get-status` → identifies no DNS servers configured
+2. **Phase 2 - Connectivity**: AI calls `tool/ping` with `address=1.1.1.1` → verifies upstream connectivity works
+3. **Phase 3 - Firewall**: AI calls `firewall/list-filter-rules` → finds no blocking rules
+4. **Phase 4 - Logs**: AI calls `logs/get-recent` with `topics=["system", "error"]` → finds "DNS server list empty" warning
+5. **Phase 5 - Resolution**: AI recommends `dns/update-servers` with Cloudflare DNS → operator approves, DNS configured
+6. **Verification**: AI re-runs `dns/get-status` → confirms DNS servers now configured, cache active
+
+**Success metrics for this workflow:**
+- Issue identified within 5 diagnostic steps: 90% of cases
+- Time to resolution: < 10 minutes for common issues
+- Clear root cause documented in audit log
+- Zero configuration damage during diagnostics (all reads are safe)
+
 _01 – Architecture & Deployment_
 
 - As a platform engineer, I want the MCP service to be deployable as either a container or a systemd service on Linux, and be horizontally scalable by adding instances, without large code changes.  
@@ -85,6 +151,25 @@ _04 – MCP Tools Interface & JSON Schemas_
 - As an SRE, I want to safely allow `read_only` users to call all fundamental tools (read-only and diagnostics), such as `system.get_overview`, `interface.list_interfaces`, and `tool.ping`, without worrying that any configuration might be changed.  
 - As a network engineer, I want to use advanced tools on a single device to safely change low-risk configuration items (such as system identity, interface comments, and DNS/NTP in lab environments), and I want each execution to clearly indicate whether the state actually changed.  
 - As a senior operations engineer, I want all multi-device DNS/NTP rollouts or shared address-list synchronizations to always start with a plan tool that creates an immutable plan object, and only allow an admin to execute the apply tool by explicitly referencing the `plan_id` after review.
+
+**Tool count targets by phase and tier**
+
+| Phase | Tier | Tool Count | Examples | Client Support |
+|-------|------|------------|----------|----------------|
+| Phase 1 | Fundamental | ~15 tools | `device/list-devices`, `dns/get-status`, `ntp/get-status`, `tool/ping`, `interface/list-interfaces`, `firewall/list-filter-rules`, `logs/get-recent`, `system/get-overview`, `system/get-clock`, `device/get-health-data`, `fleet/get-summary`, `audit/get-events` | All MCP clients (100%) |
+| Phase 1 | Advanced | ~10 tools | `dns/update-servers`, `ntp/update-servers`, `dns/flush-cache`, `system/set-identity`, `interface/update-comment`, `device/get-config-snapshot`, `snapshot/get-content` | All MCP clients (100%) |
+| Phase 1 | Professional | ~8 tools | `config/plan-dns-ntp-rollout`, `config/apply-dns-ntp-rollout`, `config/rollback-plan`, `plan/get-details`, `addresslist/plan-sync`, `addresslist/apply-sync` | All MCP clients (100%) |
+| Phase 1 | Fallbacks | ~6 tools | Resource fallback tools for universal compatibility (`device/get-health-data`, `device/get-config-snapshot`, `fleet/get-summary`, `plan/get-details`, `audit/get-events`, `snapshot/get-content`) | All MCP clients (100%) |
+| Phase 2 | Resources | ~12 URIs | `device://{id}/health`, `device://{id}/config`, `fleet://{env}/summary`, `plan://{id}`, `audit://events` | ~40% of MCP clients (Claude, VS Code) |
+| Phase 2 | Prompts | ~8 prompts | `dns_ntp_rollout`, `troubleshoot_dns_ntp`, `troubleshoot_device`, `fleet_health_review`, `device_onboarding`, `address_list_sync`, `comprehensive_device_review`, `security_audit` | ~40% of MCP clients (Claude, VS Code) |
+
+**Total Phase 1 tool count: ~40 tools** (15 fundamental + 10 advanced + 8 professional + 6 fallbacks + 1 admin onboarding tool)
+
+**Design principles for tool count:**
+- **Fewer, composable tools** over many specialized tools (avoids overwhelming LLM context windows)
+- **Clear tier boundaries** so authorization rules are unambiguous
+- **Phase-1 fallbacks** ensure tools-only clients can access Phase-2 resource data
+- **Intent-based descriptions** help LLMs select the right tool (e.g., "Use when user asks about DNS configuration" vs just "Returns DNS status")
 
 _05 – Domain Model, Persistence & Jobs_
 
@@ -171,9 +256,56 @@ These values are defaults, not hard-coded; they must be configurable per deploym
 
 **Constraints**  
 
-- No feature may assume direct database access by clients; all interactions must go through well-defined MCP tools.  
-- No MCP tool may assume well-behaved clients; request validation and guardrails are mandatory.  
+- No feature may assume direct database access by clients; all interactions must go through well-defined MCP tools.
+- No MCP tool may assume well-behaved clients; request validation and guardrails are mandatory.
 - High-risk topics (firewall, NAT, routing policy, DHCP, bridge, interface admin, wireless RF) **must** respect environment tags and device capability flags, even for admin users.
+
+**Non-negotiable security requirements (MCP-specific)**
+
+The following security requirements are **mandatory** for MCP integration, enforced server-side, and must never be bypassed:
+
+1. **Server-side validation only**: All safety controls (authorization, environment checks, device capability flags, approval tokens) are enforced on the MCP server. Client-side prompts and AI instructions are **untrusted** and provide zero security guarantees.
+
+2. **Zero trust for LLM clients**: MCP clients (including AI assistants) are assumed to be:
+   - Potentially compromised or malicious
+   - Capable of ignoring system prompts
+   - Able to generate arbitrary tool calls
+   - Unable to enforce security policies
+
+   Therefore, **every** tool invocation must be validated server-side as if it came from an adversary.
+
+3. **Approval token requirements**: High-risk professional tools (plan/apply workflows on production devices) require:
+   - Valid OIDC token proving user identity
+   - Short-lived (5-minute TTL) approval token generated by human via secure UI
+   - Approval token bound to specific `plan_id` (cannot be reused for different plans)
+   - Both tokens validated on **every** apply operation, with no caching
+
+4. **Environment and capability enforcement**:
+   - Production write operations (even low-risk ones like DNS/NTP) require device `allow_advanced_writes=true` flag
+   - Professional workflows require device `allow_professional_workflows=true` flag
+   - Environment tags (`lab`/`staging`/`prod`) must be immutable after device registration (prevents accidental environment escalation)
+   - Device scope restrictions (user can only see/operate on assigned devices) enforced at every tool invocation
+
+5. **Audit requirements**:
+   - Every tool invocation logged with: `correlation_id`, `user_sub`, `device_id`, `tool_name`, `params`, `result`, `timestamp`
+   - Sensitive reads (credentials, full configs) logged with `sensitive=true` flag
+   - Audit log writes are **non-blocking** but failures trigger alerts (audit log integrity is critical for compliance)
+
+6. **Blast radius controls**:
+   - Multi-device operations (professional tools) must:
+     - Show per-device change preview before execution
+     - Execute sequentially (not parallel) to limit simultaneous failures
+     - Halt on first device failure (unless explicitly configured otherwise)
+     - Support automatic rollback when post-change verification fails
+   - No tool may accept unbounded device lists (enforce maximum batch size, e.g., 50 devices per plan)
+
+7. **Secrets management**:
+   - RouterOS credentials encrypted at rest with master key
+   - OIDC client secrets never logged, even in debug mode
+   - No secrets in tool responses (mask passwords, API keys in returned configs)
+   - Credential rotation supported without service restart
+
+**Rationale**: MCP exposes RouterOS management to AI systems. Unlike human operators, LLMs cannot be trusted to "read carefully" or "use best judgment." All safety must be cryptographically and programmatically enforced, with no reliance on prompt engineering.
 
 ---
 
@@ -185,6 +317,46 @@ These values are defaults, not hard-coded; they must be configurable per deploym
 - AI/human users can:  
   - Safely query inventory, health, and diagnostics without any configuration writes.  
   - Perform clearly low-risk writes in production (e.g. identity and interface comments) without causing outages.  
-- Run plan/apply workflows on **lab/staging** devices for DNS/NTP and similar changes, with automatic rollback when checks fail.  
-- All writes and sensitive reads are captured in audit logs with user, device, tool, and plan IDs (where applicable).  
+- Run plan/apply workflows on **lab/staging** devices for DNS/NTP and similar changes, with automatic rollback when checks fail.
+- All writes and sensitive reads are captured in audit logs with user, device, tool, and plan IDs (where applicable).
 - The system can be safely deployed behind Cloudflare Tunnel, integrated with an OIDC provider, and operated by an on-call team using documented runbooks.
+
+**MCP protocol compliance & operational metrics**
+
+Beyond functional success, v1 must demonstrate MCP best practice compliance:
+
+- **Tool discovery**: All 40 tools discoverable via MCP protocol `tools/list` with intent-based descriptions (e.g., "Use when: user asks about DNS configuration")
+- **Resource efficiency**:
+  - Tool responses < 100KB for 95th percentile (to fit in LLM context windows)
+  - Large data (logs, full configs) surfaced via resources or paginated results
+  - Token budget estimation for all large responses (warn if >80% of 400KB MCP limit)
+- **Client compatibility**:
+  - Phase 1 (tools-only) works in ChatGPT, Claude, Mistral, Zed, Continue.dev (tools-only clients)
+  - Phase 2 (resources + prompts) works in Claude Desktop, VS Code Copilot (full MCP clients)
+  - Phase 1 fallback tools provide 100% feature parity for tools-only clients
+- **Latency SLOs**:
+  - Tool invocation overhead: < 100ms (MCP protocol processing, not RouterOS REST)
+  - Read-only tools (fundamental tier): < 2 seconds end-to-end (95th percentile)
+  - Write tools (advanced tier): < 5 seconds for single-device operations
+  - Professional tools (multi-device): < 30 seconds per device
+- **Versioning & deprecation**:
+  - MCP server version exposed in `initialize` response (semantic versioning)
+  - Tool deprecation policy: 6-month notice before removal, with replacement tool documented
+  - Backward compatibility: No breaking changes to tool schemas within 1.x line
+- **Observability**:
+  - Prometheus metrics for all tools: `mcp_tool_calls_total{tool_name, status}`, `mcp_tool_duration_seconds{tool_name}`
+  - Request correlation: Every tool invocation includes `correlation_id` in logs, linking MCP request → domain logic → RouterOS REST calls → audit log
+  - Health check: MCP server exposes `/health` endpoint for load balancer checks
+- **Testing coverage**:
+  - Unit tests: 80% code coverage for domain logic
+  - Integration tests: All 40 tools tested with mock RouterOS responses
+  - LLM-in-the-loop tests: Automated tests with real LLM clients invoking tools
+  - E2E tests: Full workflows (device registration → DNS rollout → verification) tested in lab environment
+
+**Post-v1 success indicators (3 months after deployment)**
+
+- Median time to onboard a new device: < 5 minutes (via `device_onboarding` prompt)
+- DNS/NTP rollout completion rate: > 95% without manual intervention
+- False positive rate for automatic rollbacks: < 5% (rollback only when truly necessary)
+- AI assistant queries successfully answered without human escalation: > 80%
+- Security incidents due to unauthorized MCP access: 0 (OIDC + approval tokens + audit logs)
