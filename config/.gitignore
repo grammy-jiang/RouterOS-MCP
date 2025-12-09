@@ -1,0 +1,16 @@
+# Ignore any config files with secrets
+*.secret.yaml
+*.secret.yml
+*.secret.toml
+*.env
+.env.*
+
+# Ignore personal/local configs
+local.yaml
+local.yml
+local.toml
+
+# Ignore backup files
+*.bak
+*.backup
+*~

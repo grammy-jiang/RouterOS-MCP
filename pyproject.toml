@@ -1,0 +1,229 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "routeros-mcp"
+version = "0.1.0"
+description = "Model Context Protocol (MCP) service for managing MikroTik RouterOS devices"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "RouterOS MCP Service Contributors"}
+]
+keywords = ["mcp", "routeros", "mikrotik", "network-automation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Networking",
+]
+
+dependencies = [
+    # Core MCP integration
+    "fastmcp>=0.1.0",
+    
+    # Web framework and ASGI server
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    
+    # Data validation and settings
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    
+    # HTTP client
+    "httpx>=0.26.0",
+    
+    # SSH client
+    "asyncssh>=2.14.0",
+    
+    # Database
+    "sqlalchemy[asyncio]>=2.0.25",
+    "alembic>=1.13.0",
+    "asyncpg>=0.29.0",
+    "aiosqlite>=0.19.0",
+    
+    # Observability
+    "structlog>=24.1.0",
+    "prometheus-client>=0.20.0",
+    "opentelemetry-api>=1.22.0",
+    "opentelemetry-sdk>=1.22.0",
+    "opentelemetry-instrumentation-fastapi>=0.43b0",
+    "opentelemetry-instrumentation-httpx>=0.43b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.43b0",
+    
+    # Scheduling
+    "apscheduler>=3.10.0",
+    
+    # Configuration file support
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0.1",
+    
+    # Security
+    "cryptography>=41.0.0",
+    "authlib>=1.3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    # Testing
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "coverage[toml]>=7.4.0",
+    
+    # Type checking
+    "mypy>=1.8.0",
+    "types-pyyaml>=6.0.12",
+    
+    # Linting and formatting
+    "ruff>=0.2.0",
+    "black>=24.1.0",
+    
+    # Development tools
+    "ipython>=8.20.0",
+    "rich>=13.7.0",
+]
+
+[project.scripts]
+routeros-mcp = "routeros_mcp.main:main"
+
+[project.urls]
+Homepage = "https://github.com/grammy-jiang/RouterOS-MCP"
+Documentation = "https://github.com/grammy-jiang/RouterOS-MCP/tree/main/docs"
+Repository = "https://github.com/grammy-jiang/RouterOS-MCP"
+Issues = "https://github.com/grammy-jiang/RouterOS-MCP/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["routeros_mcp*"]
+exclude = ["tests*", "docs*"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=routeros_mcp",
+    "--cov-report=term-missing:skip-covered",
+    "--cov-report=html",
+    "--cov-report=xml",
+]
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["routeros_mcp"]
+branch = true
+parallel = true
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__pycache__/*",
+    "*/site-packages/*",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = false
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+pretty = true
+show_error_codes = true
+show_error_context = true
+
+[[tool.mypy.overrides]]
+module = [
+    "asyncssh.*",
+    "apscheduler.*",
+    "fastmcp.*",
+    "prometheus_client.*",
+    "opentelemetry.*",
+    "authlib.*",
+]
+ignore_missing_imports = true
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+indent-width = 4
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "ARG",    # flake8-unused-arguments
+    "SIM",    # flake8-simplify
+    "TCH",    # flake8-type-checking
+]
+ignore = [
+    "E501",   # line too long (handled by black)
+    "B008",   # do not perform function calls in argument defaults
+    "B905",   # zip strict argument
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # Allow unused imports in __init__.py
+"tests/**/*.py" = ["ARG", "S101"]  # Allow unused args and asserts in tests
+
+[tool.ruff.lint.isort]
+known-first-party = ["routeros_mcp"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
