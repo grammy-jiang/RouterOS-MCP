@@ -370,32 +370,55 @@ CMD ["python", "-m", "routeros_mcp.mcp_server", "--config", "config/prod.yaml"]
 
 If you are implementing this service:
 
-1. **Read Core Design Docs**:
-   - Start with [docs/00](docs/00-requirements-and-scope-specification.md) (requirements & scope)
-   - Then [docs/01](docs/01-overall-system-architecture-and-deployment-topology.md) (architecture & deployment)
-   - Review [docs/14](docs/14-mcp-protocol-integration-and-transport-design.md) (MCP protocol & transport)
+### 1. Review Design Documentation
 
-2. **Understand Security, Tools & Endpoints**:
-   - Read [docs/02](docs/02-security-oauth-integration-and-access-control.md) (OAuth, RBAC, threat model)
-   - Review [docs/03](docs/03-routeros-integration-and-platform-constraints-rest-and-ssh.md) (41 REST endpoints)
-   - Study [docs/04](docs/04-mcp-tools-interface-and-json-schema-specification.md) (46 tools with intent-based descriptions)
-   - Review [docs/15](docs/15-mcp-resources-and-prompts-design.md) (resources & prompts)
+**Core Design Documents:**
+- Start with [docs/00](docs/00-requirements-and-scope-specification.md) (requirements & scope)
+- Then [docs/01](docs/01-overall-system-architecture-and-deployment-topology.md) (architecture & deployment)
+- Review [docs/14](docs/14-mcp-protocol-integration-and-transport-design.md) (MCP protocol & transport)
 
-3. **Set Up Development Environment**:
-   - Follow [docs/12](docs/12-development-environment-dependencies-and-commands.md)
-   - Review [docs/13](docs/13-python-coding-standards-and-conventions.md)
+**Security, Tools & Endpoints:**
+- Read [docs/02](docs/02-security-oauth-integration-and-access-control.md) (OAuth, RBAC, threat model)
+- Review [docs/03](docs/03-routeros-integration-and-platform-constraints-rest-and-ssh.md) (41 REST endpoints)
+- Study [docs/04](docs/04-mcp-tools-interface-and-json-schema-specification.md) (46 tools with intent-based descriptions)
+- Review [docs/15](docs/15-mcp-resources-and-prompts-design.md) (resources & prompts)
 
-4. **Implement Phase 0 and Phase 1**:
-   - Use RouterOS integration guidelines from [docs/03](docs/03-routeros-integration-and-platform-constraints-rest-and-ssh.md)
-   - Follow domain model from [docs/05](docs/05-domain-model-persistence-and-task-job-model.md)
-   - Reference module layout from [docs/11](docs/11-implementation-architecture-and-module-layout.md)
-   - Use detailed specs from [docs/16](docs/16-detailed-module-specifications.md)
+### 2. Use GitHub Copilot Agent for Implementation
 
-5. **Test Thoroughly**:
-   - Follow [docs/10](docs/10-testing-validation-and-sandbox-strategy-and-safety-nets.md)
-   - Test against lab RouterOS devices
-   - Use MCP Inspector for tool testing
-   - Achieve 85%+ coverage before Phase 2
+**📋 See [GITHUB-COPILOT-TASKS.md](GITHUB-COPILOT-TASKS.md) for structured implementation tasks.**
+
+This file contains **13 tasks (Phase 0-2)** organized into 6-hour blocks for GitHub Copilot Agent:
+- **Phase 0 (4 tasks, ~24h):** Project setup, database, security, MCP server skeleton
+- **Phase 1 (6 tasks, ~36h):** Read-only tools, health checks, admin API (23 fundamental tools)
+- **Phase 2 (3 tasks, ~18h):** Advanced write tools with safety guardrails (9 advanced tools)
+
+Each task includes:
+- Clear title, description, and acceptance criteria
+- **Custom prompt tailored for GitHub Copilot Agent**
+- References to relevant design documents
+- Code examples and testing requirements
+
+### 3. Set Up Development Environment
+
+- Follow [docs/12](docs/12-development-environment-dependencies-and-commands.md)
+- Review [docs/13](docs/13-python-coding-standards-and-conventions.md)
+- Set up Python 3.11+, PostgreSQL, and RouterOS lab device
+
+### 4. Implement Using Structured Tasks
+
+- Use tasks from [GITHUB-COPILOT-TASKS.md](GITHUB-COPILOT-TASKS.md)
+- Create GitHub issues for each task
+- Assign to GitHub Copilot Agent with custom prompts
+- Review output against design specifications
+- Test against lab RouterOS device after each task
+
+### 5. Testing Strategy
+
+- Follow [docs/10](docs/10-testing-validation-and-sandbox-strategy-and-safety-nets.md)
+- Achieve 85%+ overall coverage, 100% for core modules
+- Use MCP Inspector for tool validation
+- Test against real RouterOS lab devices
+- Validate LLM tool selection accuracy (90%+ target)
 
 ## Key Design Principles
 
