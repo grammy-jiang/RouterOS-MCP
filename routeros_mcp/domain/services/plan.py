@@ -211,9 +211,9 @@ class PlanService:
         if plan.status != "draft":
             raise ValueError(f"Plan {plan_id} cannot be approved (status: {plan.status})")
 
-        # Validate approval token
+        # Validate approval token (use constant-time comparison to prevent timing attacks)
         stored_token = plan.changes.get("approval_token")
-        if not stored_token or stored_token != approval_token:
+        if not stored_token or not secrets.compare_digest(stored_token, approval_token):
             raise ValueError("Invalid approval token")
 
         # Check token expiration

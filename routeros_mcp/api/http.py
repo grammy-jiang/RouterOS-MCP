@@ -12,7 +12,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import PlainTextResponse
 from authlib.integrations.starlette_client import OAuth
 from authlib.jose import jwt
 from authlib.jose.errors import JoseError
@@ -119,10 +119,15 @@ class OIDCValidator:
             )
 
 
+def get_validator(settings: Settings = Depends()) -> OIDCValidator:
+    """Factory for OIDCValidator with injected settings."""
+    return OIDCValidator(settings)
+
+
 async def get_current_user(
     request: Request,
     settings: Settings = Depends(),
-    validator: OIDCValidator = Depends(),
+    validator: OIDCValidator = Depends(get_validator),
 ) -> dict[str, Any]:
     """Extract and validate user from request.
 

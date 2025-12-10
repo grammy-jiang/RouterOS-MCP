@@ -3,8 +3,6 @@
 import json
 import logging
 
-import pytest
-
 from routeros_mcp.infra.observability.logging import (
     CorrelationIDFilter,
     JSONFormatter,
@@ -59,7 +57,7 @@ class TestCorrelationIDFilter:
     def test_filter_uses_default_if_no_correlation_id(self) -> None:
         """Test filter uses default if no correlation ID set."""
         # Clear any existing correlation ID by setting to None
-        import routeros_mcp.infra.observability.logging as logging_module
+        from routeros_mcp.infra.observability import logging as logging_module
 
         logging_module.correlation_id_var.set(None)
 

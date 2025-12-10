@@ -12,7 +12,7 @@ import json
 import logging
 import sys
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 # Context variable for correlation ID (thread-safe, async-safe)
@@ -78,7 +78,7 @@ class JSONFormatter(logging.Formatter):
         """
         # Base log entry
         log_entry: dict[str, Any] = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(UTC).isoformat() + "Z",
             "level": record.levelname,
             "component": record.name,
             "message": record.getMessage(),

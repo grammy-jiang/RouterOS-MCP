@@ -15,7 +15,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
 
-from routeros_mcp.infra.observability.logging import correlation_id_var, get_correlation_id
+from routeros_mcp.infra.observability.logging import get_correlation_id
 
 logger = logging.getLogger(__name__)
 

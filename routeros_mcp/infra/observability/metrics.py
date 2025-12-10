@@ -8,7 +8,6 @@ detailed requirements.
 """
 
 import logging
-from typing import Any
 
 from prometheus_client import (
     CollectorRegistry,

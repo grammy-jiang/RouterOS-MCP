@@ -14,7 +14,7 @@ from typing import Any, AsyncIterator
 
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse, StreamingResponse
+from starlette.responses import JSONResponse
 from starlette.routing import Route
 from sse_starlette import EventSourceResponse
 
@@ -103,6 +103,7 @@ class MCPHTTPTransport:
             },
         )
 
+        body: dict[str, Any] = {}
         try:
             # Parse JSON-RPC request
             body = await request.json()
@@ -195,6 +196,8 @@ class MCPHTTPTransport:
 
         async def event_generator() -> AsyncIterator[dict[str, str]]:
             """Generate SSE events."""
+            from datetime import UTC, datetime
+
             try:
                 # Send initial connection event
                 yield {
@@ -213,7 +216,7 @@ class MCPHTTPTransport:
                     await asyncio.sleep(30)
                     yield {
                         "event": "ping",
-                        "data": json.dumps({"timestamp": asyncio.get_event_loop().time()}),
+                        "data": json.dumps({"timestamp": datetime.now(UTC).isoformat() + "Z"}),
                     }
 
             except asyncio.CancelledError:
@@ -263,7 +266,6 @@ class MCPHTTPTransport:
         # For now, return a basic response structure
         # Real implementation would call into FastMCP's handler
         method = request.get("method")
-        params = request.get("params", {})
         request_id = request.get("id")
 
         logger.info(

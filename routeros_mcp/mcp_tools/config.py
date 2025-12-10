@@ -145,6 +145,11 @@ def register_config_tools(mcp: FastMCP, settings: Settings) -> None:
                     risk_level=risk_level,
                 )
 
+                # Build device list
+                device_list = "\n".join(
+                    f"  - {d['device_id']} ({d['environment']})" for d in devices_config
+                )
+
                 return format_tool_result(
                     content=f"""DNS/NTP rollout plan created successfully.
 
@@ -160,9 +165,9 @@ To apply this plan, use config/apply-dns-ntp-rollout with:
 The approval token expires at: {plan['approval_expires_at']}
 
 Per-device changes:
-{chr(10).join(f"  - {d['device_id']} ({d['environment']})" for d in devices_config)}
+{device_list}
 """,
-                    _meta={
+                    meta={
                         "plan_id": plan["plan_id"],
                         "approval_token": plan["approval_token"],
                         "approval_expires_at": plan["approval_expires_at"],
@@ -174,7 +179,7 @@ Per-device changes:
 
         except Exception as e:
             logger.error(f"Plan creation failed: {str(e)}", exc_info=True)
-            raise map_exception_to_error(e, {"tool": "config/plan-dns-ntp-rollout"})
+            raise map_exception_to_error(e)
 
     @mcp.tool()
     async def config_apply_dns_ntp_rollout(
@@ -209,7 +214,6 @@ Per-device changes:
                 # Create services
                 plan_service = PlanService(session)
                 job_service = JobService(session)
-                device_service = DeviceService(session, settings)
                 dns_ntp_service = DNSNTPService(session, settings)
                 health_service = HealthService(session, settings)
 
@@ -305,7 +309,7 @@ Batches: {results['batches_completed']}/{results['batches_total']}
 Check device health with device/get-health for each device.
 View full execution log with plan://{plan_id}/execution-log resource.
 """,
-                    _meta={
+                    meta={
                         "plan_id": plan_id,
                         "job_id": job["job_id"],
                         "results": results,
@@ -314,7 +318,7 @@ View full execution log with plan://{plan_id}/execution-log resource.
 
         except Exception as e:
             logger.error(f"Plan application failed: {str(e)}", exc_info=True)
-            raise map_exception_to_error(e, {"tool": "config/apply-dns-ntp-rollout"})
+            raise map_exception_to_error(e)
 
     @mcp.tool()
     async def config_rollback_plan(
@@ -402,12 +406,12 @@ Failed: {len(results['devices']) - success_count}
 Note: Rollback restores previous DNS/NTP configuration where available.
 Verify connectivity and health for affected devices.
 """,
-                    _meta=results,
+                    meta=results,
                 )
 
         except Exception as e:
             logger.error(f"Rollback failed: {str(e)}", exc_info=True)
-            raise map_exception_to_error(e, {"tool": "config/rollback-plan"})
+            raise map_exception_to_error(e)
 
 
 __all__ = ["register_config_tools"]
