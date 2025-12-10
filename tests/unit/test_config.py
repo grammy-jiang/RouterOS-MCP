@@ -20,7 +20,7 @@ class TestSettings:
         assert settings.debug is False
         assert settings.log_level == "INFO"
         assert settings.mcp_transport == "stdio"
-        assert settings.database_url == "sqlite:///./routeros_mcp.db"
+        assert settings.database_url == "sqlite+aiosqlite:///./routeros_mcp.db"
 
     def test_environment_override(self) -> None:
         """Test environment variable override."""
@@ -123,15 +123,18 @@ class TestSettings:
         settings = Settings(database_url="sqlite:///./test.db")
         assert settings.database_driver == "sqlite"
 
+        settings = Settings(database_url="sqlite+aiosqlite:///./test.db")
+        assert settings.database_driver == "aiosqlite"
+
         settings = Settings(database_url="postgresql+asyncpg://localhost/test")
         assert settings.database_driver == "asyncpg"
 
         settings = Settings(database_url="postgresql+psycopg://localhost/test")
         assert settings.database_driver == "psycopg"
 
-        # Plain PostgreSQL URL without driver specification returns "unknown"
+        # Plain PostgreSQL URL without driver specification
         settings = Settings(database_url="postgresql://localhost/test")
-        assert settings.database_driver == "unknown"
+        assert settings.database_driver == "postgresql"
 
     def test_to_dict_masks_secrets(self) -> None:
         """Test to_dict masks sensitive fields."""

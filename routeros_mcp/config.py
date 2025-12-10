@@ -91,7 +91,7 @@ class Settings(BaseSettings):
     # ========================================
 
     database_url: str = Field(
-        default="sqlite:///./routeros_mcp.db",
+        default="sqlite+aiosqlite:///./routeros_mcp.db",
         description="Database connection URL (SQLite or PostgreSQL)",
     )
 
@@ -180,13 +180,15 @@ class Settings(BaseSettings):
         """Validate database URL format."""
         if not (
             v.startswith("sqlite:///")
+            or v.startswith("sqlite+aiosqlite:///")
             or v.startswith("sqlite://")
+            or v.startswith("sqlite+aiosqlite://")
             or v.startswith("postgresql://")
             or v.startswith("postgresql+asyncpg://")
             or v.startswith("postgresql+psycopg://")
         ):
             raise ValueError(
-                "database_url must be SQLite (sqlite:///) or PostgreSQL "
+                "database_url must be SQLite (sqlite:///, sqlite+aiosqlite:///) or PostgreSQL "
                 "(postgresql://, postgresql+asyncpg://, postgresql+psycopg://)"
             )
         return v
@@ -251,12 +253,19 @@ class Settings(BaseSettings):
     @property
     def database_driver(self) -> str:
         """Get database driver name."""
-        if self.is_sqlite:
+        # Check SQLite variants
+        if self.database_url.startswith("sqlite+aiosqlite://"):
+            return "aiosqlite"
+        elif self.database_url.startswith("sqlite://"):
             return "sqlite"
-        elif "+asyncpg://" in self.database_url:
+        # Check PostgreSQL variants
+        elif self.database_url.startswith("postgresql+asyncpg://"):
             return "asyncpg"
-        elif "+psycopg://" in self.database_url:
+        elif self.database_url.startswith("postgresql+psycopg://"):
             return "psycopg"
+        elif self.database_url.startswith("postgresql://"):
+            # No explicit driver, could be psycopg2 or psycopg3
+            return "postgresql"
         else:
             return "unknown"
 

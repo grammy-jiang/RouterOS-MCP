@@ -1,0 +1,260 @@
+"""RouterOS SSH client with tightly-scoped command whitelisting.
+
+Provides minimal SSH/CLI access to RouterOS devices for operations
+that cannot be done via REST API. All commands must be whitelisted.
+
+Design principles:
+- Minimize SSH usage (prefer REST API)
+- Strict command whitelist (fail-safe: deny by default)
+- No arbitrary command execution
+- Connection pooling and retries
+- Comprehensive error mapping
+
+Whitelisted commands:
+- /export (configuration export)
+- /export compact (compact configuration export)
+
+See docs/03-routeros-integration-and-platform-constraints-rest-and-ssh.md
+"""
+
+import asyncio
+import logging
+from typing import Final
+
+import asyncssh
+
+from routeros_mcp.infra.routeros.exceptions import (
+    RouterOSSSHAuthenticationError,
+    RouterOSSSHCommandNotAllowedError,
+    RouterOSSSHError,
+    RouterOSSSHTimeoutError,
+)
+
+logger = logging.getLogger(__name__)
+
+# Whitelisted SSH commands (fail-safe: deny by default)
+ALLOWED_SSH_COMMANDS: Final[set[str]] = {
+    "/export",  # Full configuration export
+    "/export compact",  # Compact configuration export
+}
+
+
+class RouterOSSSHClient:
+    """Async SSH client for RouterOS CLI with command whitelisting.
+
+    Provides tightly-scoped SSH access for commands not available via REST API.
+    All commands must be in the whitelist.
+
+    Example:
+        client = RouterOSSSHClient(
+            host="192.168.1.1",
+            username="admin",
+            password="secret",
+        )
+
+        # Execute whitelisted command
+        config = await client.execute("/export compact")
+
+        # Cleanup
+        await client.close()
+    """
+
+    def __init__(
+        self,
+        host: str,
+        port: int = 22,
+        username: str | None = None,
+        password: str | None = None,
+        timeout_seconds: float = 60.0,
+        max_retries: int = 3,
+    ) -> None:
+        """Initialize RouterOS SSH client.
+
+        Args:
+            host: RouterOS device hostname or IP
+            port: SSH port (default: 22)
+            username: RouterOS username
+            password: RouterOS password
+            timeout_seconds: Command execution timeout
+            max_retries: Maximum retry attempts for connection
+        """
+        self.host = host
+        self.port = port
+        self.username = username
+        self.password = password
+        self.timeout_seconds = timeout_seconds
+        self.max_retries = max_retries
+
+        self._connection: asyncssh.SSHClientConnection | None = None
+
+    def set_credentials(self, username: str, password: str) -> None:
+        """Set or update authentication credentials.
+
+        Args:
+            username: RouterOS username
+            password: RouterOS password
+        """
+        self.username = username
+        self.password = password
+
+    async def _get_connection(self) -> asyncssh.SSHClientConnection:
+        """Get or create SSH connection with retries.
+
+        Returns:
+            SSH connection
+
+        Raises:
+            RouterOSSSHAuthenticationError: On auth failure
+            RouterOSSSHError: On connection errors
+        """
+        if not self.username or not self.password:
+            raise ValueError("Credentials not set. Call set_credentials() first.")
+
+        # Reuse existing connection if still alive
+        if self._connection is not None and not self._connection.is_closed():
+            return self._connection
+
+        # Create new connection with retries
+        for attempt in range(self.max_retries):
+            try:
+                self._connection = await asyncssh.connect(
+                    self.host,
+                    port=self.port,
+                    username=self.username,
+                    password=self.password,
+                    known_hosts=None,  # Skip host key verification (lab usage)
+                )
+                logger.info(f"SSH connection established: {self.host}:{self.port}")
+                return self._connection
+
+            except asyncssh.PermissionDenied as e:
+                raise RouterOSSSHAuthenticationError(
+                    f"SSH authentication failed: {self.host}"
+                ) from e
+
+            except Exception as e:
+                if attempt == self.max_retries - 1:
+                    raise RouterOSSSHError(
+                        f"SSH connection failed after {self.max_retries} attempts: {self.host}"
+                    ) from e
+
+                # Retry with exponential backoff
+                delay = 2**attempt
+                logger.warning(
+                    f"SSH connection attempt {attempt + 1}/{self.max_retries} failed, "
+                    f"retrying in {delay}s"
+                )
+                await asyncio.sleep(delay)
+
+        # Should never reach here
+        raise RuntimeError("Retry loop exited unexpectedly")
+
+    async def close(self) -> None:
+        """Close SSH connection."""
+        if self._connection is not None and not self._connection.is_closed():
+            self._connection.close()
+            await self._connection.wait_closed()
+            self._connection = None
+            logger.info(f"SSH connection closed: {self.host}")
+
+    def _validate_command(self, command: str) -> None:
+        """Validate that command is in whitelist.
+
+        Args:
+            command: Command to validate
+
+        Raises:
+            RouterOSSSHCommandNotAllowedError: If command not whitelisted
+        """
+        # Normalize command (strip leading/trailing whitespace)
+        normalized_command = command.strip()
+
+        # Check whitelist
+        if normalized_command not in ALLOWED_SSH_COMMANDS:
+            raise RouterOSSSHCommandNotAllowedError(
+                f"SSH command not allowed: '{command}'. "
+                f"Allowed commands: {', '.join(ALLOWED_SSH_COMMANDS)}"
+            )
+
+    async def execute(self, command: str) -> str:
+        """Execute whitelisted SSH command.
+
+        Args:
+            command: Command to execute (must be in whitelist)
+
+        Returns:
+            Command output (stdout)
+
+        Raises:
+            RouterOSSSHCommandNotAllowedError: If command not whitelisted
+            RouterOSSSHTimeoutError: If command times out
+            RouterOSSSHError: On other execution errors
+
+        Example:
+            # Export configuration
+            config = await client.execute("/export compact")
+            print(config)
+        """
+        # Validate command is whitelisted
+        self._validate_command(command)
+
+        # Get connection
+        connection = await self._get_connection()
+
+        try:
+            # Execute command with timeout
+            result = await asyncio.wait_for(
+                connection.run(command, check=True),
+                timeout=self.timeout_seconds,
+            )
+
+            # Ensure stdout is string
+            if result.stdout is None:
+                output = ""
+            elif isinstance(result.stdout, str):
+                output = result.stdout
+            else:
+                output = result.stdout.decode("utf-8")
+
+            logger.info(f"SSH command executed: {command} (output: {len(output)} bytes)")
+            return output
+
+        except TimeoutError as e:
+            raise RouterOSSSHTimeoutError(
+                f"SSH command timeout after {self.timeout_seconds}s: {command}"
+            ) from e
+
+        except asyncssh.ProcessError as e:
+            # Extract stderr message (handle bytes/str/None)
+            stderr: str | bytes | None = e.stderr
+            if stderr is None:
+                stderr_text = "No stderr"
+            elif isinstance(stderr, bytes):
+                stderr_text = stderr.decode("utf-8")
+            else:
+                stderr_text = stderr
+
+            raise RouterOSSSHError(
+                f"SSH command failed (exit code {e.exit_status}): {command}. "
+                f"Error: {stderr_text}"
+            ) from e
+
+        except Exception as e:
+            raise RouterOSSSHError(f"SSH command execution error: {command}") from e
+
+    async def export_config(self, compact: bool = True) -> str:
+        """Export device configuration via SSH.
+
+        Args:
+            compact: Use compact export format (default: True)
+
+        Returns:
+            Configuration export as string
+
+        Example:
+            config = await client.export_config(compact=True)
+            with open("backup.rsc", "w") as f:
+                f.write(config)
+        """
+        command = "/export compact" if compact else "/export"
+        return await self.execute(command)
