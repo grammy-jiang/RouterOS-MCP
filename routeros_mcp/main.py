@@ -139,14 +139,29 @@ def main() -> int:
         # Step 4: Validate configuration (basic validation already done by Pydantic)
         logger.info("Configuration validation passed")
 
-        # Step 5: Placeholder for MCP server startup
-        # TODO: Implement MCP server startup in later tasks (T2+)
-        logger.info("MCP server initialization placeholder")
-        logger.info("Ready to start MCP server (implementation pending in T2+)")
-
-        # For now, just exit successfully after validation
-        logger.info("Configuration and CLI bootstrap complete")
-        return 0
+        # Step 5: Start MCP server based on transport mode
+        if settings.mcp_transport == "stdio":
+            logger.info("Starting MCP server in stdio mode")
+            
+            # Import here to avoid circular dependencies
+            import asyncio
+            from routeros_mcp.mcp.server import create_mcp_server
+            
+            # Run async server
+            async def run_server():
+                server = await create_mcp_server(settings)
+                await server.start()
+            
+            asyncio.run(run_server())
+            return 0
+            
+        elif settings.mcp_transport == "http":
+            # TODO: HTTP transport in T7
+            logger.error("HTTP transport not yet implemented (covered in T7)")
+            return 1
+        else:
+            logger.error(f"Unknown transport mode: {settings.mcp_transport}")
+            return 1
 
     except KeyboardInterrupt:
         print("\nShutdown requested... exiting", file=sys.stderr)

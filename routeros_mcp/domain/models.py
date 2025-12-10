@@ -1,0 +1,135 @@
+"""Domain models for RouterOS MCP.
+
+Pydantic models representing domain entities and DTOs for service layer.
+These are separate from SQLAlchemy ORM models to maintain clean separation
+between domain and infrastructure layers.
+"""
+
+from datetime import datetime
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
+
+class DeviceCreate(BaseModel):
+    """DTO for creating a new device."""
+    
+    id: str = Field(..., description="Unique device identifier (e.g., 'dev-lab-01')")
+    name: str = Field(..., description="Human-friendly device name")
+    management_address: str = Field(..., description="Management address (host:port)")
+    environment: Literal["lab", "staging", "prod"] = Field(..., description="Environment")
+    tags: dict[str, str] = Field(default_factory=dict, description="Device tags")
+    allow_advanced_writes: bool = Field(default=False, description="Allow advanced writes")
+    allow_professional_workflows: bool = Field(default=False, description="Allow professional workflows")
+
+
+class DeviceUpdate(BaseModel):
+    """DTO for updating device information."""
+    
+    name: str | None = None
+    management_address: str | None = None
+    tags: dict[str, str] | None = None
+    allow_advanced_writes: bool | None = None
+    allow_professional_workflows: bool | None = None
+    status: Literal["healthy", "degraded", "unreachable", "pending", "decommissioned"] | None = None
+
+
+class Device(BaseModel):
+    """Domain model for a RouterOS device."""
+    
+    id: str
+    name: str
+    management_address: str
+    environment: Literal["lab", "staging", "prod"]
+    status: Literal["healthy", "degraded", "unreachable", "pending", "decommissioned"]
+    tags: dict[str, str]
+    
+    # Capability flags
+    allow_advanced_writes: bool
+    allow_professional_workflows: bool
+    
+    # RouterOS metadata
+    routeros_version: str | None = None
+    system_identity: str | None = None
+    hardware_model: str | None = None
+    serial_number: str | None = None
+    software_id: str | None = None
+    
+    # Timestamps
+    last_seen_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+    
+    model_config = {"from_attributes": True}
+
+
+class CredentialCreate(BaseModel):
+    """DTO for creating device credentials."""
+    
+    device_id: str = Field(..., description="Device ID")
+    kind: Literal["routeros_rest", "routeros_ssh"] = Field(..., description="Credential type")
+    username: str = Field(..., description="Username")
+    password: str = Field(..., description="Password (will be encrypted)")
+
+
+class HealthCheckResult(BaseModel):
+    """Health check result for a device."""
+    
+    device_id: str
+    status: Literal["healthy", "degraded", "unreachable"]
+    timestamp: datetime
+    
+    # System metrics
+    cpu_usage_percent: float | None = None
+    memory_usage_percent: float | None = None
+    uptime_seconds: int | None = None
+    
+    # Health indicators
+    issues: list[str] = Field(default_factory=list, description="List of health issues")
+    warnings: list[str] = Field(default_factory=list, description="List of warnings")
+    
+    # Additional metadata
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class HealthSummary(BaseModel):
+    """Summary of device or fleet health."""
+    
+    overall_status: Literal["healthy", "degraded", "unreachable"]
+    timestamp: datetime
+    
+    # Per-device results (for fleet health)
+    devices: list[HealthCheckResult] = Field(default_factory=list)
+    
+    # Aggregate statistics
+    total_devices: int = 0
+    healthy_count: int = 0
+    degraded_count: int = 0
+    unreachable_count: int = 0
+
+
+class SystemResource(BaseModel):
+    """Normalized system resource metrics."""
+    
+    device_id: str
+    timestamp: datetime
+    
+    # Version and identity
+    routeros_version: str
+    system_identity: str | None = None
+    hardware_model: str | None = None
+    
+    # Performance
+    uptime_seconds: int
+    cpu_usage_percent: float
+    cpu_count: int
+    
+    # Memory
+    memory_total_bytes: int
+    memory_free_bytes: int
+    memory_used_bytes: int
+    memory_usage_percent: float
+    
+    # Disk (optional)
+    disk_total_bytes: int | None = None
+    disk_free_bytes: int | None = None
