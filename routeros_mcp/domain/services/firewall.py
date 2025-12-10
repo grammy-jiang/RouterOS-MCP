@@ -128,9 +128,9 @@ class FirewallService:
             ValueError: If action is invalid
         """
         from routeros_mcp.security.safeguards import (
-            validate_mcp_owned_list,
-            validate_ip_address_format,
             create_dry_run_response,
+            validate_ip_address_format,
+            validate_mcp_owned_list,
         )
 
         # Validate list name is MCP-owned

@@ -119,7 +119,7 @@ def validate_ip_address_format(address: str) -> None:
         raise ValueError(
             f"Invalid IP address format: {address}. "
             f"Expected CIDR notation (e.g., '192.168.1.1/24'). Error: {e}"
-        )
+        ) from e
 
 
 def check_ip_overlap(
@@ -180,7 +180,7 @@ def check_ip_overlap(
     except ValueError as e:
         raise ValueError(
             f"Invalid IP address format: {new_address}. Error: {e}"
-        )
+        ) from e
 
 
 def validate_dns_servers(servers: list[str]) -> None:
@@ -213,7 +213,7 @@ def validate_dns_servers(servers: list[str]) -> None:
                 raise ValueError(
                     f"Invalid DNS server address: {server}. "
                     "Must be a valid IP address or hostname."
-                )
+                ) from None
 
     logger.debug(f"DNS server validation passed: {len(servers)} servers")
 
@@ -248,7 +248,7 @@ def validate_ntp_servers(servers: list[str]) -> None:
                 raise ValueError(
                     f"Invalid NTP server address: {server}. "
                     "Must be a valid IP address or hostname."
-                )
+                ) from None
 
     logger.debug(f"NTP server validation passed: {len(servers)} servers")
 

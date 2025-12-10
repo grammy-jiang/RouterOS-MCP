@@ -124,7 +124,7 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                     preposition = "to" if action == "add" else "from"
                     content = f"{verb} {address} {preposition} address list '{list_name}'"
                 else:
-                    content = f"No change needed (entry already in desired state)"
+                    content = "No change needed (entry already in desired state)"
 
                 return format_tool_result(
                     content=content,
