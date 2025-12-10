@@ -86,6 +86,7 @@ require appropriate device capabilities and permissions.
         """Register MCP tools with the server."""
         # Import tool registration functions
         from routeros_mcp.mcp_tools import (
+            register_config_tools,
             register_device_tools,
             register_diagnostics_tools,
             register_dns_ntp_tools,
@@ -216,6 +217,7 @@ require appropriate device capabilities and permissions.
         register_firewall_logs_tools(self.mcp, self.settings)
         register_firewall_write_tools(self.mcp, self.settings)
         register_diagnostics_tools(self.mcp, self.settings)
+        register_config_tools(self.mcp, self.settings)
 
         logger.info("Registered all MCP tools")
 
