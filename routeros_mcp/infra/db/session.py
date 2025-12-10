@@ -197,8 +197,31 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
+async def initialize_session_manager(settings: Settings) -> DatabaseSessionManager:
+    """Initialize and return the database session manager.
+
+    Args:
+        settings: Application settings
+
+    Returns:
+        Initialized DatabaseSessionManager
+
+    Example:
+        manager = await initialize_session_manager(settings)
+        async with manager.session() as session:
+            ...
+    """
+    manager = get_session_manager(settings)
+    if manager._session_factory is None:
+        await manager.init()
+    return manager
+
+
 def get_session_factory(settings: Settings | None = None) -> DatabaseSessionManager:
     """Get session factory for creating sessions outside FastAPI context.
+
+    WARNING: This function does not initialize the manager. The manager must be
+    initialized separately before use, typically during application startup.
 
     Args:
         settings: Application settings (optional, uses global if not provided)
@@ -207,17 +230,15 @@ def get_session_factory(settings: Settings | None = None) -> DatabaseSessionMana
         Database session manager with session() method
 
     Example:
-        factory = get_session_factory(settings)
-        async with factory.session() as session:
+        # During startup
+        manager = get_session_factory(settings)
+        await manager.init()
+
+        # Later use
+        async with manager.session() as session:
             result = await session.execute(select(Device))
     """
     manager = get_session_manager(settings)
-    if manager._session_factory is None:
-        # Initialize if not already done
-        import asyncio
-        asyncio.create_task(manager.init())
-
-    # Return the manager itself, not the session factory
     return manager
 
 

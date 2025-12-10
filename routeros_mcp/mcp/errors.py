@@ -146,8 +146,8 @@ class ValidationError(MCPError):
     message = "Validation error"
 
 
-class TimeoutError(MCPError):
-    """Operation timed out."""
+class MCPTimeoutError(MCPError):
+    """MCP operation timed out."""
 
     code = MCP_TIMEOUT_ERROR
     message = "Operation timed out"
@@ -235,7 +235,7 @@ def map_exception_to_error(exc: Exception) -> MCPError:
         )
 
     if isinstance(exc, InfraTimeoutError):
-        return TimeoutError(
+        return MCPTimeoutError(
             str(exc),
             data={"original_error": exc.__class__.__name__}
         )

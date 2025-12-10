@@ -1,7 +1,5 @@
 """Tests for MCP errors module."""
 
-import pytest
-
 from routeros_mcp.mcp.errors import (
     JSONRPC_INTERNAL_ERROR,
     JSONRPC_INVALID_PARAMS,

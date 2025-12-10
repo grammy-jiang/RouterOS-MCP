@@ -292,15 +292,27 @@ class DeviceService:
     ) -> RouterOSRestClient:
         """Get REST client for device with decrypted credentials.
 
+        **IMPORTANT**: The caller is responsible for closing the returned client
+        by calling `await client.close()` when done. Consider using in a try/finally
+        block or async context manager pattern.
+
         Args:
             device_id: Device identifier
 
         Returns:
-            Configured RouterOS REST client
+            Configured RouterOS REST client (must be closed by caller)
 
         Raises:
             DeviceNotFoundError: If device or credentials don't exist
             AuthenticationError: If credentials can't be decrypted
+
+        Example:
+            client = await service.get_rest_client("dev-lab-01")
+            try:
+                data = await client.get("/rest/system/resource")
+                # Process data...
+            finally:
+                await client.close()
         """
         device = await self.get_device(device_id)
 

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from routeros_mcp.config import Settings
 from routeros_mcp.domain.models import SystemResource
 from routeros_mcp.domain.services.device import DeviceService
+from routeros_mcp.domain.utils import parse_routeros_uptime
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ class SystemService:
                 (memory_used / memory_total * 100) if memory_total > 0 else 0.0
             )
 
-            uptime = self._parse_uptime(resource_data.get("uptime", "0s"))
+            uptime = parse_routeros_uptime(resource_data.get("uptime", "0s"))
 
             overview = {
                 "device_id": device_id,
@@ -148,7 +149,7 @@ class SystemService:
                 (memory_used / memory_total * 100) if memory_total > 0 else 0.0
             )
 
-            uptime = self._parse_uptime(resource_data.get("uptime", "0s"))
+            uptime = parse_routeros_uptime(resource_data.get("uptime", "0s"))
 
             # Try to get identity
             try:
@@ -212,40 +213,3 @@ class SystemService:
 
         finally:
             await client.close()
-
-    def _parse_uptime(self, uptime_str: str) -> int:
-        """Parse RouterOS uptime string to seconds.
-
-        Args:
-            uptime_str: Uptime string (e.g., "1w2d3h4m5s")
-
-        Returns:
-            Uptime in seconds
-        """
-        if not uptime_str:
-            return 0
-
-        # Parse uptime format: 1w2d3h4m5s
-        seconds = 0
-        current_num = ""
-
-        for char in uptime_str:
-            if char.isdigit():
-                current_num += char
-            elif char == "w":
-                seconds += int(current_num) * 7 * 24 * 3600
-                current_num = ""
-            elif char == "d":
-                seconds += int(current_num) * 24 * 3600
-                current_num = ""
-            elif char == "h":
-                seconds += int(current_num) * 3600
-                current_num = ""
-            elif char == "m":
-                seconds += int(current_num) * 60
-                current_num = ""
-            elif char == "s":
-                seconds += int(current_num)
-                current_num = ""
-
-        return seconds

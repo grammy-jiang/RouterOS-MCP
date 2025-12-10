@@ -72,14 +72,17 @@ class TestCreateErrorResponse:
         assert response["error"]["message"] == "Invalid value"
 
     def test_error_response_with_null_id(self) -> None:
-        """Test error response with null ID."""
+        """Test error response with null ID (notification error)."""
         error = ValidationError("Test error")
         response = create_error_response(
             request_id=None,
             error=error,
         )
-        
-        assert response["id"] is None
+
+        # Per JSON-RPC 2.0 spec, notification errors should not have 'id' field
+        assert "id" not in response
+        assert response["jsonrpc"] == "2.0"
+        assert "error" in response
 
 
 class TestValidateJsonRpcRequest:

@@ -47,7 +47,7 @@ class RouterOSMCPServer:
             settings: Application settings
         """
         self.settings = settings
-        self.session_factory = get_session_factory(settings)
+        self.session_factory = None  # Will be initialized in start()
 
         # Create FastMCP instance
         self.mcp = FastMCP(
@@ -257,6 +257,10 @@ require appropriate device capabilities and permissions.
                 "environment": self.settings.environment,
             },
         )
+
+        # Initialize database session factory
+        self.session_factory = await initialize_session_manager(self.settings)
+        logger.info("Database session manager initialized")
 
         if self.settings.mcp_transport == "stdio":
             # Configure logging to stderr only for stdio mode

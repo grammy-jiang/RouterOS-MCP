@@ -71,11 +71,9 @@ def create_error_response(
         "error": error.to_jsonrpc_error(),
     }
 
-    # Include ID if provided (omit for notification errors)
+    # Include ID if provided (omit for notification errors per JSON-RPC spec)
     if request_id is not None:
         response["id"] = request_id
-    else:
-        response["id"] = None
 
     return response
 
