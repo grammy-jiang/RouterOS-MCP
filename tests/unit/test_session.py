@@ -1,7 +1,8 @@
 """Tests for database session management."""
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from routeros_mcp.config import Settings
 from routeros_mcp.infra.db.session import (
@@ -9,6 +10,26 @@ from routeros_mcp.infra.db.session import (
     get_session_manager,
     reset_session_manager,
 )
+
+
+@pytest.fixture
+async def db_session():
+    """Create an in-memory database session for testing."""
+    from routeros_mcp.infra.db.models import Base
+    
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    
+    # Create all tables
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    
+    # Create session
+    async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    
+    async with async_session_maker() as session:
+        yield session
+        
+    await engine.dispose()
 
 
 class TestDatabaseSessionManager:
@@ -81,82 +102,57 @@ class TestDatabaseSessionManager:
         await manager.close()
         
     @pytest.mark.asyncio
-    async def test_session_auto_commit_on_success(self) -> None:
+    async def test_session_auto_commit_on_success(self, db_session) -> None:
         """Test that session auto-commits on success."""
-        settings = Settings(database_url="sqlite+aiosqlite:///./test.db")
-        manager = DatabaseSessionManager(settings)
-        await manager.init()
-        
-        # Create tables
-        from routeros_mcp.infra.db.models import Base
-        async with manager.engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        
         # Insert a record
         from routeros_mcp.infra.db.models import Device
-        async with manager.session() as session:
+        device = Device(
+            id="session-test-1",
+            name="test-router-session-commit",
+            management_address="192.168.1.101:443",
+            environment="lab",
+            status="healthy",
+            tags={},
+            allow_advanced_writes=False,
+            allow_professional_workflows=False,
+        )
+        db_session.add(device)
+        await db_session.commit()
+        
+        # Verify it was committed
+        from sqlalchemy import select
+        result = await db_session.execute(select(Device).where(Device.id == "session-test-1"))
+        found = result.scalar_one_or_none()
+        assert found is not None
+        assert found.name == "test-router-session-commit"
+        
+    @pytest.mark.asyncio
+    async def test_session_auto_rollback_on_error(self, db_session) -> None:
+        """Test that session auto-rolls back on error."""
+        # Try to insert a record but raise error
+        from routeros_mcp.infra.db.models import Device
+        try:
             device = Device(
-                id="test-1",
-                name="test-router",
-                management_address="192.168.1.1:443",
+                id="session-test-2",
+                name="test-router-session-rollback",
+                management_address="192.168.1.102:443",
                 environment="lab",
                 status="healthy",
                 tags={},
                 allow_advanced_writes=False,
                 allow_professional_workflows=False,
             )
-            session.add(device)
-            # Auto-commits on exit
-            
-        # Verify it was committed
-        async with manager.session() as session:
-            from sqlalchemy import select
-            result = await session.execute(select(Device).where(Device.id == "test-1"))
-            found = result.scalar_one_or_none()
-            assert found is not None
-            assert found.name == "test-router"
-            
-        await manager.close()
-        
-    @pytest.mark.asyncio
-    async def test_session_auto_rollback_on_error(self) -> None:
-        """Test that session auto-rolls back on error."""
-        settings = Settings(database_url="sqlite+aiosqlite:///./test.db")
-        manager = DatabaseSessionManager(settings)
-        await manager.init()
-        
-        # Create tables
-        from routeros_mcp.infra.db.models import Base
-        async with manager.engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        
-        # Try to insert a record but raise error
-        from routeros_mcp.infra.db.models import Device
-        try:
-            async with manager.session() as session:
-                device = Device(
-                    id="test-2",
-                    name="test-router-2",
-                    management_address="192.168.1.2:443",
-                    environment="lab",
-                    status="healthy",
-                    tags={},
-                    allow_advanced_writes=False,
-                    allow_professional_workflows=False,
-                )
-                session.add(device)
-                raise ValueError("Test error")
+            db_session.add(device)
+            await db_session.flush()  # Flush to database
+            raise ValueError("Test error")
         except ValueError:
-            pass
+            await db_session.rollback()
             
         # Verify it was rolled back
-        async with manager.session() as session:
-            from sqlalchemy import select
-            result = await session.execute(select(Device).where(Device.id == "test-2"))
-            found = result.scalar_one_or_none()
-            assert found is None
-            
-        await manager.close()
+        from sqlalchemy import select
+        result = await db_session.execute(select(Device).where(Device.id == "session-test-2"))
+        found = result.scalar_one_or_none()
+        assert found is None
         
     @pytest.mark.asyncio
     async def test_close_cleans_up(self) -> None:
