@@ -24,12 +24,12 @@ class TestRouterOSSSHClient:
     def test_client_initialization(self) -> None:
         """Test client initialization with default parameters."""
         client = RouterOSSSHClient(
-            host="192.168.1.1",
+            host="router.example.com",
             username="admin",
             password="secret",
         )
         
-        assert client.host == "192.168.1.1"
+        assert client.host == "router.example.com"
         assert client.port == 22
         assert client.username == "admin"
         assert client.password == "secret"
@@ -39,7 +39,7 @@ class TestRouterOSSSHClient:
     def test_client_initialization_custom_port(self) -> None:
         """Test client initialization with custom port."""
         client = RouterOSSSHClient(
-            host="10.0.0.1",
+            host="router2.example.com",
             port=2222,
             username="admin",
             password="secret",
@@ -49,7 +49,7 @@ class TestRouterOSSSHClient:
         
     def test_set_credentials(self) -> None:
         """Test setting credentials after initialization."""
-        client = RouterOSSSHClient(host="192.168.1.1")
+        client = RouterOSSSHClient(host="router.example.com")
         
         assert client.username is None
         assert client.password is None
@@ -69,7 +69,7 @@ class TestRouterOSSSHClient:
     async def test_validate_command_whitelisted(self) -> None:
         """Test that whitelisted commands pass validation."""
         client = RouterOSSSHClient(
-            host="192.168.1.1",
+            host="router.example.com",
             username="admin",
             password="secret",
         )
@@ -82,7 +82,7 @@ class TestRouterOSSSHClient:
     async def test_validate_command_not_whitelisted(self) -> None:
         """Test that non-whitelisted commands fail validation."""
         client = RouterOSSSHClient(
-            host="192.168.1.1",
+            host="router.example.com",
             username="admin",
             password="secret",
         )
@@ -94,7 +94,7 @@ class TestRouterOSSSHClient:
     async def test_validate_command_with_whitespace(self) -> None:
         """Test that commands with leading/trailing whitespace are normalized."""
         client = RouterOSSSHClient(
-            host="192.168.1.1",
+            host="router.example.com",
             username="admin",
             password="secret",
         )
@@ -107,7 +107,7 @@ class TestRouterOSSSHClient:
     async def test_validate_command_similar_but_not_whitelisted(self) -> None:
         """Test that similar but different commands are rejected."""
         client = RouterOSSSHClient(
-            host="192.168.1.1",
+            host="router.example.com",
             username="admin",
             password="secret",
         )
@@ -122,7 +122,7 @@ class TestRouterOSSSHClient:
     async def test_successful_command_execution(self) -> None:
         """Test successful command execution."""
         client = RouterOSSSHClient(
-            host="192.168.1.1",
+            host="router.example.com",
             username="admin",
             password="secret",
         )
@@ -144,7 +144,7 @@ class TestRouterOSSSHClient:
     async def test_command_execution_with_bytes_output(self) -> None:
         """Test command execution with bytes stdout."""
         client = RouterOSSSHClient(
-            host="192.168.1.1",
+            host="router.example.com",
             username="admin",
             password="secret",
         )
@@ -165,7 +165,7 @@ class TestRouterOSSSHClient:
     async def test_command_execution_with_empty_output(self) -> None:
         """Test command execution with empty/None stdout."""
         client = RouterOSSSHClient(
-            host="192.168.1.1",
+            host="router.example.com",
             username="admin",
             password="secret",
         )
@@ -186,7 +186,7 @@ class TestRouterOSSSHClient:
     async def test_command_timeout(self) -> None:
         """Test that command timeout raises RouterOSSSHTimeoutError."""
         client = RouterOSSSHClient(
-            host="192.168.1.1",
+            host="router.example.com",
             username="admin",
             password="secret",
             timeout_seconds=1.0,
@@ -208,7 +208,7 @@ class TestRouterOSSSHClient:
     async def test_command_execution_error(self) -> None:
         """Test that command execution error raises RouterOSSSHError."""
         client = RouterOSSSHClient(
-            host="192.168.1.1",
+            host="router.example.com",
             username="admin",
             password="secret",
         )
@@ -235,7 +235,7 @@ class TestRouterOSSSHClient:
     async def test_connection_retry_on_failure(self) -> None:
         """Test that connection retries on failure."""
         client = RouterOSSSHClient(
-            host="192.168.1.1",
+            host="router.example.com",
             username="admin",
             password="secret",
             max_retries=3,
@@ -261,7 +261,7 @@ class TestRouterOSSSHClient:
     async def test_authentication_error(self) -> None:
         """Test that authentication error raises RouterOSSSHAuthenticationError."""
         client = RouterOSSSHClient(
-            host="192.168.1.1",
+            host="router.example.com",
             username="admin",
             password="wrong",
         )
@@ -276,7 +276,7 @@ class TestRouterOSSSHClient:
     async def test_connection_reuse(self) -> None:
         """Test that connection is reused if still open."""
         client = RouterOSSSHClient(
-            host="192.168.1.1",
+            host="router.example.com",
             username="admin",
             password="secret",
         )
@@ -294,7 +294,7 @@ class TestRouterOSSSHClient:
     async def test_connection_recreation_if_closed(self) -> None:
         """Test that connection is recreated if closed."""
         client = RouterOSSSHClient(
-            host="192.168.1.1",
+            host="router.example.com",
             username="admin",
             password="secret",
         )
@@ -316,7 +316,7 @@ class TestRouterOSSSHClient:
     async def test_close_connection(self) -> None:
         """Test closing the connection."""
         client = RouterOSSSHClient(
-            host="192.168.1.1",
+            host="router.example.com",
             username="admin",
             password="secret",
         )
@@ -336,7 +336,7 @@ class TestRouterOSSSHClient:
     async def test_export_config_compact(self) -> None:
         """Test export_config with compact format."""
         client = RouterOSSSHClient(
-            host="192.168.1.1",
+            host="router.example.com",
             username="admin",
             password="secret",
         )
@@ -358,7 +358,7 @@ class TestRouterOSSSHClient:
     async def test_export_config_full(self) -> None:
         """Test export_config with full format."""
         client = RouterOSSSHClient(
-            host="192.168.1.1",
+            host="router.example.com",
             username="admin",
             password="secret",
         )
@@ -379,7 +379,7 @@ class TestRouterOSSSHClient:
     @pytest.mark.asyncio
     async def test_credentials_required_for_connection(self) -> None:
         """Test that credentials are required before creating connection."""
-        client = RouterOSSSHClient(host="192.168.1.1")
+        client = RouterOSSSHClient(host="router.example.com")
         
         with pytest.raises(ValueError, match="Credentials not set"):
             await client._get_connection()

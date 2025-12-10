@@ -109,7 +109,7 @@ class TestDatabaseSessionManager:
         device = Device(
             id="session-test-1",
             name="test-router-session-commit",
-            management_address="192.168.1.101:443",
+            management_address="198.51.100.101:443",
             environment="lab",
             status="healthy",
             tags={},
@@ -135,7 +135,7 @@ class TestDatabaseSessionManager:
             device = Device(
                 id="session-test-2",
                 name="test-router-session-rollback",
-                management_address="192.168.1.102:443",
+                management_address="198.51.100.102:443",
                 environment="lab",
                 status="healthy",
                 tags={},

@@ -45,7 +45,7 @@ class TestDeviceModel:
         device = Device(
             id="dev-001",
             name="test-router",
-            management_address="192.168.1.1:443",
+            management_address="198.51.100.1:443",
             environment="lab",
             status="healthy",
             tags={"site": "main", "rack": "A1"},
@@ -72,7 +72,7 @@ class TestDeviceModel:
         device = Device(
             id="dev-002",
             name="test-router-2",
-            management_address="192.168.1.2:443",
+            management_address="198.51.100.2:443",
             environment="lab",
             status="healthy",
             tags={},
@@ -93,7 +93,7 @@ class TestDeviceModel:
         device = Device(
             id="dev-003",
             name="test-router-3",
-            management_address="192.168.1.3:443",
+            management_address="198.51.100.3:443",
             environment="lab",
             status="healthy",
             tags={},
@@ -113,7 +113,7 @@ class TestDeviceModel:
         device = Device(
             id="dev-004",
             name="test-router-4",
-            management_address="192.168.1.4:443",
+            management_address="198.51.100.4:443",
             environment="lab",
             status="healthy",
             tags={},
@@ -135,7 +135,7 @@ class TestDeviceRelationships:
         device = Device(
             id="dev-100",
             name="test-router-100",
-            management_address="192.168.1.100:443",
+            management_address="198.51.100.100:443",
             environment="lab",
             status="healthy",
             tags={},
@@ -169,7 +169,7 @@ class TestDeviceRelationships:
         device = Device(
             id="dev-200",
             name="test-router-200",
-            management_address="192.168.1.200:443",
+            management_address="198.51.100.200:443",
             environment="lab",
             status="healthy",
             tags={},
@@ -208,7 +208,7 @@ class TestCredentialModel:
         device = Device(
             id="dev-300",
             name="test-router-300",
-            management_address="192.168.1.300:443",
+            management_address="198.51.100.300:443",
             environment="lab",
             status="healthy",
             tags={},
@@ -245,7 +245,7 @@ class TestHealthCheckModel:
         device = Device(
             id="dev-400",
             name="test-router-400",
-            management_address="192.168.1.400:443",
+            management_address="198.51.100.400:443",
             environment="lab",
             status="healthy",
             tags={},
@@ -286,7 +286,7 @@ class TestSnapshotModel:
         device = Device(
             id="dev-500",
             name="test-router-500",
-            management_address="192.168.1.500:443",
+            management_address="198.51.100.500:443",
             environment="lab",
             status="healthy",
             tags={},
@@ -408,7 +408,7 @@ class TestAuditEventModel:
         device = Device(
             id="dev-800",
             name="test-router-800",
-            management_address="192.168.1.800:443",
+            management_address="198.51.100.800:443",
             environment="lab",
             status="healthy",
             tags={},
@@ -449,7 +449,7 @@ class TestAuditEventModel:
         device = Device(
             id="dev-900",
             name="test-router-900",
-            management_address="192.168.1.900:443",
+            management_address="198.51.100.900:443",
             environment="lab",
             status="healthy",
             tags={},
