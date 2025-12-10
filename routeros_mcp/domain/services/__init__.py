@@ -15,6 +15,8 @@ Services in this package:
 - RoutingService: Routing table operations
 - FirewallLogsService: Firewall rules and system logs operations
 - DiagnosticsService: Network diagnostic operations (ping, traceroute)
+- PlanService: Plan/apply workflow for multi-device changes
+- JobService: Job execution and coordination
 """
 
 from routeros_mcp.domain.services.device import DeviceService
@@ -24,6 +26,8 @@ from routeros_mcp.domain.services.firewall_logs import FirewallLogsService
 from routeros_mcp.domain.services.health import HealthService
 from routeros_mcp.domain.services.interface import InterfaceService
 from routeros_mcp.domain.services.ip import IPService
+from routeros_mcp.domain.services.job import JobService
+from routeros_mcp.domain.services.plan import PlanService
 from routeros_mcp.domain.services.routing import RoutingService
 from routeros_mcp.domain.services.system import SystemService
 
@@ -35,6 +39,8 @@ __all__ = [
     "HealthService",
     "InterfaceService",
     "IPService",
+    "JobService",
+    "PlanService",
     "RoutingService",
     "SystemService",
 ]

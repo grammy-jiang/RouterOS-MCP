@@ -9,8 +9,10 @@ This package contains all MCP tool implementations organized by topic:
 - routing: Routing table operations
 - firewall_logs: Firewall rules and system logs
 - diagnostics: Network diagnostic tools (ping, traceroute)
+- config: Multi-device configuration workflows (plan/apply)
 """
 
+from routeros_mcp.mcp_tools.config import register_config_tools
 from routeros_mcp.mcp_tools.device import register_device_tools
 from routeros_mcp.mcp_tools.diagnostics import register_diagnostics_tools
 from routeros_mcp.mcp_tools.dns_ntp import register_dns_ntp_tools
@@ -22,6 +24,7 @@ from routeros_mcp.mcp_tools.routing import register_routing_tools
 from routeros_mcp.mcp_tools.system import register_system_tools
 
 __all__ = [
+    "register_config_tools",
     "register_device_tools",
     "register_diagnostics_tools",
     "register_dns_ntp_tools",
