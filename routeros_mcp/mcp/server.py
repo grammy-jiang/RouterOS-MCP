@@ -81,6 +81,17 @@ require appropriate device capabilities and permissions.
 
     def _register_tools(self) -> None:
         """Register MCP tools with the server."""
+        # Import tool registration functions
+        from routeros_mcp.mcp_tools import (
+            register_device_tools,
+            register_diagnostics_tools,
+            register_dns_ntp_tools,
+            register_firewall_logs_tools,
+            register_interface_tools,
+            register_ip_tools,
+            register_routing_tools,
+            register_system_tools,
+        )
 
         # Echo tool for testing
         @self.mcp.tool()
@@ -191,58 +202,17 @@ require appropriate device capabilities and permissions.
                     meta=error.data,
                 )
 
-        # System overview tool
-        @self.mcp.tool()
-        async def system_overview(device_id: str) -> dict[str, Any]:
-            """Get system overview for a device.
+        # Register all fundamental read-only tools by topic
+        register_device_tools(self.mcp, self.settings)
+        register_system_tools(self.mcp, self.settings)
+        register_interface_tools(self.mcp, self.settings)
+        register_ip_tools(self.mcp, self.settings)
+        register_dns_ntp_tools(self.mcp, self.settings)
+        register_routing_tools(self.mcp, self.settings)
+        register_firewall_logs_tools(self.mcp, self.settings)
+        register_diagnostics_tools(self.mcp, self.settings)
 
-            Args:
-                device_id: Device identifier (e.g., 'dev-lab-01')
-
-            Returns:
-                System overview with metrics and hardware info
-            """
-            try:
-                async with self.session_factory.session() as session:
-                    system_service = SystemService(session, self.settings)
-                    overview = await system_service.get_system_overview(device_id)
-
-                    # Format content
-                    content_parts = [
-                        f"Device: {overview['device_name']}",
-                        f"Identity: {overview['system_identity']}",
-                        f"RouterOS: {overview['routeros_version']}",
-                        f"Hardware: {overview['hardware_model']}",
-                        f"CPU: {overview['cpu_usage_percent']:.1f}% "
-                        f"({overview['cpu_count']} cores)",
-                        f"Memory: {overview['memory_usage_percent']:.1f}% "
-                        f"({overview['memory_used_bytes'] // 1024 // 1024}MB / "
-                        f"{overview['memory_total_bytes'] // 1024 // 1024}MB)",
-                        f"Uptime: {overview['uptime_formatted']}",
-                    ]
-
-                    content = "\n".join(content_parts)
-
-                    return format_tool_result(
-                        content=content,
-                        meta=overview,
-                    )
-
-            except MCPError as e:
-                return format_tool_result(
-                    content=e.message,
-                    is_error=True,
-                    meta=e.data,
-                )
-            except Exception as e:
-                error = map_exception_to_error(e)
-                return format_tool_result(
-                    content=error.message,
-                    is_error=True,
-                    meta=error.data,
-                )
-
-        logger.info("Registered MCP tools", extra={"tool_count": 4})
+        logger.info("Registered all MCP tools")
 
     async def start(self) -> None:
         """Start the MCP server.
