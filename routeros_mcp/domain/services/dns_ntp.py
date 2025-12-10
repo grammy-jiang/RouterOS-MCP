@@ -198,3 +198,216 @@ class DNSNTPService:
 
         finally:
             await client.close()
+
+    async def update_dns_servers(
+        self,
+        device_id: str,
+        dns_servers: list[str],
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Update DNS server configuration.
+
+        Args:
+            device_id: Device identifier
+            dns_servers: List of DNS server addresses
+            dry_run: If True, only return planned changes without applying
+
+        Returns:
+            Dictionary with update result
+
+        Raises:
+            DeviceNotFoundError: If device doesn't exist
+            ValueError: If server addresses are invalid
+        """
+        from routeros_mcp.security.safeguards import (
+            create_dry_run_response,
+            validate_dns_servers,
+        )
+
+        # Validate DNS servers
+        validate_dns_servers(dns_servers)
+
+        await self.device_service.get_device(device_id)
+        client = await self.device_service.get_rest_client(device_id)
+
+        try:
+            # Get current DNS configuration
+            current_data = await client.get("/rest/ip/dns")
+            current_servers_str = current_data.get("servers", "")
+            current_servers = [
+                s.strip() for s in current_servers_str.split(",") if s.strip()
+            ]
+
+            # Check if change is needed
+            if set(current_servers) == set(dns_servers):
+                return {
+                    "changed": False,
+                    "old_servers": current_servers,
+                    "new_servers": dns_servers,
+                    "dry_run": dry_run,
+                }
+
+            # Dry-run: return planned changes
+            if dry_run:
+                return create_dry_run_response(
+                    operation="dns/update-servers",
+                    device_id=device_id,
+                    planned_changes={
+                        "old_servers": current_servers,
+                        "new_servers": dns_servers,
+                    },
+                )
+
+            # Apply change
+            servers_str = ",".join(dns_servers)
+            await client.patch("/rest/ip/dns", {"servers": servers_str})
+
+            logger.info(
+                f"Updated DNS servers: {current_servers} -> {dns_servers}",
+                extra={"device_id": device_id},
+            )
+
+            return {
+                "changed": True,
+                "old_servers": current_servers,
+                "new_servers": dns_servers,
+                "dry_run": False,
+            }
+
+        finally:
+            await client.close()
+
+    async def flush_dns_cache(
+        self,
+        device_id: str,
+    ) -> dict[str, Any]:
+        """Flush (clear) DNS cache.
+
+        Args:
+            device_id: Device identifier
+
+        Returns:
+            Dictionary with flush result
+
+        Raises:
+            DeviceNotFoundError: If device doesn't exist
+        """
+        await self.device_service.get_device(device_id)
+        client = await self.device_service.get_rest_client(device_id)
+
+        try:
+            # Get cache size before flush (for reporting)
+            try:
+                cache_data = await client.get("/rest/ip/dns/cache")
+                entries_before = len(cache_data) if isinstance(cache_data, list) else 0
+            except Exception:
+                entries_before = 0
+
+            # Flush cache
+            await client.post("/rest/ip/dns/cache/flush", {})
+
+            logger.info(
+                f"Flushed DNS cache ({entries_before} entries)",
+                extra={"device_id": device_id},
+            )
+
+            return {
+                "changed": True,
+                "entries_flushed": entries_before,
+            }
+
+        finally:
+            await client.close()
+
+    async def update_ntp_servers(
+        self,
+        device_id: str,
+        ntp_servers: list[str],
+        enabled: bool = True,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Update NTP server configuration.
+
+        Args:
+            device_id: Device identifier
+            ntp_servers: List of NTP server addresses
+            enabled: Enable NTP client
+            dry_run: If True, only return planned changes without applying
+
+        Returns:
+            Dictionary with update result
+
+        Raises:
+            DeviceNotFoundError: If device doesn't exist
+            ValueError: If server addresses are invalid
+        """
+        from routeros_mcp.security.safeguards import (
+            create_dry_run_response,
+            validate_ntp_servers,
+        )
+
+        # Validate NTP servers
+        validate_ntp_servers(ntp_servers)
+
+        await self.device_service.get_device(device_id)
+        client = await self.device_service.get_rest_client(device_id)
+
+        try:
+            # Get current NTP configuration
+            current_data = await client.get("/rest/system/ntp/client")
+            current_servers_str = current_data.get("servers", "")
+            if isinstance(current_servers_str, str):
+                current_servers = [
+                    s.strip() for s in current_servers_str.split(",") if s.strip()
+                ]
+            elif isinstance(current_servers_str, list):
+                current_servers = current_servers_str
+            else:
+                current_servers = []
+            current_enabled = current_data.get("enabled", False)
+
+            # Check if change is needed
+            if set(current_servers) == set(ntp_servers) and current_enabled == enabled:
+                return {
+                    "changed": False,
+                    "old_servers": current_servers,
+                    "new_servers": ntp_servers,
+                    "enabled": enabled,
+                    "dry_run": dry_run,
+                }
+
+            # Dry-run: return planned changes
+            if dry_run:
+                return create_dry_run_response(
+                    operation="ntp/update-servers",
+                    device_id=device_id,
+                    planned_changes={
+                        "old_servers": current_servers,
+                        "new_servers": ntp_servers,
+                        "old_enabled": current_enabled,
+                        "new_enabled": enabled,
+                    },
+                )
+
+            # Apply change
+            servers_str = ",".join(ntp_servers)
+            await client.patch(
+                "/rest/system/ntp/client",
+                {"servers": servers_str, "enabled": "yes" if enabled else "no"},
+            )
+
+            logger.info(
+                f"Updated NTP servers: {current_servers} -> {ntp_servers}, enabled={enabled}",
+                extra={"device_id": device_id},
+            )
+
+            return {
+                "changed": True,
+                "old_servers": current_servers,
+                "new_servers": ntp_servers,
+                "enabled": enabled,
+                "dry_run": False,
+            }
+
+        finally:
+            await client.close()

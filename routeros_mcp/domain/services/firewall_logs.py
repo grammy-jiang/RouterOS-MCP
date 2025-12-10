@@ -170,7 +170,7 @@ class FirewallLogsService:
                 for entry in lists_data:
                     if isinstance(entry, dict):
                         entry_list_name = entry.get("list", "")
-                        
+
                         # Filter by list name if provided
                         if list_name and entry_list_name != list_name:
                             continue

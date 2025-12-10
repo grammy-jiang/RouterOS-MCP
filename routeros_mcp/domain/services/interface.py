@@ -165,7 +165,7 @@ class InterfaceService:
                 for stat in stats_data:
                     if isinstance(stat, dict):
                         name = stat.get("name", "")
-                        
+
                         # Filter by interface names if provided
                         if interface_names and name not in interface_names:
                             continue

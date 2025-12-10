@@ -102,7 +102,7 @@ class DiagnosticsService:
                 "count": count,
                 "interval": f"{interval_ms}ms",
             }
-            
+
             ping_data = await client.post("/rest/tool/ping", ping_params)
 
             # Parse ping results
@@ -196,18 +196,18 @@ class DiagnosticsService:
                 "address": address,
                 "count": count,
             }
-            
+
             trace_data = await client.post("/rest/tool/traceroute", trace_params)
 
             # Parse traceroute results
             hops: list[dict[str, Any]] = []
-            
+
             if isinstance(trace_data, list):
                 for result in trace_data:
                     if isinstance(result, dict):
                         hop_num = result.get("hop", 0)
                         hop_address = result.get("address", "*")
-                        
+
                         # Parse RTT
                         time_str = result.get("time", "")
                         if time_str and isinstance(time_str, str):

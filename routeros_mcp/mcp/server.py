@@ -87,6 +87,7 @@ require appropriate device capabilities and permissions.
             register_diagnostics_tools,
             register_dns_ntp_tools,
             register_firewall_logs_tools,
+            register_firewall_write_tools,
             register_interface_tools,
             register_ip_tools,
             register_routing_tools,
@@ -210,6 +211,7 @@ require appropriate device capabilities and permissions.
         register_dns_ntp_tools(self.mcp, self.settings)
         register_routing_tools(self.mcp, self.settings)
         register_firewall_logs_tools(self.mcp, self.settings)
+        register_firewall_write_tools(self.mcp, self.settings)
         register_diagnostics_tools(self.mcp, self.settings)
 
         logger.info("Registered all MCP tools")
