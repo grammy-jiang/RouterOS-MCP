@@ -1,0 +1,186 @@
+name: dns-ntp-rollout
+description: Step-by-step guide for rolling out DNS/NTP changes across devices
+
+arguments:
+  - name: environment
+    description: Target environment for rollout
+    type: string
+    enum: [lab, staging, prod]
+    required: false
+    default: lab
+  
+  - name: dry_run
+    description: Whether to recommend dry-run first
+    type: boolean
+    required: false
+    default: true
+
+messages:
+  - role: user
+    content: |
+      # DNS/NTP Rollout Workflow for {{ environment | upper }}
+      
+      ## Overview
+      Rolling out DNS/NTP changes to **{{ device_count }} devices** in {{ environment }} environment.
+      
+      {% if environment == 'prod' %}
+      ⚠️  **PRODUCTION ENVIRONMENT ALERT** ⚠️
+      - Changes require admin role
+      - Plan/apply workflow is MANDATORY
+      - Human approval token required
+      - Devices must have allow_advanced_writes=true
+      - Post-change monitoring required
+      {% endif %}
+      
+      ## Prerequisites
+      - [ ] User role: {{ 'admin' if environment == 'prod' else 'ops_rw or admin' }}
+      - [ ] Environment: {{ environment }}
+      - [ ] Devices have allow_advanced_writes={{ 'true' if environment in ['lab', 'staging'] else 'requires approval' }}
+      - [ ] Backup current DNS/NTP config (optional but recommended)
+      
+      ## Workflow Steps
+      
+      ### 1. List Target Devices
+      **Tool:** `device/list`
+      
+      **Parameters:**
+      ```json
+      {
+        "environment": "{{ environment }}"
+      }
+      ```
+      
+      **Action:** Review device list, verify all intended devices are included.
+      
+      ---
+      
+      ### 2. Get Current DNS/NTP Configuration
+      **Tools:**
+      - `dns/get-config` - Check current DNS servers
+      - `ntp/get-config` - Check current NTP servers
+      
+      **Action:** Document current settings for rollback reference.
+      
+      ---
+      
+      {% if dry_run %}
+      ### 3. Preview Changes (Dry Run)
+      **Tools:**
+      - `dns/update-servers` with `dry_run: true`
+      - `ntp/update-servers` with `dry_run: true`
+      
+      **Parameters Example:**
+      ```json
+      {
+        "device_id": "dev-001",
+        "dns_servers": ["8.8.8.8", "8.8.4.4"],
+        "dry_run": true
+      }
+      ```
+      
+      **Action:** Review what will change on each device before actual application.
+      
+      ---
+      {% endif %}
+      
+      ### {{ 4 if dry_run else 3 }}. Apply DNS Configuration
+      **Tool:** `dns/update-servers`
+      
+      **Parameters:**
+      ```json
+      {
+        "device_id": "<device_id>",
+        "dns_servers": ["8.8.8.8", "8.8.4.4"],
+        "dry_run": false{% if environment == 'prod' %},
+        "approval_token": "<token>"{% endif %}
+      }
+      ```
+      
+      **Action:** Apply DNS changes. Monitor for errors.
+      
+      ---
+      
+      ### {{ 5 if dry_run else 4 }}. Apply NTP Configuration
+      **Tool:** `ntp/update-servers`
+      
+      **Parameters:**
+      ```json
+      {
+        "device_id": "<device_id>",
+        "ntp_servers": ["time.cloudflare.com", "time.google.com"],
+        "dry_run": false{% if environment == 'prod' %},
+        "approval_token": "<token>"{% endif %}
+      }
+      ```
+      
+      **Action:** Apply NTP changes. Monitor for sync issues.
+      
+      ---
+      
+      ### {{ 6 if dry_run else 5 }}. Verify Changes
+      **Post-apply checklist:**
+      - [ ] DNS resolution works: Test with `diagnostics/ping` to a hostname
+      - [ ] NTP sync achieved: Check `ntp/get-status`
+      - [ ] Health checks remain green: Review `device://{device_id}/health`
+      - [ ] No connectivity issues: Use `device/check-connectivity`
+      
+      **Tools for verification:**
+      - `dns/get-config` - Verify DNS configuration applied
+      - `ntp/get-status` - Check NTP sync status and time offset
+      - `system/get-overview` - Overall system health
+      
+      ---
+      
+      ## Rollback Procedure
+      If issues occur after applying changes:
+      
+      1. **Assess Impact:** Check which devices are affected
+      2. **Revert Changes:** Use previous DNS/NTP values documented in step 2
+      3. **Use Tools:**
+         - `dns/update-servers` with old values
+         - `ntp/update-servers` with old values
+      4. **Verify Restoration:** Ensure services recover
+      
+      ---
+      
+      ## Safety Notes
+      - Always test in **lab** environment first
+      - Use **staging** for final validation before production
+      - Production changes require **admin approval**
+      - Monitor **health checks** for 5-10 minutes post-change
+      - Keep **rollback values** documented
+      
+      ---
+      
+      ## Troubleshooting Common Issues
+      
+      **Issue:** DNS resolution fails post-change
+      - **Solution:** Verify DNS servers are reachable, check firewall rules for port 53
+      - **Tool:** `diagnostics/ping` to DNS server IPs
+      
+      **Issue:** NTP sync fails
+      - **Solution:** Ensure NTP port 123/UDP is allowed, verify server reachability
+      - **Tool:** `ntp/get-status` to check sync status
+      
+      **Issue:** Device becomes unreachable during change
+      - **Solution:** Wait for network stabilization, may need physical access
+      
+      ---
+      
+      ## Additional Resources
+      - `troubleshoot-dns-ntp` prompt for detailed diagnostics
+      - `device://{device_id}/health` resource for health monitoring
+      - `fleet://health-summary` resource for fleet-wide status
+
+template_vars:
+  device_count: 0
+
+metadata:
+  category: workflow
+  tier: advanced
+  environments: [lab, staging, prod]
+  requires_approval: true
+  approvals_per_environment:
+    lab: false
+    staging: false
+    prod: true

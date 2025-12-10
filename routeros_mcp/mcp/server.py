@@ -71,6 +71,9 @@ require appropriate device capabilities and permissions.
         # Register tools
         self._register_tools()
 
+        # Register prompts (can be done immediately)
+        self._register_prompts()
+
         logger.info(
             "Initialized RouterOS MCP server",
             extra={
@@ -216,6 +219,32 @@ require appropriate device capabilities and permissions.
 
         logger.info("Registered all MCP tools")
 
+    def _register_resources(self) -> None:
+        """Register MCP resources with the server."""
+        # Import resource registration functions
+        from routeros_mcp.mcp_resources import (
+            register_device_resources,
+            register_fleet_resources,
+            register_plan_resources,
+            register_audit_resources,
+        )
+
+        # Note: Resources need session_factory which is initialized in start()
+        # We'll register them in start() instead
+        logger.info("Resource registration deferred to start()")
+
+    def _register_prompts(self) -> None:
+        """Register MCP prompts with the server."""
+        # Import prompts registration function
+        from routeros_mcp.mcp_prompts import register_prompts
+
+        # Register YAML-backed prompts
+        try:
+            register_prompts(self.mcp, self.settings)
+            logger.info("Registered MCP prompts")
+        except Exception as e:
+            logger.error(f"Failed to register prompts: {e}", exc_info=True)
+
     async def start(self) -> None:
         """Start the MCP server.
 
@@ -233,6 +262,23 @@ require appropriate device capabilities and permissions.
         # Initialize database session factory
         self.session_factory = await initialize_session_manager(self.settings)
         logger.info("Database session manager initialized")
+
+        # Register resources (now that we have session_factory)
+        from routeros_mcp.mcp_resources import (
+            register_device_resources,
+            register_fleet_resources,
+            register_plan_resources,
+            register_audit_resources,
+        )
+
+        try:
+            register_device_resources(self.mcp, self.session_factory, self.settings)
+            register_fleet_resources(self.mcp, self.session_factory, self.settings)
+            register_plan_resources(self.mcp, self.session_factory, self.settings)
+            register_audit_resources(self.mcp, self.session_factory, self.settings)
+            logger.info("Registered MCP resources")
+        except Exception as e:
+            logger.error(f"Failed to register resources: {e}", exc_info=True)
 
         if self.settings.mcp_transport == "stdio":
             # Configure logging to stderr only for stdio mode

@@ -1,0 +1,281 @@
+name: troubleshoot-device
+description: General device troubleshooting diagnostic workflow
+
+arguments:
+  - name: device_id
+    description: Device to troubleshoot (optional, shows device selection if omitted)
+    type: string
+    required: false
+  
+  - name: issue_type
+    description: Type of issue being investigated
+    type: string
+    enum: [connectivity, performance, health, config]
+    required: false
+
+messages:
+  - role: user
+    content: |
+      # Device Troubleshooting Guide
+      {% if not device_id %}
+      
+      ## Getting Started
+      To get device-specific troubleshooting, provide a `device_id` parameter.
+      
+      ### Find Devices
+      **Tool:** `device/list`
+      
+      Filter by status to find problematic devices:
+      ```json
+      {
+        "environment": "lab"
+      }
+      ```
+      
+      Look for devices with:
+      - Status: "unreachable" or "degraded"
+      - High CPU/memory usage
+      - Recent health warnings
+      
+      Once you have a device_id, re-run this prompt with that parameter.
+      
+      {% else %}
+      
+      ## Troubleshooting Device: {{ device_name }}
+      
+      **Device ID:** {{ device_id }}
+      **Environment:** {{ device_environment }}
+      **Management Address:** {{ management_address }}
+      **Current Status:** {{ status }}
+      
+      ---
+      
+      ## Quick Diagnostics
+      
+      ### Step 1: Connectivity Check
+      **Tool:** `device/check-connectivity`
+      
+      ```json
+      {
+        "device_id": "{{ device_id }}"
+      }
+      ```
+      
+      **Expected:** Should respond within 2-5 seconds with device identity.
+      **If fails:** Device is unreachable - check network connectivity.
+      
+      ---
+      
+      ### Step 2: System Overview
+      **Tool:** `system/get-overview`
+      
+      ```json
+      {
+        "device_id": "{{ device_id }}"
+      }
+      ```
+      
+      **Review:**
+      - CPU usage (high = potential overload)
+      - Memory usage (high = potential issue)
+      - Uptime (recent reboot?)
+      - Temperature (overheat warning?)
+      - RouterOS version
+      
+      ---
+      
+      ### Step 3: Interface Status
+      **Tool:** `interface/list`
+      
+      ```json
+      {
+        "device_id": "{{ device_id }}"
+      }
+      ```
+      
+      **Check:**
+      - Management interface is UP
+      - Expected interfaces are present
+      - No unexpected DOWN interfaces
+      - Traffic counters are incrementing
+      
+      ---
+      
+      ### Step 4: Recent Logs
+      **Resource:** `device://{{ device_id }}/logs`
+      
+      **Look for:**
+      - Error messages
+      - Connection failures
+      - Configuration changes
+      - System events (reboots, updates)
+      
+      ---
+      
+      ### Step 5: Health Status
+      **Resource:** `device://{{ device_id }}/health`
+      
+      **Review:**
+      - Overall health state
+      - Recent health checks
+      - Any active warnings
+      - Performance metrics
+      
+      ---
+      
+      ## Issue-Specific Diagnostics
+      
+      {% if issue_type == 'connectivity' %}
+      ### Connectivity Issues
+      
+      **Symptom:** Cannot contact device via REST API
+      
+      **Diagnostic steps:**
+      1. **Network ping:** Verify basic IP connectivity
+      2. **Check REST API service:**
+         - Ensure REST API is enabled on device
+         - Verify port is correct (default 80/443)
+      3. **Verify credentials:**
+         - Use `device/check-connectivity` to test auth
+      4. **Check firewall:** Ensure management port is accessible
+      
+      **Resolution:**
+      - Fix network connectivity issues
+      - Update management address if device IP changed
+      - Rotate credentials if authentication fails
+      - Enable REST API service if disabled
+      
+      {% elif issue_type == 'performance' %}
+      ### Performance Issues
+      
+      **Symptom:** High CPU/memory usage, slow response
+      
+      **Diagnostic steps:**
+      1. **Check resource usage:** Use `system/get-overview`
+      2. **Review interface stats:** High traffic may cause load
+      3. **Check active connections:** May indicate traffic spike or attack
+      4. **Review routing table:** Large routing tables increase CPU
+      
+      **Resolution:**
+      - Identify and reduce polling frequency if MCP-related
+      - Investigate traffic anomalies
+      - Optimize firewall rules if complex
+      - Consider hardware upgrade for sustained high load
+      
+      {% elif issue_type == 'health' %}
+      ### Health Check Issues
+      
+      **Symptom:** Health status shows warnings or degraded
+      
+      **Diagnostic steps:**
+      1. **Review health metrics:** Check `device://{{ device_id }}/health`
+      2. **Check temperature:** Overheating may cause throttling
+      3. **Verify power supply:** Voltage irregularities
+      4. **Check recent changes:** Configuration or software updates
+      
+      **Resolution:**
+      - Address overheating (cooling, ventilation)
+      - Verify power supply stability
+      - Revert recent changes if they caused issues
+      - Update RouterOS if bugs are suspected
+      
+      {% elif issue_type == 'config' %}
+      ### Configuration Issues
+      
+      **Symptom:** Device config differs from expected or baseline
+      
+      **Diagnostic steps:**
+      1. **Fetch current config:** `device://{{ device_id }}/config`
+      2. **Compare with baseline:** If you have a known-good config
+      3. **Review audit logs:** Check for manual or automated changes
+         - Resource: `audit://events/by-device/{{ device_id }}`
+      4. **Check for drift:** Compare with similar devices
+      
+      **Resolution:**
+      - Document and approve intentional changes
+      - Revert unwanted configuration changes
+      - Update baseline if config is correct
+      - Investigate unauthorized changes
+      
+      {% else %}
+      ### General Diagnostic Steps
+      
+      **For any issue:**
+      
+      1. **Check basic connectivity** - Ensure device is reachable
+      2. **Review system metrics** - CPU, memory, uptime, temperature
+      3. **Check interface status** - Verify network connectivity
+      4. **Review recent logs** - Look for errors or events
+      5. **Compare with baseline** - Is this normal for this device?
+      6. **Check recent changes** - Any config or software updates?
+      
+      {% endif %}
+      
+      ---
+      
+      ## Common Issues and Solutions
+      
+      ### Device Unreachable
+      - **Network issue:** Verify routing and connectivity
+      - **REST API disabled:** Check if service is running
+      - **Firewall blocking:** Ensure management port is open
+      - **Credentials expired:** Rotate and update credentials
+      
+      ### High CPU Usage
+      - **Traffic spike:** Check interface statistics
+      - **Complex firewall:** Optimize rules
+      - **Excessive polling:** Reduce monitoring frequency
+      - **RouterOS bug:** Check for available updates
+      
+      ### Memory Pressure
+      - **Large routing tables:** Normal for BGP routers
+      - **Connection tracking full:** Review connection limits
+      - **Logs accumulating:** Enable log rotation
+      - **Memory leak:** May require RouterOS update
+      
+      ### Temperature Warnings
+      - **Poor ventilation:** Improve airflow
+      - **High ambient temp:** Check room cooling
+      - **Hardware issue:** Fan failure or dust buildup
+      
+      ---
+      
+      ## Next Steps
+      
+      After resolving issues:
+      
+      1. **Verify fix:**
+         - Re-run diagnostic tools
+         - Monitor for 10-15 minutes
+         - Check health status recovers
+      
+      2. **Document findings:**
+         - Record root cause
+         - Note resolution steps
+         - Update runbooks if needed
+      
+      3. **Prevent recurrence:**
+         - Set up alerts if not already present
+         - Review monitoring thresholds
+         - Consider configuration management
+      
+      ## Related Prompts and Resources
+      - `troubleshoot-dns-ntp` - For DNS/NTP specific issues
+      - `device-onboarding` - If device needs re-registration
+      - `device://{{ device_id }}/health` - Health monitoring
+      - `device://{{ device_id }}/logs` - System logs
+      - `audit://events/by-device/{{ device_id }}` - Change history
+      
+      {% endif %}
+
+template_vars:
+  device_name: "Unknown Device"
+  device_environment: "unknown"
+  management_address: "unknown"
+  status: "unknown"
+
+metadata:
+  category: troubleshooting
+  tier: fundamental
+  environments: [lab, staging, prod]
+  requires_approval: false

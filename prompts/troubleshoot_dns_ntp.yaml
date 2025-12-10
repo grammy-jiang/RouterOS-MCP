@@ -1,0 +1,342 @@
+name: troubleshoot-dns-ntp
+description: Diagnostic procedures for DNS and NTP configuration issues
+
+arguments:
+  - name: device_id
+    description: Device to troubleshoot (optional, shows device selection if omitted)
+    type: string
+    required: false
+  
+  - name: issue_type
+    description: Type of issue being investigated
+    type: string
+    enum: [dns, ntp, both]
+    required: false
+    default: both
+
+messages:
+  - role: user
+    content: |
+      # DNS/NTP Troubleshooting Guide
+      {% if not device_id %}
+      
+      ## Getting Started
+      To get device-specific troubleshooting, provide a `device_id` parameter.
+      
+      ### Find Devices
+      **Tool:** `device/list`
+      
+      Filter by health status to find devices with issues:
+      ```json
+      {
+        "environment": "lab"
+      }
+      ```
+      
+      Review the list and identify devices showing DNS/NTP problems.
+      Once you have a device_id, re-run this prompt with that parameter.
+      
+      ## General DNS/NTP Issues
+      
+      ### Common DNS Problems
+      - DNS servers unreachable
+      - Incorrect DNS server configuration
+      - Firewall blocking port 53 (UDP/TCP)
+      - Upstream DNS failure
+      
+      ### Common NTP Problems
+      - NTP servers unreachable
+      - Firewall blocking port 123 (UDP)
+      - Large time offset preventing sync
+      - Incorrect NTP server configuration
+      
+      {% else %}
+      
+      ## Troubleshooting Device: {{ device_name }}
+      
+      **Device ID:** {{ device_id }}
+      **Environment:** {{ device_environment }}
+      **Issue Type:** {{ issue_type }}
+      
+      ---
+      
+      {% if issue_type in ['dns', 'both'] %}
+      ## DNS Diagnostics
+      
+      ### Step 1: Check Current DNS Configuration
+      **Tool:** `dns/get-config`
+      
+      ```json
+      {
+        "device_id": "{{ device_id }}"
+      }
+      ```
+      
+      **Review:**
+      - Are DNS servers configured?
+      - Are the DNS server IPs correct?
+      - Is allow-remote-requests enabled (if acting as DNS server)?
+      
+      ---
+      
+      ### Step 2: Test DNS Server Reachability
+      **Tool:** `diagnostics/ping`
+      
+      Test each DNS server:
+      ```json
+      {
+        "device_id": "{{ device_id }}",
+        "address": "<dns_server_ip>",
+        "count": 3
+      }
+      ```
+      
+      **Expected:** Should receive replies from DNS servers.
+      **If fails:** DNS servers may be unreachable due to network/firewall issues.
+      
+      ---
+      
+      ### Step 3: Test DNS Resolution
+      **Tool:** `diagnostics/ping`
+      
+      Test resolving a well-known hostname:
+      ```json
+      {
+        "device_id": "{{ device_id }}",
+        "address": "www.google.com",
+        "count": 3
+      }
+      ```
+      
+      **Expected:** Should resolve hostname to IP and receive replies.
+      **If fails:** DNS resolution is not working.
+      
+      ---
+      
+      ### Step 4: Check DNS Cache
+      **Tool:** `dns/get-cache`
+      
+      ```json
+      {
+        "device_id": "{{ device_id }}"
+      }
+      ```
+      
+      **Review:**
+      - Are there recent cache entries?
+      - Any SERVFAIL or NXDOMAIN errors?
+      
+      ---
+      
+      ### Step 5: Review Firewall Rules
+      **Tool:** `firewall/list-rules`
+      
+      Check if port 53 (UDP/TCP) is allowed:
+      ```json
+      {
+        "device_id": "{{ device_id }}",
+        "chain": "output"
+      }
+      ```
+      
+      **Look for:** Rules allowing UDP/TCP port 53 to DNS servers.
+      **If blocked:** Add firewall rule to permit DNS traffic.
+      
+      ---
+      
+      ### DNS Issue Resolution Steps
+      
+      **Problem: DNS servers not configured**
+      - Use `dns/update-servers` to configure proper DNS servers
+      - Recommended: Public DNS like 8.8.8.8, 1.1.1.1, or corporate DNS
+      
+      **Problem: DNS servers unreachable**
+      - Verify network connectivity to DNS server IPs
+      - Check upstream routing
+      - Verify DNS servers are operational
+      
+      **Problem: Firewall blocking DNS**
+      - Add firewall rule allowing UDP/TCP 53 to DNS servers
+      - Tool: `firewall/add-rule` (requires advanced writes)
+      
+      **Problem: DNS resolution slow**
+      - Check DNS server response times
+      - Consider using geographically closer DNS servers
+      - Verify no packet loss to DNS servers
+      
+      {% endif %}
+      
+      ---
+      
+      {% if issue_type in ['ntp', 'both'] %}
+      ## NTP Diagnostics
+      
+      ### Step 1: Check Current NTP Configuration
+      **Tool:** `ntp/get-config`
+      
+      ```json
+      {
+        "device_id": "{{ device_id }}"
+      }
+      ```
+      
+      **Review:**
+      - Are NTP servers configured?
+      - Is NTP client enabled?
+      - What is the configured mode (unicast/broadcast/multicast)?
+      
+      ---
+      
+      ### Step 2: Check NTP Sync Status
+      **Tool:** `ntp/get-status`
+      
+      ```json
+      {
+        "device_id": "{{ device_id }}"
+      }
+      ```
+      
+      **Review:**
+      - Is NTP synchronized (synced=true)?
+      - What is the time offset?
+      - When was last successful sync?
+      - Are there any error messages?
+      
+      **Healthy values:**
+      - synced: true
+      - offset: < 100ms
+      - last sync: within last hour
+      
+      ---
+      
+      ### Step 3: Test NTP Server Reachability
+      **Tool:** `diagnostics/ping`
+      
+      Test each NTP server:
+      ```json
+      {
+        "device_id": "{{ device_id }}",
+        "address": "<ntp_server>",
+        "count": 3
+      }
+      ```
+      
+      **Expected:** Should receive replies from NTP servers.
+      **If fails:** NTP servers may be unreachable.
+      
+      ---
+      
+      ### Step 4: Check System Time
+      **Tool:** `system/get-overview`
+      
+      ```json
+      {
+        "device_id": "{{ device_id }}"
+      }
+      ```
+      
+      **Review current-time field:**
+      - Is the time accurate?
+      - Large drift may prevent NTP sync (>1000 seconds)
+      
+      ---
+      
+      ### Step 5: Review Firewall Rules for NTP
+      **Tool:** `firewall/list-rules`
+      
+      Check if port 123 (UDP) is allowed:
+      ```json
+      {
+        "device_id": "{{ device_id }}",
+        "chain": "output"
+      }
+      ```
+      
+      **Look for:** Rules allowing UDP port 123 to NTP servers.
+      **If blocked:** Add firewall rule to permit NTP traffic.
+      
+      ---
+      
+      ### NTP Issue Resolution Steps
+      
+      **Problem: NTP not configured**
+      - Use `ntp/update-servers` to configure NTP servers
+      - Recommended: time.cloudflare.com, time.google.com, or pool.ntp.org
+      
+      **Problem: NTP servers unreachable**
+      - Verify network connectivity to NTP server
+      - Check if using hostname: ensure DNS resolution works
+      - Verify NTP servers are operational
+      
+      **Problem: NTP not syncing**
+      - Check time offset - if > 1000 seconds, may need manual adjustment
+      - Verify NTP client is enabled
+      - Wait up to 5 minutes for initial sync
+      - Check for firewall blocking port 123/UDP
+      
+      **Problem: Large time offset**
+      - If offset > 1000 seconds, NTP may refuse to sync
+      - Options:
+        1. Manually set approximate time first
+        2. Temporarily disable time-check limits (RouterOS specific)
+      
+      **Problem: Firewall blocking NTP**
+      - Add firewall rule allowing UDP 123 to NTP servers
+      - Tool: `firewall/add-rule` (requires advanced writes)
+      
+      {% endif %}
+      
+      ---
+      
+      ## Combined DNS/NTP Issues
+      
+      If both DNS and NTP are failing:
+      
+      1. **Check basic connectivity:**
+         - Use `device/check-connectivity` to verify device is reachable
+         - Use `diagnostics/ping` to test external connectivity (e.g., 8.8.8.8)
+      
+      2. **Check for network configuration issues:**
+         - Verify default gateway is correct
+         - Check routing table with `routing/list-routes`
+         - Verify management interface is UP
+      
+      3. **Check firewall policy:**
+         - Review firewall rules with `firewall/list-rules`
+         - Ensure output chain allows DNS (53) and NTP (123)
+      
+      ---
+      
+      ## Next Steps
+      
+      After resolving issues:
+      
+      1. **Verify resolution:**
+         - Re-run DNS and NTP status checks
+         - Wait 5 minutes and verify sync is maintained
+         - Test DNS resolution to multiple hostnames
+      
+      2. **Update health monitoring:**
+         - Check `device://{{ device_id }}/health` for health recovery
+         - Verify no new alerts generated
+      
+      3. **Document findings:**
+         - Record root cause in ticket/issue
+         - Update runbooks if new issue pattern discovered
+      
+      ## Related Resources
+      - `dns-ntp-rollout` prompt for configuration changes
+      - `device://{{ device_id }}/health` resource for health monitoring
+      - `device://{{ device_id }}/logs` resource for system logs
+      
+      {% endif %}
+
+template_vars:
+  device_name: "Unknown Device"
+  device_environment: "unknown"
+
+metadata:
+  category: troubleshooting
+  tier: fundamental
+  environments: [lab, staging, prod]
+  requires_approval: false

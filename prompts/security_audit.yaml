@@ -1,0 +1,310 @@
+name: security-audit
+description: Security configuration audit for RouterOS devices
+
+arguments:
+  - name: device_id
+    description: Device to audit (optional for fleet-wide audit)
+    type: string
+    required: false
+  
+  - name: audit_scope
+    description: Scope of security audit
+    type: string
+    enum: [device, fleet]
+    required: false
+    default: device
+
+messages:
+  - role: user
+    content: |
+      # Security Audit
+      
+      {% if audit_scope == 'fleet' %}
+      ## Fleet-Wide Security Audit
+      
+      ### Step 1: List All Devices
+      **Tool:** `device/list`
+      
+      ### Step 2: Run Audit for Each Device
+      For each device, perform individual security audit (see device scope below).
+      
+      ### Step 3: Aggregate Findings
+      - Identify common vulnerabilities
+      - Prioritize by severity and exposure
+      - Generate remediation plan
+      
+      {% else %}
+      
+      ## Device Security Audit: {{ device_name }}
+      
+      **Device ID:** {{ device_id }}
+      **Environment:** {{ device_environment }}
+      
+      ---
+      
+      ## 1. Network Services Security
+      
+      ### 1.1 Service Exposure Assessment
+      **Check RouterOS services status:**
+      
+      **Critical - Should be DISABLED:**
+      - [ ] Telnet (insecure, use SSH instead)
+      - [ ] FTP (insecure, use SFTP/SCP)
+      - [ ] HTTP API (use HTTPS)
+      
+      **Caution - Restrict if enabled:**
+      - [ ] SSH (restrict to management network)
+      - [ ] Winbox (restrict to management network)
+      - [ ] REST API (required for MCP, restrict source IPs)
+      
+      **Check with:** System logs or RouterOS console access
+      
+      ---
+      
+      ## 2. Firewall Configuration
+      
+      ### 2.1 Input Chain (Device Protection)
+      **Tool:** `firewall/list-rules`
+      
+      ```json
+      {
+        "device_id": "{{ device_id }}",
+        "chain": "input"
+      }
+      ```
+      
+      **Verify:**
+      - [ ] Default policy is DROP or REJECT
+      - [ ] Management access restricted to trusted sources
+      - [ ] ICMP rate limiting in place
+      - [ ] Invalid packet dropping
+      - [ ] Port scan protection
+      
+      ### 2.2 Forward Chain (Traffic Filtering)
+      **Review forward chain rules:**
+      - [ ] Appropriate traffic filtering
+      - [ ] No overly permissive rules
+      - [ ] Logging for security events
+      - [ ] Rules are optimized (frequent matches first)
+      
+      ### 2.3 Address Lists for Security
+      **Tool:** `firewall/list-address-lists`
+      
+      **Check for security-related lists:**
+      - Blacklisted IPs
+      - Whitelisted management IPs
+      - Threat intelligence feeds (if used)
+      
+      ---
+      
+      ## 3. User Account Security
+      
+      ### 3.1 Account Review
+      **Review user accounts:**
+      - [ ] Default admin account disabled or renamed
+      - [ ] MCP service account follows least privilege
+      - [ ] No accounts with empty passwords
+      - [ ] Inactive accounts removed
+      - [ ] No unnecessary full-admin accounts
+      
+      ### 3.2 Authentication Methods
+      **Check authentication configuration:**
+      - [ ] Strong password policy enforced
+      - [ ] SSH key authentication preferred
+      - [ ] Certificate-based auth for production
+      - [ ] Failed login lockout configured
+      
+      ---
+      
+      ## 4. RouterOS Version and Patching
+      
+      ### 4.1 Version Check
+      **Tool:** `system/get-overview`
+      
+      **Verify:**
+      - [ ] RouterOS version is recent (within 6 months)
+      - [ ] No known critical CVEs for this version
+      - [ ] Firmware is up to date
+      - [ ] All packages are same version
+      
+      ### 4.2 Update Recommendations
+      - Check MikroTik security advisories
+      - Plan upgrade if running old version
+      - Test in lab before production update
+      
+      ---
+      
+      ## 5. Network Segmentation
+      
+      ### 5.1 VLAN Configuration
+      **Tool:** `interface/list`
+      
+      **Review:**
+      - [ ] Proper VLAN segmentation in use
+      - [ ] Management VLAN separate from user traffic
+      - [ ] Inter-VLAN routing controlled by firewall
+      
+      ### 5.2 Bridge Security
+      **If using bridges:**
+      - [ ] VLAN filtering enabled on bridges
+      - [ ] Unknown unicast flooding limited
+      - [ ] BPDU guard on edge ports
+      
+      ---
+      
+      ## 6. DNS and NTP Security
+      
+      ### 6.1 DNS Configuration
+      **Tool:** `dns/get-config`
+      
+      **Verify:**
+      - [ ] Using trusted DNS servers only
+      - [ ] DNS cache poisoning protection
+      - [ ] No open DNS resolver (if DNS server enabled)
+      - [ ] DNSSEC validation enabled (if supported)
+      
+      ### 6.2 NTP Configuration
+      **Tool:** `ntp/get-status`
+      
+      **Verify:**
+      - [ ] Using trusted NTP sources
+      - [ ] Time synchronized correctly
+      - [ ] NTP traffic restricted by firewall
+      
+      ---
+      
+      ## 7. Logging and Monitoring
+      
+      ### 7.1 Logging Configuration
+      **Resource:** `device://{{ device_id }}/logs`
+      
+      **Verify:**
+      - [ ] Logging enabled for security events
+      - [ ] Logs retained for adequate period
+      - [ ] Remote log server configured (recommended)
+      - [ ] Sensitive data not logged
+      
+      ### 7.2 Monitoring and Alerting
+      **Check:**
+      - [ ] Health monitoring active
+      - [ ] Alerts configured for security events
+      - [ ] Failed login attempts monitored
+      - [ ] Resource exhaustion alerts
+      
+      ---
+      
+      ## 8. Configuration Security
+      
+      ### 8.1 Configuration Backup
+      **Resource:** `device://{{ device_id }}/config`
+      
+      **Verify:**
+      - [ ] Regular configuration backups
+      - [ ] Backups stored securely
+      - [ ] Config change tracking enabled
+      - [ ] Rollback procedures documented
+      
+      ### 8.2 Configuration Standards
+      **Review against standards:**
+      - [ ] Follows organizational security policy
+      - [ ] Compliant with CIS benchmarks (if applicable)
+      - [ ] Industry best practices followed
+      - [ ] No legacy insecure configurations
+      
+      ---
+      
+      ## 9. Wireless Security (if applicable)
+      
+      ### 9.1 Wireless Configuration
+      **Tool:** `wireless/get-config`
+      
+      **Verify:**
+      - [ ] WPA3 or WPA2 encryption (no WEP/WPA)
+      - [ ] Strong pre-shared keys
+      - [ ] SSID hiding (not relied upon for security)
+      - [ ] Client isolation if needed
+      - [ ] MAC filtering as additional layer
+      
+      ---
+      
+      ## 10. Recent Security Events
+      
+      ### 10.1 Audit Log Review
+      **Resource:** `audit://events/by-device/{{ device_id }}`
+      
+      **Review last 30 days:**
+      - [ ] No unauthorized configuration changes
+      - [ ] No suspicious access patterns
+      - [ ] All changes properly documented
+      - [ ] No security policy violations
+      
+      ### 10.2 System Log Analysis
+      **Resource:** `device://{{ device_id }}/logs`
+      
+      **Look for:**
+      - Failed authentication attempts
+      - Firewall drops from unusual sources
+      - Service restart events
+      - Configuration changes
+      
+      ---
+      
+      ## Security Audit Score Card
+      
+      ### Critical Issues (Fix Immediately)
+      - [ ] No critical issues found
+      - List any critical issues here
+      
+      ### High Priority Issues
+      - [ ] No high priority issues found
+      - List any high priority issues here
+      
+      ### Medium Priority Issues
+      - [ ] No medium priority issues found
+      - List any medium priority issues here
+      
+      ### Low Priority / Recommendations
+      - [ ] All recommendations noted
+      - List recommendations here
+      
+      ---
+      
+      ## Remediation Plan
+      
+      **Immediate Actions (Critical):**
+      1. [Action item]
+      2. [Action item]
+      
+      **Short Term (High Priority - within 1 week):**
+      1. [Action item]
+      2. [Action item]
+      
+      **Medium Term (within 1 month):**
+      1. [Action item]
+      2. [Action item]
+      
+      **Long Term (Recommendations):**
+      1. [Action item]
+      2. [Action item]
+      
+      ---
+      
+      ## Follow-Up
+      
+      - [ ] Document findings in security tracker
+      - [ ] Assign remediation tasks
+      - [ ] Schedule follow-up audit
+      - [ ] Update security baseline
+      - [ ] Train team on findings
+      
+      {% endif %}
+
+template_vars:
+  device_name: "Unknown Device"
+  device_environment: "unknown"
+
+metadata:
+  category: security
+  tier: fundamental
+  environments: [lab, staging, prod]
+  requires_approval: false

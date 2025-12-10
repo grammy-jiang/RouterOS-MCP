@@ -1,0 +1,260 @@
+name: device-onboarding
+description: Guide for registering a new RouterOS device
+
+arguments:
+  - name: environment
+    description: Target environment for device
+    type: string
+    enum: [lab, staging, prod]
+    required: false
+    default: lab
+
+messages:
+  - role: user
+    content: |
+      # Device Onboarding Guide
+      
+      ## Overview
+      Register a new RouterOS v7 device in the **{{ environment }}** environment.
+      
+      ## Prerequisites
+      - [ ] RouterOS v7.x device (minimum version 7.10 recommended)
+      - [ ] Device accessible via network
+      - [ ] REST API enabled on device
+      - [ ] Admin credentials for initial setup
+      - [ ] Device static IP or reserved DHCP (recommended)
+      
+      ---
+      
+      ## Onboarding Process
+      
+      ### Step 1: Prepare RouterOS Device
+      
+      **Create service account on RouterOS device:**
+      
+      For read-only access:
+      ```routeros
+      /user group add name=mcp-readonly policy=read,api,rest-api,sensitive
+      /user add name=mcp-readonly group=mcp-readonly password="<secure-password>"
+      ```
+      
+      For lab/staging with write access:
+      ```routeros
+      /user group add name=mcp-ops policy=read,write,api,rest-api,policy,sensitive
+      /user add name=mcp-ops group=mcp-ops password="<secure-password>"
+      ```
+      
+      **Enable REST API (if not already enabled):**
+      ```routeros
+      /ip service enable api-ssl
+      /ip service set api-ssl port=443
+      ```
+      
+      Or for HTTP (less secure, lab only):
+      ```routeros
+      /ip service enable www
+      /ip service set www port=80
+      ```
+      
+      ---
+      
+      ### Step 2: Register Device
+      
+      **Use admin API to register device:**
+      
+      **API Endpoint:** `POST /admin/devices/register`
+      
+      **Request:**
+      ```json
+      {
+        "name": "{{ environment }}-router-01",
+        "management_address": "192.168.1.1:443",
+        "environment": "{{ environment }}",
+        "tags": ["site:main", "role:edge"],
+        "credentials": {
+          "username": "mcp-{{ 'ops' if environment in ['lab', 'staging'] else 'readonly' }}",
+          "password": "<secure-password>"
+        },
+        "capability_flags": {
+          "allow_advanced_writes": {{ 'true' if environment == 'lab' else 'false' }},
+          "allow_professional_workflows": false
+        }
+      }
+      ```
+      
+      **Expected Response:**
+      ```json
+      {
+        "device_id": "dev-001",
+        "status": "registered",
+        "next_steps": ["verify connectivity", "run health check"]
+      }
+      ```
+      
+      ---
+      
+      ### Step 3: Verify Registration
+      
+      **Tool:** `device/list`
+      
+      ```json
+      {
+        "environment": "{{ environment }}"
+      }
+      ```
+      
+      **Verify:**
+      - Device appears in list
+      - Environment matches ({{ environment }})
+      - Capability flags are correct
+      
+      ---
+      
+      ### Step 4: Test Connectivity
+      
+      **Tool:** `device/check-connectivity`
+      
+      ```json
+      {
+        "device_id": "<device_id from step 2>"
+      }
+      ```
+      
+      **Expected:** Successful connection with device identity returned.
+      **If fails:** Check network connectivity, credentials, REST API status.
+      
+      ---
+      
+      ### Step 5: Fetch System Overview
+      
+      **Tool:** `system/get-overview`
+      
+      ```json
+      {
+        "device_id": "<device_id>"
+      }
+      ```
+      
+      **Verify:**
+      - All metrics populate correctly
+      - No connection errors
+      - RouterOS version is compatible (7.10+)
+      
+      ---
+      
+      ### Step 6: Review Device Capabilities
+      
+      **Resource:** `device://<device_id>/overview`
+      
+      **Check:**
+      - RouterOS version and features
+      - Hardware model and resources
+      - Network interfaces
+      - Any missing packages
+      
+      ---
+      
+      ## Security Checklist
+      
+      - [ ] Service account created with least privilege
+      - [ ] Strong password used (or certificate auth for production)
+      - [ ] Credentials stored encrypted in MCP
+      - [ ] Management network access restricted (firewall)
+      - [ ] Device capability flags set appropriately:
+        - Lab: allow_advanced_writes=true
+        - Staging: allow_advanced_writes={{ 'true' if environment == 'staging' else 'false' }}
+        - Prod: allow_advanced_writes=false (requires approval for changes)
+      - [ ] Audit logging enabled for device
+      - [ ] HTTPS/SSL used for REST API (not HTTP)
+      
+      ---
+      
+      ## Post-Onboarding Tasks
+      
+      ### 1. Configure Health Monitoring
+      - Health checks will run automatically
+      - Review initial health status after 5 minutes
+      - Adjust alert thresholds if needed
+      
+      ### 2. Test Read-Only Tools
+      Try a few basic tools to verify functionality:
+      - `system/get-overview`
+      - `interface/list`
+      - `ip/list-addresses`
+      - `routing/list-routes`
+      
+      ### 3. Tag Device for Organization
+      Use tags to categorize device:
+      - Site: `site:datacenter-1`, `site:branch-office`
+      - Role: `role:edge`, `role:core`, `role:access`
+      - Function: `function:router`, `function:wireless-ap`
+      
+      ### 4. Document Device
+      - Add to inventory system
+      - Note any special configuration
+      - Record contact info for site
+      - Link to physical location/rack diagram
+      
+      {% if environment == 'prod' %}
+      ### 5. Production-Specific Setup
+      - [ ] Request approval workflow for writes
+      - [ ] Set up change management integration
+      - [ ] Configure enhanced monitoring/alerting
+      - [ ] Add to backup schedule
+      - [ ] Document disaster recovery procedures
+      {% endif %}
+      
+      ---
+      
+      ## Troubleshooting
+      
+      ### Cannot connect to device
+      - **Verify IP address:** Ping management IP
+      - **Check REST API:** Test with curl: `curl http://device-ip/rest/system/identity`
+      - **Verify port:** Default 80 (HTTP) or 443 (HTTPS)
+      - **Check firewall:** Ensure management port is accessible
+      - **Test credentials:** Verify username/password on RouterOS
+      
+      ### Credential errors
+      - Verify service account exists on device: `/user print`
+      - Check account permissions: `/user group print`
+      - Ensure password is correct
+      - For production, verify certificate if using cert auth
+      
+      ### Device registration fails
+      - Check for duplicate device_id (must be unique)
+      - Verify management_address is unique
+      - Ensure environment value is valid (lab/staging/prod)
+      - Review MCP server logs for details
+      
+      ### REST API not responding
+      - Check if service is enabled: `/ip service print`
+      - Verify correct port: `/ip service print detail`
+      - Check interface binding (usually "all")
+      - Review RouterOS firewall rules
+      
+      ---
+      
+      ## Next Steps
+      
+      After successful onboarding:
+      
+      1. **Monitor initial health checks** - Watch for any issues
+      2. **Test relevant tools** - Verify functionality for your use case
+      3. **Set up alerts** - Configure notifications for health issues
+      4. **Document** - Update inventory and runbooks
+      5. **Train team** - Ensure operators know how to use MCP for this device
+      
+      ## Additional Resources
+      
+      - RouterOS REST API docs: https://wiki.mikrotik.com/wiki/Manual:REST_API
+      - MCP security best practices: `docs/02-security-oauth-integration-and-access-control.md`
+      - Capability flags reference: See security design documentation
+      - `troubleshoot-device` prompt for diagnostics
+      - `device://<device_id>/overview` resource for device details
+
+metadata:
+  category: onboarding
+  tier: fundamental
+  environments: [lab, staging, prod]
+  requires_approval: false
