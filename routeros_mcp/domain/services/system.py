@@ -213,3 +213,81 @@ class SystemService:
 
         finally:
             await client.close()
+
+    async def update_system_identity(
+        self,
+        device_id: str,
+        new_identity: str,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Update system identity (hostname).
+
+        Args:
+            device_id: Device identifier
+            new_identity: New identity name
+            dry_run: If True, only return planned changes without applying
+
+        Returns:
+            Dictionary with update result
+
+        Raises:
+            DeviceNotFoundError: If device doesn't exist
+            ValueError: If identity is invalid
+        """
+        # Validate identity
+        if not new_identity or not new_identity.strip():
+            raise ValueError("System identity cannot be empty")
+
+        if len(new_identity) > 255:
+            raise ValueError(
+                f"System identity too long ({len(new_identity)} chars). "
+                "Maximum 255 characters allowed."
+            )
+
+        await self.device_service.get_device(device_id)
+        client = await self.device_service.get_rest_client(device_id)
+
+        try:
+            # Get current identity
+            current_data = await client.get("/rest/system/identity")
+            current_identity = current_data.get("name", "Unknown")
+
+            # Check if change is needed
+            if current_identity == new_identity:
+                return {
+                    "changed": False,
+                    "old_identity": current_identity,
+                    "new_identity": new_identity,
+                    "dry_run": dry_run,
+                }
+
+            # Dry-run: return planned changes
+            if dry_run:
+                from routeros_mcp.security.safeguards import create_dry_run_response
+
+                return create_dry_run_response(
+                    operation="system/set-identity",
+                    device_id=device_id,
+                    planned_changes={
+                        "old_identity": current_identity,
+                        "new_identity": new_identity,
+                    },
+                )
+
+            # Apply change
+            await client.patch("/rest/system/identity", {"name": new_identity})
+
+            logger.info(
+                f"Updated system identity: {current_identity} -> {new_identity}",
+                extra={"device_id": device_id},
+            )
+
+            return {
+                "changed": True,
+                "old_identity": current_identity,
+                "new_identity": new_identity,
+                "dry_run": False,
+            }
+
+        finally:
+            await client.close()

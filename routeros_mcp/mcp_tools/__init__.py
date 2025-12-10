@@ -15,6 +15,7 @@ from routeros_mcp.mcp_tools.device import register_device_tools
 from routeros_mcp.mcp_tools.diagnostics import register_diagnostics_tools
 from routeros_mcp.mcp_tools.dns_ntp import register_dns_ntp_tools
 from routeros_mcp.mcp_tools.firewall_logs import register_firewall_logs_tools
+from routeros_mcp.mcp_tools.firewall_write import register_firewall_write_tools
 from routeros_mcp.mcp_tools.interface import register_interface_tools
 from routeros_mcp.mcp_tools.ip import register_ip_tools
 from routeros_mcp.mcp_tools.routing import register_routing_tools
@@ -25,6 +26,7 @@ __all__ = [
     "register_diagnostics_tools",
     "register_dns_ntp_tools",
     "register_firewall_logs_tools",
+    "register_firewall_write_tools",
     "register_interface_tools",
     "register_ip_tools",
     "register_routing_tools",

@@ -239,3 +239,269 @@ def register_dns_ntp_tools(mcp: FastMCP, settings: Settings) -> None:
             )
 
     logger.info("Registered DNS and NTP tools")
+
+    @mcp.tool()
+    async def update_dns_servers(
+        device_id: str, dns_servers: list[str], dry_run: bool = False
+    ) -> dict[str, Any]:
+        """Update DNS server configuration.
+
+        Use when:
+        - User asks "change DNS servers to X,Y" or "update DNS config"
+        - Migrating to new DNS infrastructure
+        - Fixing DNS resolution issues
+        - Standardizing DNS across fleet
+
+        Side effects:
+        - Updates DNS servers immediately (unless dry_run=True)
+        - May cause brief DNS resolution disruption
+        - Audit logged
+
+        Safety:
+        - Advanced tier (requires allow_advanced_writes=true)
+        - Medium risk operation
+        - Supports dry_run for preview
+        - Lab/staging preferred, production with caution
+
+        Args:
+            device_id: Device identifier (e.g., 'dev-lab-01')
+            dns_servers: List of DNS server addresses (IP or hostname)
+            dry_run: If True, only return planned changes without applying
+
+        Returns:
+            Formatted tool result with update status
+        """
+        try:
+            async with session_factory.session() as session:
+                device_service = DeviceService(session, settings)
+                dns_ntp_service = DNSNTPService(session, settings)
+
+                # Get device first to validate it exists
+                device = await device_service.get_device(device_id)
+
+                # Authorization check - advanced tier
+                check_tool_authorization(
+                    device_environment=device.environment,
+                    service_environment=settings.environment,
+                    tool_tier=ToolTier.ADVANCED,
+                    allow_advanced_writes=device.allow_advanced_writes,
+                    allow_professional_workflows=device.allow_professional_workflows,
+                    device_id=device_id,
+                    tool_name="dns/update-servers",
+                )
+
+                # Update DNS servers
+                result = await dns_ntp_service.update_dns_servers(
+                    device_id, dns_servers, dry_run
+                )
+
+                # Format content
+                if dry_run:
+                    old_servers = result["planned_changes"]["old_servers"]
+                    new_servers = result["planned_changes"]["new_servers"]
+                    content = (
+                        f"DRY RUN: Would change DNS servers from "
+                        f"{', '.join(old_servers)} to {', '.join(new_servers)}"
+                    )
+                elif result["changed"]:
+                    content = (
+                        f"DNS servers updated to {', '.join(result['new_servers'])}"
+                    )
+                else:
+                    content = f"DNS servers already set (no change)"
+
+                return format_tool_result(
+                    content=content,
+                    meta={
+                        "device_id": device_id,
+                        **result,
+                    },
+                )
+
+        except MCPError as e:
+            return format_tool_result(
+                content=e.message,
+                is_error=True,
+                meta=e.data,
+            )
+        except Exception as e:
+            error = map_exception_to_error(e)
+            return format_tool_result(
+                content=error.message,
+                is_error=True,
+                meta=error.data,
+            )
+
+    @mcp.tool()
+    async def flush_dns_cache(device_id: str) -> dict[str, Any]:
+        """Flush (clear) DNS cache.
+
+        Use when:
+        - User asks "flush DNS cache" or "clear DNS"
+        - Troubleshooting stale DNS entries
+        - After DNS server changes
+        - Forcing fresh DNS resolution
+
+        Side effects:
+        - Clears all cached DNS entries immediately
+        - Next DNS query will require upstream resolution
+        - Slight increase in DNS resolution latency temporarily
+        - Audit logged
+
+        Safety:
+        - Advanced tier (requires allow_advanced_writes=true)
+        - Low risk operation
+        - No dry-run needed (read-like operation)
+
+        Args:
+            device_id: Device identifier (e.g., 'dev-lab-01')
+
+        Returns:
+            Formatted tool result with flush status
+        """
+        try:
+            async with session_factory.session() as session:
+                device_service = DeviceService(session, settings)
+                dns_ntp_service = DNSNTPService(session, settings)
+
+                # Get device first to validate it exists
+                device = await device_service.get_device(device_id)
+
+                # Authorization check - advanced tier
+                check_tool_authorization(
+                    device_environment=device.environment,
+                    service_environment=settings.environment,
+                    tool_tier=ToolTier.ADVANCED,
+                    allow_advanced_writes=device.allow_advanced_writes,
+                    allow_professional_workflows=device.allow_professional_workflows,
+                    device_id=device_id,
+                    tool_name="dns/flush-cache",
+                )
+
+                # Flush DNS cache
+                result = await dns_ntp_service.flush_dns_cache(device_id)
+
+                content = f"DNS cache flushed ({result['entries_flushed']} entries)"
+
+                return format_tool_result(
+                    content=content,
+                    meta={
+                        "device_id": device_id,
+                        **result,
+                    },
+                )
+
+        except MCPError as e:
+            return format_tool_result(
+                content=e.message,
+                is_error=True,
+                meta=e.data,
+            )
+        except Exception as e:
+            error = map_exception_to_error(e)
+            return format_tool_result(
+                content=error.message,
+                is_error=True,
+                meta=error.data,
+            )
+
+    @mcp.tool()
+    async def update_ntp_servers(
+        device_id: str,
+        ntp_servers: list[str],
+        enabled: bool = True,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Update NTP server configuration.
+
+        Use when:
+        - User asks "change NTP servers to X" or "update time servers"
+        - Migrating to new NTP infrastructure
+        - Fixing time synchronization issues
+        - Standardizing NTP across fleet
+
+        Side effects:
+        - Updates NTP configuration immediately (unless dry_run=True)
+        - May cause brief time sync disruption
+        - System will re-sync with new servers
+        - Audit logged
+
+        Safety:
+        - Advanced tier (requires allow_advanced_writes=true)
+        - Medium risk operation
+        - Supports dry_run for preview
+        - Lab/staging preferred, production with caution
+
+        Args:
+            device_id: Device identifier (e.g., 'dev-lab-01')
+            ntp_servers: List of NTP server addresses (IP or hostname)
+            enabled: Enable NTP client (default: True)
+            dry_run: If True, only return planned changes without applying
+
+        Returns:
+            Formatted tool result with update status
+        """
+        try:
+            async with session_factory.session() as session:
+                device_service = DeviceService(session, settings)
+                dns_ntp_service = DNSNTPService(session, settings)
+
+                # Get device first to validate it exists
+                device = await device_service.get_device(device_id)
+
+                # Authorization check - advanced tier
+                check_tool_authorization(
+                    device_environment=device.environment,
+                    service_environment=settings.environment,
+                    tool_tier=ToolTier.ADVANCED,
+                    allow_advanced_writes=device.allow_advanced_writes,
+                    allow_professional_workflows=device.allow_professional_workflows,
+                    device_id=device_id,
+                    tool_name="ntp/update-servers",
+                )
+
+                # Update NTP servers
+                result = await dns_ntp_service.update_ntp_servers(
+                    device_id, ntp_servers, enabled, dry_run
+                )
+
+                # Format content
+                if dry_run:
+                    old_servers = result["planned_changes"]["old_servers"]
+                    new_servers = result["planned_changes"]["new_servers"]
+                    content = (
+                        f"DRY RUN: Would change NTP servers from "
+                        f"{', '.join(old_servers)} to {', '.join(new_servers)}, "
+                        f"enabled={enabled}"
+                    )
+                elif result["changed"]:
+                    content = (
+                        f"NTP servers updated to {', '.join(result['new_servers'])}, "
+                        f"enabled={enabled}"
+                    )
+                else:
+                    content = f"NTP servers already set (no change)"
+
+                return format_tool_result(
+                    content=content,
+                    meta={
+                        "device_id": device_id,
+                        **result,
+                    },
+                )
+
+        except MCPError as e:
+            return format_tool_result(
+                content=e.message,
+                is_error=True,
+                meta=e.data,
+            )
+        except Exception as e:
+            error = map_exception_to_error(e)
+            return format_tool_result(
+                content=error.message,
+                is_error=True,
+                meta=error.data,
+            )
+
+    logger.info("Registered DNS and NTP write tools")

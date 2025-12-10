@@ -167,3 +167,161 @@ class IPService:
 
         finally:
             await client.close()
+
+    async def add_secondary_address(
+        self,
+        device_id: str,
+        address: str,
+        interface: str,
+        comment: str = "",
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Add a secondary IP address to an interface.
+
+        Args:
+            device_id: Device identifier
+            address: IP address in CIDR notation (e.g., "192.168.1.10/24")
+            interface: Interface name
+            comment: Optional comment
+            dry_run: If True, only return planned changes without applying
+
+        Returns:
+            Dictionary with add result
+
+        Raises:
+            DeviceNotFoundError: If device doesn't exist
+            ValueError: If address format is invalid
+            UnsafeOperationError: If address overlaps with existing address
+        """
+        from routeros_mcp.security.safeguards import (
+            validate_ip_address_format,
+            check_ip_overlap,
+            create_dry_run_response,
+        )
+
+        # Validate IP address format
+        validate_ip_address_format(address)
+
+        await self.device_service.get_device(device_id)
+
+        # Get existing addresses to check for overlaps
+        existing_addresses = await self.list_addresses(device_id)
+
+        # Check for overlap
+        check_ip_overlap(address, existing_addresses, interface)
+
+        # Dry-run: return planned changes
+        if dry_run:
+            return create_dry_run_response(
+                operation="ip/add-secondary-address",
+                device_id=device_id,
+                planned_changes={
+                    "action": "add",
+                    "address": address,
+                    "interface": interface,
+                    "comment": comment,
+                },
+            )
+
+        # Apply change
+        client = await self.device_service.get_rest_client(device_id)
+
+        try:
+            payload = {
+                "address": address,
+                "interface": interface,
+            }
+            if comment:
+                payload["comment"] = comment
+
+            result = await client.put("/rest/ip/address", payload)
+
+            # Extract ID from result
+            address_id = result.get(".id", "") if isinstance(result, dict) else ""
+
+            logger.info(
+                f"Added secondary IP address {address} to interface {interface}",
+                extra={"device_id": device_id, "address_id": address_id},
+            )
+
+            return {
+                "changed": True,
+                "address": address,
+                "interface": interface,
+                "comment": comment,
+                "address_id": address_id,
+                "dry_run": False,
+            }
+
+        finally:
+            await client.close()
+
+    async def remove_secondary_address(
+        self,
+        device_id: str,
+        address_id: str,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Remove a secondary IP address.
+
+        Args:
+            device_id: Device identifier
+            address_id: Address ID to remove
+            dry_run: If True, only return planned changes without applying
+
+        Returns:
+            Dictionary with remove result
+
+        Raises:
+            DeviceNotFoundError: If device doesn't exist
+            ManagementPathProtectionError: If removing management IP
+        """
+        from routeros_mcp.security.safeguards import (
+            check_management_ip_protection,
+            create_dry_run_response,
+        )
+
+        device = await self.device_service.get_device(device_id)
+
+        # Get address details
+        address_details = await self.get_address(device_id, address_id)
+
+        # Check management IP protection
+        check_management_ip_protection(
+            device.management_address, address_details["address"]
+        )
+
+        # Dry-run: return planned changes
+        if dry_run:
+            return create_dry_run_response(
+                operation="ip/remove-secondary-address",
+                device_id=device_id,
+                planned_changes={
+                    "action": "remove",
+                    "address_id": address_id,
+                    "address": address_details["address"],
+                    "interface": address_details["interface"],
+                },
+            )
+
+        # Apply change
+        client = await self.device_service.get_rest_client(device_id)
+
+        try:
+            await client.delete(f"/rest/ip/address/{address_id}")
+
+            logger.info(
+                f"Removed IP address {address_details['address']} from interface {address_details['interface']}",
+                extra={"device_id": device_id, "address_id": address_id},
+            )
+
+            return {
+                "changed": True,
+                "address_id": address_id,
+                "address": address_details["address"],
+                "interface": address_details["interface"],
+                "dry_run": False,
+            }
+
+        finally:
+            await client.close()

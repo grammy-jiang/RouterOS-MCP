@@ -253,3 +253,98 @@ def register_system_tools(mcp: FastMCP, settings: Settings) -> None:
             )
 
     logger.info("Registered system information tools")
+
+    @mcp.tool()
+    async def set_system_identity(
+        device_id: str, identity: str, dry_run: bool = False
+    ) -> dict[str, Any]:
+        """Update system identity (hostname).
+
+        Use when:
+        - User asks "set hostname to X" or "change device name to Y"
+        - Standardizing device naming across fleet
+        - Updating device identity for documentation
+        - Renaming device after role change
+
+        Side effects:
+        - Changes system identity immediately (unless dry_run=True)
+        - Device will appear with new name in logs and MikroTik tools
+        - No connectivity impact
+        - Audit logged
+
+        Safety:
+        - Advanced tier (requires allow_advanced_writes=true)
+        - Low risk operation
+        - Supports dry_run for preview
+        - Lab/staging/prod allowed (based on device flags)
+
+        Args:
+            device_id: Device identifier (e.g., 'dev-lab-01')
+            identity: New identity name
+            dry_run: If True, only return planned changes without applying
+
+        Returns:
+            Formatted tool result with update status
+        """
+        try:
+            async with session_factory.session() as session:
+                device_service = DeviceService(session, settings)
+                system_service = SystemService(session, settings)
+
+                # Get device first to validate it exists
+                device = await device_service.get_device(device_id)
+
+                # Authorization check - advanced tier
+                check_tool_authorization(
+                    device_environment=device.environment,
+                    service_environment=settings.environment,
+                    tool_tier=ToolTier.ADVANCED,
+                    allow_advanced_writes=device.allow_advanced_writes,
+                    allow_professional_workflows=device.allow_professional_workflows,
+                    device_id=device_id,
+                    tool_name="system/set-identity",
+                )
+
+                # Update identity
+                result = await system_service.update_system_identity(
+                    device_id, identity, dry_run
+                )
+
+                # Format content
+                if dry_run:
+                    content = (
+                        f"DRY RUN: Would change system identity from "
+                        f"'{result['planned_changes']['old_identity']}' to "
+                        f"'{result['planned_changes']['new_identity']}'"
+                    )
+                elif result["changed"]:
+                    content = (
+                        f"System identity updated from '{result['old_identity']}' to "
+                        f"'{result['new_identity']}'"
+                    )
+                else:
+                    content = f"System identity already set to '{identity}' (no change)"
+
+                return format_tool_result(
+                    content=content,
+                    meta={
+                        "device_id": device_id,
+                        **result,
+                    },
+                )
+
+        except MCPError as e:
+            return format_tool_result(
+                content=e.message,
+                is_error=True,
+                meta=e.data,
+            )
+        except Exception as e:
+            error = map_exception_to_error(e)
+            return format_tool_result(
+                content=error.message,
+                is_error=True,
+                meta=error.data,
+            )
+
+    logger.info("Registered system write tools")
