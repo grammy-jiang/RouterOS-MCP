@@ -1,0 +1,182 @@
+name: address-list-sync
+description: Synchronize address lists across RouterOS devices
+
+arguments:
+  - name: environment
+    description: Target environment
+    type: string
+    enum: [lab, staging, prod]
+    required: false
+    default: lab
+  
+  - name: list_name
+    description: Address list name to sync
+    type: string
+    required: false
+
+messages:
+  - role: user
+    content: |
+      # Address List Synchronization Workflow
+      
+      ## Overview
+      Synchronize firewall address lists across devices in {{ environment }} environment.
+      
+      {% if not list_name %}
+      ## Step 1: List Available Address Lists
+      
+      First, identify which address list to sync.
+      
+      **Tool:** `firewall/list-address-lists`
+      
+      ```json
+      {
+        "device_id": "<reference-device>"
+      }
+      ```
+      
+      Select a list to sync and re-run this prompt with the `list_name` parameter.
+      
+      {% else %}
+      
+      ## Syncing Address List: {{ list_name }}
+      
+      ### Step 1: Identify Source Device
+      
+      Choose a device with the authoritative version of **{{ list_name }}**.
+      
+      **Tool:** `device/list`
+      
+      ---
+      
+      ### Step 2: Export Source Address List
+      
+      **Tool:** `firewall/get-address-list`
+      
+      ```json
+      {
+        "device_id": "<source-device-id>",
+        "list_name": "{{ list_name }}"
+      }
+      ```
+      
+      **Review entries:**
+      - Verify list contents are correct
+      - Note total entry count
+      - Document any special requirements
+      
+      ---
+      
+      ### Step 3: Identify Target Devices
+      
+      **Tool:** `device/list`
+      
+      ```json
+      {
+        "environment": "{{ environment }}"
+      }
+      ```
+      
+      **Select devices** that should have this address list.
+      
+      ---
+      
+      ### Step 4: Backup Existing Lists
+      
+      For each target device, backup current list:
+      
+      **Tool:** `firewall/get-address-list`
+      
+      Save output for rollback if needed.
+      
+      ---
+      
+      ### Step 5: Sync Address List Entries
+      
+      For each target device:
+      
+      **Tool:** `firewall/sync-address-list`
+      
+      ```json
+      {
+        "device_id": "<target-device-id>",
+        "list_name": "{{ list_name }}",
+        "source_device_id": "<source-device-id>",
+        "mode": "replace"{% if environment == 'prod' %},
+        "approval_token": "<token>"{% endif %}
+      }
+      ```
+      
+      **Modes:**
+      - `replace`: Clear and replace entire list
+      - `merge`: Add missing entries, keep existing
+      - `sync`: Add missing, remove extra
+      
+      ---
+      
+      ### Step 6: Verify Synchronization
+      
+      For each device:
+      
+      **Tool:** `firewall/get-address-list`
+      
+      **Verify:**
+      - Entry count matches source
+      - All addresses present
+      - No unexpected entries (in replace mode)
+      
+      ---
+      
+      ## Safety Considerations
+      
+      {% if environment == 'prod' %}
+      ⚠️  **PRODUCTION ENVIRONMENT**
+      - Requires approval token
+      - Test in lab first
+      - Have rollback plan ready
+      - Sync during maintenance window
+      {% else %}
+      - Test sync on one device first
+      - Verify firewall rules still work
+      - Check for any blocked traffic
+      {% endif %}
+      
+      ---
+      
+      ## Rollback Procedure
+      
+      If sync causes issues:
+      
+      1. **Use backed up lists** from Step 4
+      2. **Restore with tool:** `firewall/restore-address-list`
+      3. **Verify restoration** completes successfully
+      
+      ---
+      
+      ## Common Issues
+      
+      **List not found on source:**
+      - Verify list name spelling
+      - Check source device has the list
+      
+      **Sync fails on target:**
+      - Check device capabilities
+      - Verify write permissions
+      - Review firewall configuration
+      
+      **Traffic blocked after sync:**
+      - Review firewall rules using this list
+      - Check for missing entries
+      - Verify address format (IP vs CIDR)
+      
+      {% endif %}
+
+metadata:
+  category: workflow
+  tier: advanced
+  environments: [lab, staging, prod]
+  requires_approval: true
+  approvals_per_environment:
+    lab: false
+    staging: false
+    prod: true

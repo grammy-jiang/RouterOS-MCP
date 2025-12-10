@@ -1,0 +1,147 @@
+name: fleet-health-review
+description: Fleet-wide health assessment and review workflow
+
+arguments:
+  - name: environment
+    description: Environment to review
+    type: string
+    enum: [lab, staging, prod, all]
+    required: false
+    default: all
+
+messages:
+  - role: user
+    content: |
+      # Fleet Health Review
+      
+      ## Overview
+      Comprehensive health assessment for {{ environment }} environment.
+      
+      ---
+      
+      ## Step 1: Fleet Health Summary
+      
+      **Resource:** `fleet://health-summary`
+      
+      **Review:**
+      - Total device count
+      - Healthy vs degraded vs unreachable
+      - Average CPU/memory usage across fleet
+      - Devices requiring attention
+      
+      ---
+      
+      ## Step 2: List All Devices
+      
+      **Tool:** `device/list`
+      
+      ```json
+      {
+        {% if environment != 'all' %}"environment": "{{ environment }}"{% endif %}
+      }
+      ```
+      
+      **Review each device:**
+      - Name and ID
+      - Current status
+      - Last health check time
+      - Any warnings or alerts
+      
+      ---
+      
+      ## Step 3: Identify Problematic Devices
+      
+      **Look for:**
+      - Status: "unreachable" or "degraded"
+      - High CPU usage (>80%)
+      - High memory usage (>90%)
+      - Old RouterOS versions
+      - Failed health checks
+      
+      **Action:** Create list of devices needing attention.
+      
+      ---
+      
+      ## Step 4: Review Individual Device Health
+      
+      For each problematic device:
+      
+      **Resource:** `device://{device_id}/health`
+      
+      **Tool:** `system/get-overview`
+      
+      **Assess:**
+      - Is device reachable now?
+      - What are current metrics?
+      - When did issues start?
+      - Are issues ongoing or resolved?
+      
+      ---
+      
+      ## Step 5: Check for Common Issues
+      
+      **DNS/NTP problems:**
+      - Use `troubleshoot-dns-ntp` prompt for affected devices
+      
+      **Connectivity issues:**
+      - Use `troubleshoot-device` with issue_type=connectivity
+      
+      **Performance issues:**
+      - Use `troubleshoot-device` with issue_type=performance
+      
+      ---
+      
+      ## Step 6: Review Recent Changes
+      
+      **Resource:** `audit://events/recent`
+      
+      **Look for:**
+      - Recent configuration changes
+      - Failed operations
+      - Write operations in production
+      - Unusual activity patterns
+      
+      ---
+      
+      ## Health Review Checklist
+      
+      - [ ] All devices reachable
+      - [ ] No critical health warnings
+      - [ ] CPU usage within normal ranges
+      - [ ] Memory usage acceptable
+      - [ ] No failed health checks
+      - [ ] DNS resolution working
+      - [ ] NTP synchronized
+      - [ ] RouterOS versions up to date
+      - [ ] No unauthorized changes
+      - [ ] Alerts configured properly
+      
+      ---
+      
+      ## Recommended Actions
+      
+      Based on findings:
+      
+      1. **Unreachable devices:** Investigate network issues
+      2. **Performance issues:** Review resource usage patterns
+      3. **Outdated RouterOS:** Plan upgrade maintenance
+      4. **Configuration drift:** Review and reconcile configs
+      5. **Missing monitoring:** Enable health checks
+      
+      ---
+      
+      ## Generate Fleet Report
+      
+      Document findings:
+      - Total devices reviewed
+      - Healthy device count
+      - Issues found and severity
+      - Actions taken
+      - Outstanding items
+      - Next review date
+
+metadata:
+  category: workflow
+  tier: fundamental
+  environments: [lab, staging, prod]
+  requires_approval: false
