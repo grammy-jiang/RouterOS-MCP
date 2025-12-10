@@ -220,8 +220,8 @@ class DNSNTPService:
             ValueError: If server addresses are invalid
         """
         from routeros_mcp.security.safeguards import (
-            validate_dns_servers,
             create_dry_run_response,
+            validate_dns_servers,
         )
 
         # Validate DNS servers
@@ -342,8 +342,8 @@ class DNSNTPService:
             ValueError: If server addresses are invalid
         """
         from routeros_mcp.security.safeguards import (
-            validate_ntp_servers,
             create_dry_run_response,
+            validate_ntp_servers,
         )
 
         # Validate NTP servers

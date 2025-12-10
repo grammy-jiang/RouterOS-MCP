@@ -117,7 +117,7 @@ class HealthService:
                 status_str = "healthy"
 
             # Type assertion for status
-            status = cast(Literal["healthy", "degraded", "unreachable"], status_str)
+            status = cast("Literal['healthy', 'degraded', 'unreachable']", status_str)
 
             result = HealthCheckResult(
                 device_id=device_id,
@@ -198,7 +198,7 @@ class HealthService:
         # Determine overall fleet status
         overall_status_value: str = "degraded" if unreachable_count > 0 or degraded_count > 0 else "healthy"
         # Type cast for Literal type
-        overall_status = cast(Literal["healthy", "degraded", "unreachable"], overall_status_value)
+        overall_status = cast("Literal['healthy', 'degraded', 'unreachable']", overall_status_value)
 
         return HealthSummary(
             overall_status=overall_status,

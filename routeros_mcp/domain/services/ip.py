@@ -194,9 +194,9 @@ class IPService:
             UnsafeOperationError: If address overlaps with existing address
         """
         from routeros_mcp.security.safeguards import (
-            validate_ip_address_format,
             check_ip_overlap,
             create_dry_run_response,
+            validate_ip_address_format,
         )
 
         # Validate IP address format

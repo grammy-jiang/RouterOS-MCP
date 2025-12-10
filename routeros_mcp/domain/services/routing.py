@@ -78,7 +78,7 @@ class RoutingService:
 
             if isinstance(routes_data, list):
                 total_routes = len(routes_data)
-                
+
                 for route in routes_data:
                     if isinstance(route, dict):
                         # Count by type
