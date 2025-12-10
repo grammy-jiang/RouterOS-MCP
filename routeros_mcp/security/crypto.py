@@ -234,3 +234,42 @@ def validate_encryption_key(key: str) -> bool:
         # ValueError: Invalid Fernet key format
         # TypeError: key is not a string
         return False
+
+
+# Helper functions for use without instantiating CredentialEncryption
+def encrypt_string(plaintext: str, encryption_key: str) -> str:
+    """Encrypt a plaintext string using the provided encryption key.
+
+    Args:
+        plaintext: String to encrypt
+        encryption_key: Base64-encoded Fernet key
+
+    Returns:
+        Base64-encoded ciphertext
+
+    Example:
+        encrypted = encrypt_string("password123", settings.encryption_key)
+    """
+    crypto = CredentialEncryption(encryption_key)
+    return crypto.encrypt(plaintext)
+
+
+def decrypt_string(ciphertext: str, encryption_key: str) -> str:
+    """Decrypt a ciphertext string using the provided encryption key.
+
+    Args:
+        ciphertext: Base64-encoded ciphertext
+        encryption_key: Base64-encoded Fernet key
+
+    Returns:
+        Decrypted plaintext
+
+    Raises:
+        DecryptionError: If decryption fails
+
+    Example:
+        plaintext = decrypt_string(encrypted, settings.encryption_key)
+    """
+    crypto = CredentialEncryption(encryption_key)
+    return crypto.decrypt(ciphertext)
+
