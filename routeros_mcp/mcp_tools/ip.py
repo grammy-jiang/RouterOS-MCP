@@ -40,7 +40,7 @@ def register_ip_tools(mcp: FastMCP, settings: Settings) -> None:
         - Troubleshooting IP connectivity issues
         - Verifying address configuration after changes
 
-        Returns: List of IP addresses with CIDR notation, network, interface, disabled status, 
+        Returns: List of IP addresses with CIDR notation, network, interface, disabled status,
         and comment.
 
         Tip: Returns both primary and secondary addresses on all interfaces.
@@ -287,12 +287,6 @@ def register_ip_write_tools(mcp: FastMCP, settings: Settings) -> None:
             Formatted tool result with add status
         """
         try:
-            from routeros_mcp.domain.services.device import DeviceService
-            from routeros_mcp.domain.services.ip import IPService
-            from routeros_mcp.mcp.errors import MCPError, map_exception_to_error
-            from routeros_mcp.mcp.protocol.jsonrpc import format_tool_result
-            from routeros_mcp.security.authz import ToolTier, check_tool_authorization
-
             async with session_factory.session() as session:
                 device_service = DeviceService(session, settings)
                 ip_service = IPService(session, settings)
@@ -379,12 +373,6 @@ def register_ip_write_tools(mcp: FastMCP, settings: Settings) -> None:
             Formatted tool result with remove status
         """
         try:
-            from routeros_mcp.domain.services.device import DeviceService
-            from routeros_mcp.domain.services.ip import IPService
-            from routeros_mcp.mcp.errors import MCPError, map_exception_to_error
-            from routeros_mcp.mcp.protocol.jsonrpc import format_tool_result
-            from routeros_mcp.security.authz import ToolTier, check_tool_authorization
-
             async with session_factory.session() as session:
                 device_service = DeviceService(session, settings)
                 ip_service = IPService(session, settings)
