@@ -25,33 +25,33 @@ class TestRouterOSRestClient:
     def test_client_initialization(self) -> None:
         """Test client initialization with default parameters."""
         client = RouterOSRestClient(
-            host="router.example.com",
+            host="127.0.0.1",
             username="admin",
             password="secret",
         )
         
-        assert client.host == "router.example.com"
+        assert client.host == "127.0.0.1"
         assert client.port == 443
         assert client.username == "admin"
         assert client.password == "secret"
         assert client.max_retries == 3
-        assert client.base_url == "https://router.example.com:443"
+        assert client.base_url == "https://127.0.0.1:443"
         
     def test_client_initialization_custom_port(self) -> None:
         """Test client initialization with custom port."""
         client = RouterOSRestClient(
-            host="router2.example.com",
+            host="127.0.0.2",
             port=8443,
             username="admin",
             password="secret",
         )
         
         assert client.port == 8443
-        assert client.base_url == "https://router2.example.com:8443"
+        assert client.base_url == "https://127.0.0.2:8443"
         
     def test_set_credentials(self) -> None:
         """Test setting credentials after initialization."""
-        client = RouterOSRestClient(host="router.example.com")
+        client = RouterOSRestClient(host="127.0.0.1")
         
         assert client.username is None
         assert client.password is None
@@ -65,7 +65,7 @@ class TestRouterOSRestClient:
     async def test_successful_get_request(self) -> None:
         """Test successful GET request."""
         client = RouterOSRestClient(
-            host="router.example.com",
+            host="127.0.0.1",
             username="admin",
             password="secret",
         )
@@ -89,7 +89,7 @@ class TestRouterOSRestClient:
     async def test_successful_post_request(self) -> None:
         """Test successful POST request."""
         client = RouterOSRestClient(
-            host="router.example.com",
+            host="127.0.0.1",
             username="admin",
             password="secret",
         )
@@ -112,7 +112,7 @@ class TestRouterOSRestClient:
     async def test_empty_response_handling(self) -> None:
         """Test handling of empty response."""
         client = RouterOSRestClient(
-            host="router.example.com",
+            host="127.0.0.1",
             username="admin",
             password="secret",
         )
@@ -134,7 +134,7 @@ class TestRouterOSRestClient:
     async def test_401_authentication_error(self) -> None:
         """Test that 401 response raises RouterOSAuthenticationError."""
         client = RouterOSRestClient(
-            host="router.example.com",
+            host="127.0.0.1",
             username="admin",
             password="wrong",
         )
@@ -156,7 +156,7 @@ class TestRouterOSRestClient:
     async def test_403_authorization_error(self) -> None:
         """Test that 403 response raises RouterOSAuthorizationError."""
         client = RouterOSRestClient(
-            host="router.example.com",
+            host="127.0.0.1",
             username="readonly",
             password="secret",
         )
@@ -178,7 +178,7 @@ class TestRouterOSRestClient:
     async def test_404_not_found_error(self) -> None:
         """Test that 404 response raises RouterOSNotFoundError."""
         client = RouterOSRestClient(
-            host="router.example.com",
+            host="127.0.0.1",
             username="admin",
             password="secret",
         )
@@ -200,7 +200,7 @@ class TestRouterOSRestClient:
     async def test_400_validation_error(self) -> None:
         """Test that 400 response raises RouterOSValidationError."""
         client = RouterOSRestClient(
-            host="router.example.com",
+            host="127.0.0.1",
             username="admin",
             password="secret",
         )
@@ -222,7 +222,7 @@ class TestRouterOSRestClient:
     async def test_500_server_error(self) -> None:
         """Test that 500 response raises RouterOSServerError."""
         client = RouterOSRestClient(
-            host="router.example.com",
+            host="127.0.0.1",
             username="admin",
             password="secret",
         )
@@ -244,7 +244,7 @@ class TestRouterOSRestClient:
     async def test_timeout_with_retries(self) -> None:
         """Test that timeout triggers retries and eventually raises RouterOSTimeoutError."""
         client = RouterOSRestClient(
-            host="router.example.com",
+            host="127.0.0.1",
             username="admin",
             password="secret",
             max_retries=3,
@@ -265,7 +265,7 @@ class TestRouterOSRestClient:
     async def test_network_error_with_retries(self) -> None:
         """Test that network error triggers retries."""
         client = RouterOSRestClient(
-            host="router.example.com",
+            host="127.0.0.1",
             username="admin",
             password="secret",
             max_retries=3,
@@ -286,7 +286,7 @@ class TestRouterOSRestClient:
     async def test_invalid_json_response(self) -> None:
         """Test handling of invalid JSON response."""
         client = RouterOSRestClient(
-            host="router.example.com",
+            host="127.0.0.1",
             username="admin",
             password="secret",
         )
@@ -309,7 +309,7 @@ class TestRouterOSRestClient:
     async def test_successful_retry_after_transient_error(self) -> None:
         """Test that client succeeds after transient error."""
         client = RouterOSRestClient(
-            host="router.example.com",
+            host="127.0.0.1",
             username="admin",
             password="secret",
             max_retries=3,
@@ -338,7 +338,7 @@ class TestRouterOSRestClient:
     async def test_client_methods(self) -> None:
         """Test all HTTP method wrappers."""
         client = RouterOSRestClient(
-            host="router.example.com",
+            host="127.0.0.1",
             username="admin",
             password="secret",
         )
@@ -366,7 +366,7 @@ class TestRouterOSRestClient:
     async def test_close_client(self) -> None:
         """Test closing the client."""
         client = RouterOSRestClient(
-            host="router.example.com",
+            host="127.0.0.1",
             username="admin",
             password="secret",
         )
