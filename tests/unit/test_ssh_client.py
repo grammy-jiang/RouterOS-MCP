@@ -232,7 +232,7 @@ class TestRouterOSSSHClient:
                 await client.execute("/export compact")
                 
     @pytest.mark.asyncio
-    async def test_connection_retry_on_failure(self) -> None:
+    async def test_connection_retry_on_failure(self, monkeypatch) -> None:
         """Test that connection retries on failure."""
         client = RouterOSSSHClient(
             host="router.example.com",
@@ -241,24 +241,28 @@ class TestRouterOSSSHClient:
             max_retries=3,
         )
         
-        with patch('asyncssh.connect') as mock_connect:
-            # First two attempts fail, third succeeds
-            mock_connection = AsyncMock()
-            mock_connection.is_closed.return_value = False
-            
-            mock_connect.side_effect = [
-                Exception("Connection refused"),
-                Exception("Connection refused"),
-                mock_connection,
-            ]
-            
-            connection = await client._get_connection()
-            
-            assert connection == mock_connection
-            assert mock_connect.call_count == 3
+        # First two attempts fail, third succeeds
+        mock_connection = AsyncMock()
+        mock_connection.is_closed.return_value = False
+        
+        call_count = 0
+        async def mock_connect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise Exception("Connection refused")
+            return mock_connection
+        
+        import routeros_mcp.infra.routeros.ssh_client as ssh_module
+        monkeypatch.setattr(ssh_module.asyncssh, 'connect', mock_connect)
+        
+        connection = await client._get_connection()
+        
+        assert connection == mock_connection
+        assert call_count == 3
             
     @pytest.mark.asyncio
-    async def test_authentication_error(self) -> None:
+    async def test_authentication_error(self, monkeypatch) -> None:
         """Test that authentication error raises RouterOSSSHAuthenticationError."""
         client = RouterOSSSHClient(
             host="router.example.com",
@@ -266,11 +270,14 @@ class TestRouterOSSSHClient:
             password="wrong",
         )
         
-        with patch('asyncssh.connect') as mock_connect:
-            mock_connect.side_effect = asyncssh.PermissionDenied("Authentication failed")
-            
-            with pytest.raises(RouterOSSSHAuthenticationError, match="SSH authentication failed"):
-                await client._get_connection()
+        async def mock_connect(*args, **kwargs):
+            raise asyncssh.PermissionDenied("Authentication failed")
+        
+        import routeros_mcp.infra.routeros.ssh_client as ssh_module
+        monkeypatch.setattr(ssh_module.asyncssh, 'connect', mock_connect)
+        
+        with pytest.raises(RouterOSSSHAuthenticationError, match="SSH authentication failed"):
+            await client._get_connection()
                 
     @pytest.mark.asyncio
     async def test_connection_reuse(self) -> None:
@@ -281,17 +288,18 @@ class TestRouterOSSSHClient:
             password="secret",
         )
         
-        mock_connection = AsyncMock()
-        mock_connection.is_closed.return_value = False
+        mock_connection = MagicMock()
+        mock_connection.is_closed = MagicMock(return_value=False)
         
         client._connection = mock_connection
         
         connection = await client._get_connection()
         
         assert connection == mock_connection
+        # Connection is reused, no new connection created
         
     @pytest.mark.asyncio
-    async def test_connection_recreation_if_closed(self) -> None:
+    async def test_connection_recreation_if_closed(self, monkeypatch) -> None:
         """Test that connection is recreated if closed."""
         client = RouterOSSSHClient(
             host="router.example.com",
@@ -306,11 +314,15 @@ class TestRouterOSSSHClient:
         new_connection = AsyncMock()
         new_connection.is_closed.return_value = False
         
-        with patch('asyncssh.connect', return_value=new_connection):
-            connection = await client._get_connection()
-            
-            assert connection == new_connection
-            assert connection != old_connection
+        async def mock_connect(*args, **kwargs):
+            return new_connection
+        
+        import routeros_mcp.infra.routeros.ssh_client as ssh_module
+        monkeypatch.setattr(ssh_module.asyncssh, 'connect', mock_connect)
+        
+        connection = await client._get_connection()
+        
+        assert connection == new_connection
             
     @pytest.mark.asyncio
     async def test_close_connection(self) -> None:
@@ -321,8 +333,9 @@ class TestRouterOSSSHClient:
             password="secret",
         )
         
-        mock_connection = AsyncMock()
-        mock_connection.is_closed.return_value = False
+        mock_connection = MagicMock()
+        mock_connection.is_closed = MagicMock(return_value=False)
+        mock_connection.close = MagicMock()
         mock_connection.wait_closed = AsyncMock()
         client._connection = mock_connection
         
