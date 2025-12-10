@@ -2,11 +2,11 @@
 
 import logging
 from datetime import UTC, datetime
-from typing import Any
 
 from fastmcp import FastMCP
 
 from routeros_mcp.config import Settings
+from routeros_mcp.infra.db.session import DatabaseSessionManager
 from routeros_mcp.mcp_resources.utils import format_resource_content
 
 logger = logging.getLogger(__name__)
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 def register_audit_resources(
     mcp: FastMCP,
-    session_factory: Any,
+    session_factory: DatabaseSessionManager,
     settings: Settings,
 ) -> None:
     """Register audit:// resources with MCP server.

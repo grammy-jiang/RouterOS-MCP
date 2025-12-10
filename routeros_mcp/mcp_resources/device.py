@@ -2,7 +2,6 @@
 
 import logging
 from datetime import UTC, datetime
-from typing import Any
 
 from fastmcp import FastMCP
 
@@ -10,6 +9,7 @@ from routeros_mcp.config import Settings
 from routeros_mcp.domain.services.device import DeviceService
 from routeros_mcp.domain.services.health import HealthService
 from routeros_mcp.domain.services.system import SystemService
+from routeros_mcp.infra.db.session import DatabaseSessionManager
 from routeros_mcp.mcp.errors import DeviceNotFoundError, MCPError
 from routeros_mcp.mcp_resources.utils import format_resource_content
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 def register_device_resources(
     mcp: FastMCP,
-    session_factory: Any,
+    session_factory: DatabaseSessionManager,
     settings: Settings,
 ) -> None:
     """Register device:// resources with MCP server.
