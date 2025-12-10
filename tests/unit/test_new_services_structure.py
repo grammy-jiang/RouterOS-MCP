@@ -4,10 +4,6 @@ Basic smoke tests to verify that all new domain services can be imported
 and instantiated correctly.
 """
 
-import pytest
-
-from routeros_mcp.config import Settings
-
 
 class TestDomainServicesStructure:
     """Test that all domain services can be imported and instantiated."""

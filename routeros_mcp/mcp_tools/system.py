@@ -231,7 +231,6 @@ def register_system_tools(mcp: FastMCP, settings: Settings) -> None:
                         meta={
                             "device_id": device_id,
                             "time": time_str,
-                            "timezone": timezone,
                             "time_zone_autodetect": clock_data.get("time-zone-autodetect", False),
                             "time_zone_name": timezone,
                         },

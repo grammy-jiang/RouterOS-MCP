@@ -190,6 +190,8 @@ class DiagnosticsService:
 
         try:
             # Run traceroute
+            # Note: MAX_TRACEROUTE_HOPS is enforced by RouterOS itself (default 30)
+            # The RouterOS API automatically limits the number of hops
             trace_params = {
                 "address": address,
                 "count": count,
