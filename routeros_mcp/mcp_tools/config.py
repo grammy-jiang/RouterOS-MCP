@@ -21,7 +21,6 @@ from routeros_mcp.domain.services.plan import PlanService
 from routeros_mcp.infra.db.session import get_session_factory
 from routeros_mcp.mcp.errors import map_exception_to_error
 from routeros_mcp.mcp.protocol.jsonrpc import format_tool_result
-from routeros_mcp.security.authz import ToolTier, check_tool_authorization
 
 logger = logging.getLogger(__name__)
 

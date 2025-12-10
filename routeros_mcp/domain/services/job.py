@@ -10,13 +10,13 @@ detailed requirements.
 import asyncio
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any, Callable
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from routeros_mcp.infra.db.models import Device as DeviceModel
 from routeros_mcp.infra.db.models import Job as JobModel
 from routeros_mcp.infra.db.models import Plan as PlanModel
 

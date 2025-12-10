@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from fastmcp import FastMCP
 
 from routeros_mcp.config import Settings
+from routeros_mcp.domain.services.job import JobService
+from routeros_mcp.domain.services.plan import PlanService
 from routeros_mcp.infra.db.session import DatabaseSessionManager
 from routeros_mcp.mcp_resources.utils import format_resource_content
 
@@ -42,26 +44,39 @@ def register_plan_resources(
         Returns:
             JSON-formatted plan summary
         """
-        # Placeholder implementation
-        # TODO: Integrate with actual PlanService when available
+        try:
+            async with session_factory.session() as session:
+                plan_service = PlanService(session)
+                plan = await plan_service.get_plan(plan_id)
 
-        result = {
-            "plan_id": plan_id,
-            "name": f"Plan {plan_id}",
-            "description": "Placeholder plan summary",
-            "status": "pending",
-            "created_at": datetime.now(UTC).isoformat(),
-            "note": "Plan service integration pending - T7",
-        }
+                result = {
+                    "plan_id": plan["plan_id"],
+                    "tool_name": plan["tool_name"],
+                    "status": plan["status"],
+                    "created_by": plan["created_by"],
+                    "approved_by": plan["approved_by"],
+                    "device_count": len(plan["device_ids"]),
+                    "summary": plan["summary"],
+                    "created_at": plan["created_at"],
+                    "approved_at": plan["approved_at"],
+                }
 
-        content = format_resource_content(result, "application/json")
+                content = format_resource_content(result, "application/json")
 
-        logger.info(
-            f"Resource accessed: plan://{plan_id}/summary",
-            extra={"plan_id": plan_id},
-        )
+                logger.info(
+                    f"Resource accessed: plan://{plan_id}/summary",
+                    extra={"plan_id": plan_id},
+                )
 
-        return content
+                return content
+
+        except Exception as e:
+            logger.error(f"Error retrieving plan summary: {e}", exc_info=True)
+            error_result = {
+                "error": str(e),
+                "plan_id": plan_id,
+            }
+            return format_resource_content(error_result, "application/json")
 
     @mcp.resource("plan://{plan_id}/details")
     async def plan_details(plan_id: str) -> str:
@@ -80,23 +95,41 @@ def register_plan_resources(
         Returns:
             JSON-formatted plan details
         """
-        # Placeholder implementation
-        result = {
-            "plan_id": plan_id,
-            "details": "Detailed plan information",
-            "devices": [],
-            "changes": [],
-            "note": "Plan service integration pending - T7",
-        }
+        try:
+            async with session_factory.session() as session:
+                plan_service = PlanService(session)
+                plan = await plan_service.get_plan(plan_id)
 
-        content = format_resource_content(result, "application/json")
+                result = {
+                    "plan_id": plan["plan_id"],
+                    "tool_name": plan["tool_name"],
+                    "status": plan["status"],
+                    "created_by": plan["created_by"],
+                    "approved_by": plan["approved_by"],
+                    "device_ids": plan["device_ids"],
+                    "summary": plan["summary"],
+                    "changes": plan["changes"],
+                    "created_at": plan["created_at"],
+                    "approved_at": plan["approved_at"],
+                    "updated_at": plan["updated_at"],
+                }
 
-        logger.info(
-            f"Resource accessed: plan://{plan_id}/details",
-            extra={"plan_id": plan_id},
-        )
+                content = format_resource_content(result, "application/json")
 
-        return content
+                logger.info(
+                    f"Resource accessed: plan://{plan_id}/details",
+                    extra={"plan_id": plan_id},
+                )
+
+                return content
+
+        except Exception as e:
+            logger.error(f"Error retrieving plan details: {e}", exc_info=True)
+            error_result = {
+                "error": str(e),
+                "plan_id": plan_id,
+            }
+            return format_resource_content(error_result, "application/json")
 
     @mcp.resource("plan://{plan_id}/execution-log")
     async def plan_execution_log(plan_id: str) -> str:
@@ -115,22 +148,44 @@ def register_plan_resources(
         Returns:
             JSON-formatted execution log
         """
-        # Placeholder implementation
-        result = {
-            "plan_id": plan_id,
-            "execution_log": [],
-            "status": "not_executed",
-            "note": "Plan service integration pending - T7",
-        }
+        try:
+            async with session_factory.session() as session:
+                plan_service = PlanService(session)
+                job_service = JobService(session)
 
-        content = format_resource_content(result, "application/json")
+                # Get plan details
+                plan = await plan_service.get_plan(plan_id)
 
-        logger.info(
-            f"Resource accessed: plan://{plan_id}/execution-log",
-            extra={"plan_id": plan_id},
-        )
+                # Get associated jobs
+                jobs = await job_service.list_jobs(plan_id=plan_id, limit=100)
 
-        return content
+                result = {
+                    "plan_id": plan_id,
+                    "status": plan["status"],
+                    "jobs": jobs,
+                    "execution_summary": {
+                        "total_jobs": len(jobs),
+                        "completed_jobs": sum(1 for j in jobs if j["status"] == "success"),
+                        "failed_jobs": sum(1 for j in jobs if j["status"] == "failed"),
+                    },
+                }
+
+                content = format_resource_content(result, "application/json")
+
+                logger.info(
+                    f"Resource accessed: plan://{plan_id}/execution-log",
+                    extra={"plan_id": plan_id},
+                )
+
+                return content
+
+        except Exception as e:
+            logger.error(f"Error retrieving execution log: {e}", exc_info=True)
+            error_result = {
+                "error": str(e),
+                "plan_id": plan_id,
+            }
+            return format_resource_content(error_result, "application/json")
 
 
 __all__ = ["register_plan_resources"]
