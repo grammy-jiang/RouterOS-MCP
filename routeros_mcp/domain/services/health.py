@@ -5,6 +5,7 @@ Computes device health based on metrics, RouterOS responses, and failure history
 
 import logging
 from datetime import UTC, datetime
+from typing import Literal, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 

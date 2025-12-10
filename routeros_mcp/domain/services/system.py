@@ -6,6 +6,7 @@ including resource metrics, identity, and package information.
 
 import logging
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
