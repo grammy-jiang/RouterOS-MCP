@@ -2,8 +2,6 @@
 
 import json
 
-import pytest
-
 from routeros_mcp.mcp_resources.utils import (
     create_resource_metadata,
     estimate_tokens,

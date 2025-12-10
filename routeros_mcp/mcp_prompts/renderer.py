@@ -3,7 +3,7 @@
 import logging
 from typing import Any
 
-from jinja2 import Environment, Template, TemplateSyntaxError
+from jinja2 import Environment, TemplateSyntaxError
 
 from routeros_mcp.mcp_prompts.loader import PromptTemplate
 

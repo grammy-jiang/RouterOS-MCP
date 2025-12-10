@@ -1,6 +1,5 @@
 """MCP resources for plan data (plan:// URI scheme)."""
 
-import json
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -8,7 +7,6 @@ from typing import Any
 from fastmcp import FastMCP
 
 from routeros_mcp.config import Settings
-from routeros_mcp.mcp.errors import MCPError
 from routeros_mcp.mcp_resources.utils import format_resource_content
 
 logger = logging.getLogger(__name__)

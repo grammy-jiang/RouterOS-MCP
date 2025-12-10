@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from routeros_mcp.mcp_prompts.loader import PromptLoader, PromptTemplate
+from routeros_mcp.mcp_prompts.loader import PromptLoader
 
 
 def test_load_valid_prompt():
@@ -96,7 +96,7 @@ messages:
         )
 
         loader = PromptLoader(tmpdir)
-        templates = loader.load_all()
+        loader.load_all()
 
         validation_results = loader.validate_all()
 
@@ -124,7 +124,7 @@ messages:
             )
 
         loader = PromptLoader(tmpdir)
-        templates = loader.load_all()
+        loader.load_all()
 
         names = loader.list_templates()
         assert len(names) == 3

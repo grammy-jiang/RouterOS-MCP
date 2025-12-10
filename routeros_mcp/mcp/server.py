@@ -272,10 +272,10 @@ require appropriate device capabilities and permissions.
         )
 
         try:
-            register_device_resources(self.mcp, self.session_factory.session, self.settings)
-            register_fleet_resources(self.mcp, self.session_factory.session, self.settings)
-            register_plan_resources(self.mcp, self.session_factory.session, self.settings)
-            register_audit_resources(self.mcp, self.session_factory.session, self.settings)
+            register_device_resources(self.mcp, self.session_factory, self.settings)
+            register_fleet_resources(self.mcp, self.session_factory, self.settings)
+            register_plan_resources(self.mcp, self.session_factory, self.settings)
+            register_audit_resources(self.mcp, self.session_factory, self.settings)
             logger.info("Registered MCP resources")
         except Exception as e:
             logger.error(f"Failed to register resources: {e}", exc_info=True)

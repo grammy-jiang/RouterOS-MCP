@@ -65,7 +65,7 @@ def register_prompts(
     # Register each template as an MCP prompt
     for name, template in templates.items():
         # Create prompt handler function
-        def create_prompt_handler(tmpl):
+        def create_prompt_handler(tmpl=template):
             """Create a prompt handler for the given template."""
 
             async def prompt_handler(**kwargs: Any) -> str:

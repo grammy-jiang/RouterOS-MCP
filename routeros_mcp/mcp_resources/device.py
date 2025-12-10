@@ -1,19 +1,17 @@
 """MCP resources for device data (device:// URI scheme)."""
 
-import json
 import logging
 from datetime import UTC, datetime
 from typing import Any
 
 from fastmcp import FastMCP
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from routeros_mcp.config import Settings
 from routeros_mcp.domain.services.device import DeviceService
 from routeros_mcp.domain.services.health import HealthService
 from routeros_mcp.domain.services.system import SystemService
 from routeros_mcp.mcp.errors import DeviceNotFoundError, MCPError
-from routeros_mcp.mcp_resources.utils import create_resource_metadata, format_resource_content
+from routeros_mcp.mcp_resources.utils import format_resource_content
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +46,7 @@ def register_device_resources(
         Returns:
             JSON-formatted device overview
         """
-        async with session_factory() as session:
+        async with session_factory.session() as session:
             device_service = DeviceService(session, settings)
             system_service = SystemService(session, settings)
             health_service = HealthService(session, settings)
@@ -128,7 +126,7 @@ def register_device_resources(
         Returns:
             JSON-formatted health metrics
         """
-        async with session_factory() as session:
+        async with session_factory.session() as session:
             device_service = DeviceService(session, settings)
             health_service = HealthService(session, settings)
 
@@ -192,7 +190,7 @@ def register_device_resources(
         Returns:
             RouterOS configuration script (placeholder)
         """
-        async with session_factory() as session:
+        async with session_factory.session() as session:
             device_service = DeviceService(session, settings)
 
             try:
@@ -240,7 +238,7 @@ def register_device_resources(
         Returns:
             JSON array of log entries (placeholder)
         """
-        async with session_factory() as session:
+        async with session_factory.session() as session:
             device_service = DeviceService(session, settings)
 
             try:

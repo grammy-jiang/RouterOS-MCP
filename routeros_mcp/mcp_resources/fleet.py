@@ -1,12 +1,10 @@
 """MCP resources for fleet data (fleet:// URI scheme)."""
 
-import json
 import logging
 from datetime import UTC, datetime
 from typing import Any
 
 from fastmcp import FastMCP
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from routeros_mcp.config import Settings
 from routeros_mcp.domain.services.device import DeviceService
@@ -44,7 +42,7 @@ def register_fleet_resources(
         Returns:
             JSON-formatted fleet health summary
         """
-        async with session_factory() as session:
+        async with session_factory.session() as session:
             device_service = DeviceService(session, settings)
             health_service = HealthService(session, settings)
 
@@ -167,7 +165,7 @@ def register_fleet_resources(
         Returns:
             JSON array of device summaries
         """
-        async with session_factory() as session:
+        async with session_factory.session() as session:
             device_service = DeviceService(session, settings)
 
             try:
