@@ -197,18 +197,18 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
-def get_session_factory(settings: Settings | None = None) -> async_sessionmaker[AsyncSession]:
+def get_session_factory(settings: Settings | None = None) -> DatabaseSessionManager:
     """Get session factory for creating sessions outside FastAPI context.
-    
+
     Args:
         settings: Application settings (optional, uses global if not provided)
-        
+
     Returns:
-        Async session factory callable
-        
+        Database session manager with session() method
+
     Example:
         factory = get_session_factory(settings)
-        async with factory() as session:
+        async with factory.session() as session:
             result = await session.execute(select(Device))
     """
     manager = get_session_manager(settings)
@@ -216,9 +216,9 @@ def get_session_factory(settings: Settings | None = None) -> async_sessionmaker[
         # Initialize if not already done
         import asyncio
         asyncio.create_task(manager.init())
-    
-    # Return the session context manager wrapped in a factory
-    return manager.session
+
+    # Return the manager itself, not the session factory
+    return manager
 
 
 def reset_session_manager() -> None:
