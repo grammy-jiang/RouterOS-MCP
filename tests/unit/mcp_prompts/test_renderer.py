@@ -11,9 +11,7 @@ def test_render_simple_template():
     template = PromptTemplate(
         name="simple",
         description="Simple test",
-        messages=[
-            PromptMessage(role="user", content="Hello, world!")
-        ],
+        messages=[PromptMessage(role="user", content="Hello, world!")],
     )
 
     renderer = PromptRenderer()
@@ -41,11 +39,7 @@ def test_render_with_arguments():
                 default="Hello",
             ),
         ],
-        messages=[
-            PromptMessage(
-                role="user", content="{{ greeting }}, {{ name }}!"
-            )
-        ],
+        messages=[PromptMessage(role="user", content="{{ greeting }}, {{ name }}!")],
     )
 
     renderer = PromptRenderer()
@@ -86,9 +80,7 @@ def test_render_with_template_vars():
     template = PromptTemplate(
         name="with-vars",
         description="Test with template vars",
-        messages=[
-            PromptMessage(role="user", content="{{ title }}\n\n{{ content }}")
-        ],
+        messages=[PromptMessage(role="user", content="{{ title }}\n\n{{ content }}")],
         template_vars={
             "title": "Default Title",
             "content": "Default content",

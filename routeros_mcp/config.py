@@ -243,7 +243,7 @@ class Settings(BaseSettings):
     @property
     def is_sqlite(self) -> bool:
         """Check if database is SQLite."""
-        return self.database_url.startswith("sqlite:")
+        return self.database_url.startswith("sqlite")
 
     @property
     def is_postgresql(self) -> bool:

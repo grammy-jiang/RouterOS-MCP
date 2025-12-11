@@ -183,18 +183,12 @@ def register_fleet_resources(
                         "name": d.name,
                         "environment": d.environment,
                         "management_address": d.management_address,
-                        "tags": d.tags or [],
+                        "tags": d.tags or {},
                         "capability_flags": {
-                            "allow_advanced_writes": d.capability_flags.get(
-                                "allow_advanced_writes", False
-                            )
-                            if d.capability_flags
-                            else False,
-                            "allow_professional_workflows": d.capability_flags.get(
-                                "allow_professional_workflows", False
-                            )
-                            if d.capability_flags
-                            else False,
+                            "allow_advanced_writes": getattr(d, "allow_advanced_writes", False),
+                            "allow_professional_workflows": getattr(
+                                d, "allow_professional_workflows", False
+                            ),
                         },
                     }
                     for d in devices

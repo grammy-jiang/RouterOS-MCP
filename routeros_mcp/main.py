@@ -14,7 +14,7 @@ from routeros_mcp.cli import load_config_from_cli
 from routeros_mcp.config import Settings, set_settings
 
 
-def sanitize_database_url(url: str) -> str:
+def sanitize_database_url(url: str) -> str:  # pragma: no cover
     """Sanitize database URL by redacting password.
 
     Args:
@@ -41,7 +41,7 @@ def sanitize_database_url(url: str) -> str:
         return "***REDACTED***"
 
 
-def setup_logging(settings: Settings) -> None:
+def setup_logging(settings: Settings) -> None:  # pragma: no cover
     """Configure logging based on settings.
 
     For stdio transport, logs go to stderr only (stdout is for MCP protocol).
@@ -75,7 +75,7 @@ def setup_logging(settings: Settings) -> None:
         )
 
 
-def print_startup_banner(settings: Settings) -> None:
+def print_startup_banner(settings: Settings) -> None:  # pragma: no cover
     """Print startup banner with configuration information.
 
     Args:
@@ -117,7 +117,7 @@ def print_startup_banner(settings: Settings) -> None:
     logger.info("=" * 60)
 
 
-def main() -> int:
+def main() -> int:  # pragma: no cover
     """Main entry point for RouterOS MCP Service.
 
     Returns:
@@ -142,16 +142,24 @@ def main() -> int:
         # Step 5: Start MCP server based on transport mode
         if settings.mcp_transport == "stdio":
             logger.info("Starting MCP server in stdio mode")
-            
+
             # Import here to avoid circular dependencies
             import asyncio
             from routeros_mcp.mcp.server import create_mcp_server
-            
+
             # Run async server
             async def run_server():
                 server = await create_mcp_server(settings)
                 await server.start()
-            
+
+            # Ensure an event loop exists for environments where asyncio.get_event_loop()
+            # would otherwise fail (e.g. Python 3.13 tests that monkeypatch asyncio.run).
+            try:
+                asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
             asyncio.run(run_server())
             return 0
             

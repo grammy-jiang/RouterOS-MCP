@@ -33,7 +33,7 @@ async def main() -> int:
 
         # Check tools are registered
         # FastMCP doesn't expose tools directly, so we just verify server exists
-        print(f"✓ MCP server initialized successfully")
+        print("✓ MCP server initialized successfully")
 
         print("\n" + "=" * 60)
         print("All checks passed!")

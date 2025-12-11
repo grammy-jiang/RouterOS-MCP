@@ -4,9 +4,12 @@ import logging
 from datetime import UTC, datetime
 
 from fastmcp import FastMCP
+from sqlalchemy import desc, select
 
 from routeros_mcp.config import Settings
+from routeros_mcp.infra.db.models import AuditEvent
 from routeros_mcp.infra.db.session import DatabaseSessionManager
+from routeros_mcp.mcp.errors import MCPError
 from routeros_mcp.mcp_resources.utils import format_resource_content
 
 logger = logging.getLogger(__name__)
@@ -42,30 +45,34 @@ def register_audit_resources(
         Returns:
             JSON array of audit events
         """
-        # Placeholder implementation
-        # TODO: Integrate with actual AuditService when available
+        async with session_factory.session() as session:
+            try:
+                query = (
+                    select(AuditEvent)
+                    .order_by(desc(AuditEvent.timestamp))
+                    .limit(limit)
+                )
+                result = await session.execute(query)
+                events = result.scalars().all()
 
-        result = {
-            "events": [
-                {
-                    "timestamp": datetime.now(UTC).isoformat(),
-                    "event_type": "tool_invocation",
-                    "user_sub": "user123",
-                    "device_id": "dev-001",
-                    "tool_name": "system/get-overview",
-                    "status": "success",
+                payload = {
+                    "events": [
+                        _serialize_audit_event(event) for event in events
+                    ],
+                    "count": len(events),
+                    "limit": limit,
                 }
-            ],
-            "count": 1,
-            "limit": limit,
-            "note": "Audit service integration pending",
-        }
 
-        content = format_resource_content(result, "application/json")
+                logger.info("Resource accessed: audit://events/recent")
+                return format_resource_content(payload, "application/json")
 
-        logger.info("Resource accessed: audit://events/recent")
-
-        return content
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.error("Failed to load audit events", exc_info=True)
+                raise MCPError(
+                    code=-32050,
+                    message="Failed to load audit events",
+                    data={"error": str(exc)},
+                )
 
     @mcp.resource("audit://events/by-user/{user_sub}")
     async def audit_events_by_user(user_sub: str, limit: int = 100) -> str:
@@ -78,23 +85,38 @@ def register_audit_resources(
         Returns:
             JSON array of audit events for the specified user
         """
-        # Placeholder implementation
-        result = {
-            "user_sub": user_sub,
-            "events": [],
-            "count": 0,
-            "limit": limit,
-            "note": "Audit service integration pending",
-        }
+        async with session_factory.session() as session:
+            try:
+                query = (
+                    select(AuditEvent)
+                    .where(AuditEvent.user_sub == user_sub)
+                    .order_by(desc(AuditEvent.timestamp))
+                    .limit(limit)
+                )
+                result = await session.execute(query)
+                events = result.scalars().all()
 
-        content = format_resource_content(result, "application/json")
+                payload = {
+                    "user_sub": user_sub,
+                    "events": [
+                        _serialize_audit_event(event) for event in events
+                    ],
+                    "count": len(events),
+                    "limit": limit,
+                }
 
-        logger.info(
-            f"Resource accessed: audit://events/by-user/{user_sub}",
-            extra={"user_sub": user_sub},
-        )
+                logger.info(
+                    "Resource accessed: audit://events/by-user/%s", user_sub
+                )
+                return format_resource_content(payload, "application/json")
 
-        return content
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.error("Failed to load audit events by user", exc_info=True)
+                raise MCPError(
+                    code=-32051,
+                    message="Failed to load audit events for user",
+                    data={"user_sub": user_sub, "error": str(exc)},
+                )
 
     @mcp.resource("audit://events/by-device/{device_id}")
     async def audit_events_by_device(device_id: str, limit: int = 100) -> str:
@@ -107,23 +129,38 @@ def register_audit_resources(
         Returns:
             JSON array of audit events for the specified device
         """
-        # Placeholder implementation
-        result = {
-            "device_id": device_id,
-            "events": [],
-            "count": 0,
-            "limit": limit,
-            "note": "Audit service integration pending",
-        }
+        async with session_factory.session() as session:
+            try:
+                query = (
+                    select(AuditEvent)
+                    .where(AuditEvent.device_id == device_id)
+                    .order_by(desc(AuditEvent.timestamp))
+                    .limit(limit)
+                )
+                result = await session.execute(query)
+                events = result.scalars().all()
 
-        content = format_resource_content(result, "application/json")
+                payload = {
+                    "device_id": device_id,
+                    "events": [
+                        _serialize_audit_event(event) for event in events
+                    ],
+                    "count": len(events),
+                    "limit": limit,
+                }
 
-        logger.info(
-            f"Resource accessed: audit://events/by-device/{device_id}",
-            extra={"device_id": device_id},
-        )
+                logger.info(
+                    "Resource accessed: audit://events/by-device/%s", device_id
+                )
+                return format_resource_content(payload, "application/json")
 
-        return content
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.error("Failed to load audit events by device", exc_info=True)
+                raise MCPError(
+                    code=-32052,
+                    message="Failed to load audit events for device",
+                    data={"device_id": device_id, "error": str(exc)},
+                )
 
     @mcp.resource("audit://events/by-tool/{tool_name}")
     async def audit_events_by_tool(tool_name: str, limit: int = 100) -> str:
@@ -136,23 +173,60 @@ def register_audit_resources(
         Returns:
             JSON array of audit events for the specified tool
         """
-        # Placeholder implementation
-        result = {
-            "tool_name": tool_name,
-            "events": [],
-            "count": 0,
-            "limit": limit,
-            "note": "Audit service integration pending",
-        }
+        async with session_factory.session() as session:
+            try:
+                query = (
+                    select(AuditEvent)
+                    .where(AuditEvent.tool_name == tool_name)
+                    .order_by(desc(AuditEvent.timestamp))
+                    .limit(limit)
+                )
+                result = await session.execute(query)
+                events = result.scalars().all()
 
-        content = format_resource_content(result, "application/json")
+                payload = {
+                    "tool_name": tool_name,
+                    "events": [
+                        _serialize_audit_event(event) for event in events
+                    ],
+                    "count": len(events),
+                    "limit": limit,
+                }
 
-        logger.info(
-            f"Resource accessed: audit://events/by-tool/{tool_name}",
-            extra={"tool_name": tool_name},
-        )
+                logger.info(
+                    "Resource accessed: audit://events/by-tool/%s", tool_name
+                )
+                return format_resource_content(payload, "application/json")
 
-        return content
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.error("Failed to load audit events by tool", exc_info=True)
+                raise MCPError(
+                    code=-32053,
+                    message="Failed to load audit events for tool",
+                    data={"tool_name": tool_name, "error": str(exc)},
+                )
+
+
+def _serialize_audit_event(event: AuditEvent) -> dict:
+    """Convert an AuditEvent ORM instance into a JSON-serializable dict."""
+
+    return {
+        "id": event.id,
+        "timestamp": event.timestamp.isoformat(),
+        "user_sub": event.user_sub,
+        "user_email": event.user_email,
+        "user_role": event.user_role,
+        "device_id": event.device_id,
+        "environment": event.environment,
+        "action": event.action,
+        "tool_name": event.tool_name,
+        "tool_tier": event.tool_tier,
+        "plan_id": event.plan_id,
+        "job_id": event.job_id,
+        "result": event.result,
+        "meta": event.meta or {},
+        "error_message": event.error_message,
+    }
 
 
 __all__ = ["register_audit_resources"]

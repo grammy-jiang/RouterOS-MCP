@@ -312,6 +312,7 @@ View full execution log with plan://{plan_id}/execution-log resource.
                     meta={
                         "plan_id": plan_id,
                         "job_id": job["job_id"],
+                        "status": results.get("status"),
                         "results": results,
                     },
                 )

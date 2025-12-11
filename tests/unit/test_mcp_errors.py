@@ -1,5 +1,15 @@
 """Tests for MCP errors module."""
 
+from routeros_mcp.infra.routeros.exceptions import (
+    RouterOSAuthenticationError,
+    RouterOSAuthorizationError,
+    RouterOSClientError,
+    RouterOSNetworkError,
+    RouterOSNotFoundError,
+    RouterOSServerError,
+    RouterOSTimeoutError,
+    RouterOSValidationError,
+)
 from routeros_mcp.mcp.errors import (
     JSONRPC_INTERNAL_ERROR,
     JSONRPC_INVALID_PARAMS,
@@ -11,14 +21,17 @@ from routeros_mcp.mcp.errors import (
     MCP_DEVICE_UNREACHABLE,
     MCP_VALIDATION_ERROR,
     AuthenticationError,
+    AuthorizationError,
     DeviceNotFoundError,
     DeviceUnreachableError,
     InternalError,
     InvalidParamsError,
     InvalidRequestError,
     MCPError,
+    MCPTimeoutError,
     MethodNotFoundError,
     ParseError,
+    RouterOSError,
     ValidationError,
     map_exception_to_error,
 )
@@ -57,7 +70,7 @@ class TestMCPErrorClass:
             code=-32001,
         )
         jsonrpc_error = error.to_jsonrpc_error()
-        
+
         assert jsonrpc_error == {
             "code": -32001,
             "message": "Test error",
@@ -68,7 +81,7 @@ class TestMCPErrorClass:
         """Test JSON-RPC error without data field."""
         error = MCPError("Simple error")
         jsonrpc_error = error.to_jsonrpc_error()
-        
+
         assert jsonrpc_error == {
             "code": JSONRPC_INTERNAL_ERROR,
             "message": "Simple error",
@@ -148,14 +161,14 @@ class TestExceptionMapping:
         """Test that MCPError is returned unchanged."""
         original = DeviceNotFoundError("Device not found")
         mapped = map_exception_to_error(original)
-        
+
         assert mapped is original
 
     def test_map_value_error(self) -> None:
         """Test mapping ValueError to ValidationError."""
         exc = ValueError("Invalid input")
         mapped = map_exception_to_error(exc)
-        
+
         assert isinstance(mapped, ValidationError)
         assert "Invalid input" in mapped.message
 
@@ -163,8 +176,40 @@ class TestExceptionMapping:
         """Test mapping generic exception to InternalError."""
         exc = RuntimeError("Something went wrong")
         mapped = map_exception_to_error(exc)
-        
+
         assert isinstance(mapped, InternalError)
         assert "Something went wrong" in mapped.message
         assert "original_error" in mapped.data
         assert mapped.data["original_error"] == "RuntimeError"
+
+    def test_map_routeros_auth_errors(self) -> None:
+        """RouterOS auth-related errors should map to MCP auth errors."""
+        auth_error = RouterOSAuthenticationError("auth failed", "body")
+        authz_error = RouterOSAuthorizationError("forbidden", "body")
+
+        assert isinstance(map_exception_to_error(auth_error), AuthenticationError)
+        assert isinstance(map_exception_to_error(authz_error), AuthorizationError)
+
+    def test_map_routeros_timeout_and_validation(self) -> None:
+        """Timeout and validation errors should be mapped appropriately."""
+        timeout_error = RouterOSTimeoutError("timeout")
+        validation_error = RouterOSValidationError("bad request", 400, "body")
+
+        assert isinstance(map_exception_to_error(timeout_error), MCPTimeoutError)
+        assert isinstance(map_exception_to_error(validation_error), ValidationError)
+
+    def test_map_routeros_network_and_not_found(self) -> None:
+        """Network and not found errors should map to device-specific MCP errors."""
+        network_error = RouterOSNetworkError("network down")
+        not_found_error = RouterOSNotFoundError("missing", "body")
+
+        assert isinstance(map_exception_to_error(network_error), DeviceUnreachableError)
+        assert isinstance(map_exception_to_error(not_found_error), DeviceNotFoundError)
+
+    def test_map_routeros_client_and_server(self) -> None:
+        """Client and server errors should map to generic RouterOSError wrapper."""
+        client_error = RouterOSClientError("bad", 418, "body")
+        server_error = RouterOSServerError("oops", 500, "body")
+
+        assert isinstance(map_exception_to_error(client_error), RouterOSError)
+        assert isinstance(map_exception_to_error(server_error), RouterOSError)

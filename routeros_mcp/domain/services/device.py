@@ -138,7 +138,7 @@ class DeviceService:
             "Registered device",
             extra={
                 "device_id": device_orm.id,
-                "name": device_orm.name,
+                "device_name": device_orm.name,
                 "environment": device_orm.environment,
             },
         )

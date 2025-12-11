@@ -229,10 +229,10 @@ def validate_encryption_key(key: str) -> bool:
         # Validate Fernet key format
         Fernet(key_bytes)
         return True
-    except (UnicodeEncodeError, ValueError, TypeError):
+    except (UnicodeEncodeError, ValueError, TypeError, AttributeError):
         # UnicodeEncodeError: Invalid UTF-8
         # ValueError: Invalid Fernet key format
-        # TypeError: key is not a string
+        # TypeError/AttributeError: key is not a string-like object
         return False
 
 

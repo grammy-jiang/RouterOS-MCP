@@ -50,9 +50,7 @@ class TestManagementPathProtection:
 
     def test_removing_management_ip_blocked(self):
         """Removing management IP should be blocked."""
-        with pytest.raises(
-            ManagementPathProtectionError, match="management IP"
-        ):
+        with pytest.raises(ManagementPathProtectionError, match="management IP"):
             check_management_ip_protection(
                 device_management_address="192.168.1.1:443",
                 ip_to_remove="192.168.1.1/24",
@@ -73,6 +71,18 @@ class TestManagementPathProtection:
                 device_management_address="192.168.1.100:443",
                 ip_to_remove="192.168.1.0/24",
             )
+
+    def test_management_ip_invalid_format_logs_warning(self, caplog):
+        """Invalid IP formats should emit warning rather than raising."""
+        caplog.set_level("WARNING")
+
+        # Invalid management address will trigger ValueError in ipaddress
+        check_management_ip_protection(
+            device_management_address="not-an-ip",
+            ip_to_remove="invalid-cidr",
+        )
+
+        assert any("Could not parse IPs" in record.message for record in caplog.records)
 
 
 class TestIPAddressValidation:
@@ -102,18 +112,14 @@ class TestIPOverlapValidation:
 
     def test_overlapping_ips_rejected(self):
         """Overlapping IPs on same interface should be rejected."""
-        existing = [
-            {"interface": "ether1", "address": "192.168.1.1/24", "dynamic": False}
-        ]
+        existing = [{"interface": "ether1", "address": "192.168.1.1/24", "dynamic": False}]
 
         with pytest.raises(UnsafeOperationError, match="overlaps"):
             check_ip_overlap("192.168.1.10/24", existing, "ether1")
 
     def test_non_overlapping_ips_allowed(self):
         """Non-overlapping IPs should be allowed."""
-        existing = [
-            {"interface": "ether1", "address": "192.168.1.1/24", "dynamic": False}
-        ]
+        existing = [{"interface": "ether1", "address": "192.168.1.1/24", "dynamic": False}]
 
         # Different interface - should not raise
         check_ip_overlap("192.168.1.10/24", existing, "ether2")
@@ -123,12 +129,35 @@ class TestIPOverlapValidation:
 
     def test_dynamic_addresses_ignored(self):
         """Dynamic addresses should be ignored in overlap check."""
-        existing = [
-            {"interface": "ether1", "address": "192.168.1.1/24", "dynamic": True}
-        ]
+        existing = [{"interface": "ether1", "address": "192.168.1.1/24", "dynamic": True}]
 
         # Should not raise even though it overlaps (dynamic address)
         check_ip_overlap("192.168.1.10/24", existing, "ether1")
+
+    def test_invalid_existing_address_skipped(self, caplog):
+        """Invalid existing addresses should be skipped with warning."""
+        caplog.set_level("WARNING")
+        existing = [
+            {"interface": "ether1", "address": "not-a-cidr", "dynamic": False},
+        ]
+
+        check_ip_overlap("10.0.0.0/24", existing, "ether1")
+
+        assert any(
+            "Could not parse existing address" in record.message for record in caplog.records
+        )
+
+    def test_empty_existing_address_skipped(self):
+        """Entries without an address should be ignored."""
+        existing = [{"interface": "ether1", "address": ""}]
+
+        # Should not raise even though the entry is empty
+        check_ip_overlap("10.0.0.0/24", existing, "ether1")
+
+    def test_invalid_new_address_raises_value_error(self):
+        """Invalid new address should raise ValueError with context."""
+        with pytest.raises(ValueError, match="Invalid IP address format"):
+            check_ip_overlap("bad-cidr", [], "ether1")
 
 
 class TestDNSServerValidation:
@@ -157,6 +186,11 @@ class TestDNSServerValidation:
         with pytest.raises(ValueError, match="Invalid DNS server"):
             validate_dns_servers(["not a valid server!@#"])
 
+    def test_empty_dns_entry_rejected(self):
+        """Blank DNS server entries should fail validation."""
+        with pytest.raises(ValueError, match="cannot be empty"):
+            validate_dns_servers(["", "8.8.8.8"])
+
 
 class TestNTPServerValidation:
     """Test NTP server validation."""
@@ -177,6 +211,16 @@ class TestNTPServerValidation:
         servers = [f"ntp{i}.example.com" for i in range(11)]
         with pytest.raises(ValueError, match="Too many"):
             validate_ntp_servers(servers)
+
+    def test_empty_ntp_entry_rejected(self):
+        """Blank NTP server entries should fail validation."""
+        with pytest.raises(ValueError, match="cannot be empty"):
+            validate_ntp_servers(["", "pool.ntp.org"])
+
+    def test_invalid_ntp_server_format(self):
+        """Invalid NTP server strings should raise ValueError."""
+        with pytest.raises(ValueError, match="Invalid NTP server address"):
+            validate_ntp_servers(["bad@@@server"])
 
 
 class TestDryRunResponse:

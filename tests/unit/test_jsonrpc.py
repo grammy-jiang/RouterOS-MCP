@@ -21,7 +21,7 @@ class TestCreateSuccessResponse:
             request_id="req-123",
             result={"content": [{"type": "text", "text": "Success"}]},
         )
-        
+
         assert response["jsonrpc"] == "2.0"
         assert response["id"] == "req-123"
         assert "result" in response
@@ -33,7 +33,7 @@ class TestCreateSuccessResponse:
             request_id=42,
             result={"data": "test"},
         )
-        
+
         assert response["id"] == 42
 
 
@@ -50,7 +50,7 @@ class TestCreateErrorResponse:
             request_id="req-123",
             error=error,
         )
-        
+
         assert response["jsonrpc"] == "2.0"
         assert response["id"] == "req-123"
         assert "error" in response
@@ -65,7 +65,7 @@ class TestCreateErrorResponse:
             request_id="req-123",
             error=exc,
         )
-        
+
         assert response["jsonrpc"] == "2.0"
         assert "error" in response
         # Should be mapped to ValidationError
@@ -96,7 +96,7 @@ class TestValidateJsonRpcRequest:
             "method": "tools/call",
             "params": {"name": "echo", "arguments": {"message": "test"}},
         }
-        
+
         valid, error = validate_jsonrpc_request(request)
         assert valid is True
         assert error is None
@@ -107,7 +107,7 @@ class TestValidateJsonRpcRequest:
             "id": "req-123",
             "method": "tools/call",
         }
-        
+
         valid, error = validate_jsonrpc_request(request)
         assert valid is False
         assert "jsonrpc" in error.lower()
@@ -119,7 +119,7 @@ class TestValidateJsonRpcRequest:
             "id": "req-123",
             "method": "tools/call",
         }
-        
+
         valid, error = validate_jsonrpc_request(request)
         assert valid is False
         assert "2.0" in error
@@ -130,7 +130,7 @@ class TestValidateJsonRpcRequest:
             "jsonrpc": "2.0",
             "id": "req-123",
         }
-        
+
         valid, error = validate_jsonrpc_request(request)
         assert valid is False
         assert "method" in error.lower()
@@ -142,7 +142,7 @@ class TestValidateJsonRpcRequest:
             "id": ["invalid"],  # Array is not valid
             "method": "tools/call",
         }
-        
+
         valid, error = validate_jsonrpc_request(request)
         assert valid is False
         assert "id" in error.lower()
@@ -155,7 +155,7 @@ class TestValidateJsonRpcRequest:
             "method": "tools/call",
             "params": "invalid",  # String is not valid
         }
-        
+
         valid, error = validate_jsonrpc_request(request)
         assert valid is False
         assert "params" in error.lower()
@@ -167,7 +167,7 @@ class TestValidateJsonRpcRequest:
             "method": "notify",
             "params": {},
         }
-        
+
         valid, error = validate_jsonrpc_request(request)
         assert valid is True
 
@@ -181,7 +181,7 @@ class TestFormatToolResult:
             content="Test message",
             meta={"device_id": "dev-123"},
         )
-        
+
         assert result["isError"] is False
         assert len(result["content"]) == 1
         assert result["content"][0]["type"] == "text"
@@ -192,7 +192,7 @@ class TestFormatToolResult:
         """Test formatting dictionary content."""
         content_item = {"type": "text", "text": "Test"}
         result = format_tool_result(content=content_item)
-        
+
         assert len(result["content"]) == 1
         assert result["content"][0] == content_item
 
@@ -203,7 +203,7 @@ class TestFormatToolResult:
             {"type": "text", "text": "Line 2"},
         ]
         result = format_tool_result(content=content_items)
-        
+
         assert len(result["content"]) == 2
         assert result["content"] == content_items
 
@@ -214,14 +214,14 @@ class TestFormatToolResult:
             is_error=True,
             meta={"error_code": 123},
         )
-        
+
         assert result["isError"] is True
         assert result["_meta"]["error_code"] == 123
 
     def test_format_result_without_meta(self) -> None:
         """Test formatting result without metadata."""
         result = format_tool_result(content="Test")
-        
+
         assert "isError" in result
         assert "content" in result
         assert "_meta" not in result
@@ -236,9 +236,9 @@ class TestExtractToolArguments:
             "name": "system/get-overview",
             "arguments": {"device_id": "dev-123"},
         }
-        
+
         tool_name, args = extract_tool_arguments(params)
-        
+
         assert tool_name == "system/get-overview"
         assert args == {"device_id": "dev-123"}
 
@@ -247,9 +247,9 @@ class TestExtractToolArguments:
         params = {
             "name": "echo",
         }
-        
+
         tool_name, args = extract_tool_arguments(params)
-        
+
         assert tool_name == "echo"
         assert args == {}
 
@@ -263,7 +263,7 @@ class TestExtractToolArguments:
         params = {
             "arguments": {},
         }
-        
+
         with pytest.raises(ValueError, match="name is required"):
             extract_tool_arguments(params)
 
@@ -273,7 +273,7 @@ class TestExtractToolArguments:
             "name": 123,  # Should be string
             "arguments": {},
         }
-        
+
         with pytest.raises(ValueError, match="name must be a string"):
             extract_tool_arguments(params)
 
@@ -283,6 +283,6 @@ class TestExtractToolArguments:
             "name": "echo",
             "arguments": "invalid",  # Should be object
         }
-        
+
         with pytest.raises(ValueError, match="arguments must be an object"):
             extract_tool_arguments(params)

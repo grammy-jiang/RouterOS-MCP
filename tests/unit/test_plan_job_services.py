@@ -1,11 +1,16 @@
 """Tests for Plan and Job services."""
 
+from typing import Any
+
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from routeros_mcp.domain.services import job as job_module
 from routeros_mcp.domain.services.job import JobService
 from routeros_mcp.domain.services.plan import PlanService
 from routeros_mcp.infra.db.models import Base, Device
+from routeros_mcp.infra.db.models import Job as JobModel
 
 
 @pytest.fixture
@@ -18,9 +23,7 @@ async def db_session() -> AsyncSession:
         await conn.run_sync(Base.metadata.create_all)
 
     # Create session
-    async_session_maker = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
+    async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async with async_session_maker() as session:
         yield session
@@ -54,9 +57,7 @@ class TestPlanService:
     """Tests for PlanService."""
 
     @pytest.mark.asyncio
-    async def test_create_plan(
-        self, db_session: AsyncSession, test_devices: list[str]
-    ) -> None:
+    async def test_create_plan(self, db_session: AsyncSession, test_devices: list[str]) -> None:
         """Test creating a plan."""
         service = PlanService(db_session)
 
@@ -107,9 +108,7 @@ class TestPlanService:
             )
 
     @pytest.mark.asyncio
-    async def test_get_plan(
-        self, db_session: AsyncSession, test_devices: list[str]
-    ) -> None:
+    async def test_get_plan(self, db_session: AsyncSession, test_devices: list[str]) -> None:
         """Test retrieving a plan."""
         service = PlanService(db_session)
 
@@ -139,9 +138,7 @@ class TestPlanService:
             await service.get_plan("nonexistent-plan")
 
     @pytest.mark.asyncio
-    async def test_approve_plan(
-        self, db_session: AsyncSession, test_devices: list[str]
-    ) -> None:
+    async def test_approve_plan(self, db_session: AsyncSession, test_devices: list[str]) -> None:
         """Test approving a plan."""
         service = PlanService(db_session)
 
@@ -232,9 +229,7 @@ class TestPlanService:
         assert updated_plan["status"] == "applied"
 
     @pytest.mark.asyncio
-    async def test_list_plans(
-        self, db_session: AsyncSession, test_devices: list[str]
-    ) -> None:
+    async def test_list_plans(self, db_session: AsyncSession, test_devices: list[str]) -> None:
         """Test listing plans."""
         service = PlanService(db_session)
 
@@ -270,9 +265,7 @@ class TestJobService:
     """Tests for JobService."""
 
     @pytest.mark.asyncio
-    async def test_create_job(
-        self, db_session: AsyncSession, test_devices: list[str]
-    ) -> None:
+    async def test_create_job(self, db_session: AsyncSession, test_devices: list[str]) -> None:
         """Test creating a job."""
         service = JobService(db_session)
 
@@ -326,9 +319,7 @@ class TestJobService:
             )
 
     @pytest.mark.asyncio
-    async def test_get_job(
-        self, db_session: AsyncSession, test_devices: list[str]
-    ) -> None:
+    async def test_get_job(self, db_session: AsyncSession, test_devices: list[str]) -> None:
         """Test retrieving a job."""
         service = JobService(db_session)
 
@@ -354,9 +345,7 @@ class TestJobService:
             await service.get_job("nonexistent-job")
 
     @pytest.mark.asyncio
-    async def test_list_jobs(
-        self, db_session: AsyncSession, test_devices: list[str]
-    ) -> None:
+    async def test_list_jobs(self, db_session: AsyncSession, test_devices: list[str]) -> None:
         """Test listing jobs."""
         service = JobService(db_session)
 
@@ -378,3 +367,136 @@ class TestJobService:
         type_a_jobs = await service.list_jobs(job_type="TYPE_A")
         assert len(type_a_jobs) == 1
         assert type_a_jobs[0]["job_type"] == "TYPE_A"
+
+    @pytest.mark.asyncio
+    async def test_execute_job_success(
+        self,
+        db_session: AsyncSession,
+        test_devices: list[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Execute job across batches and mark success."""
+        service = JobService(db_session)
+
+        job = await service.create_job(
+            job_type="TEST_EXEC",
+            device_ids=test_devices,
+        )
+
+        async def executor(job_id: str, device_ids: list[str], context: dict[str, Any]):
+            return {"devices": {did: {"status": "ok"} for did in device_ids}, "context": context}
+
+        async def _fast_sleep(*_args, **_kwargs):
+            return None
+
+        monkeypatch.setattr(job_module.asyncio, "sleep", _fast_sleep)
+
+        result = await service.execute_job(
+            job["job_id"],
+            executor,
+            executor_context={"foo": "bar"},
+            batch_size=2,
+            batch_pause_seconds=0,
+        )
+
+        assert result["batches_completed"] == 2
+        fetched = await service.get_job(job["job_id"])
+        assert fetched["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_execute_job_failure_marks_failed(
+        self,
+        db_session: AsyncSession,
+        test_devices: list[str],
+    ) -> None:
+        """Executor failure should mark job failed and propagate."""
+        service = JobService(db_session)
+
+        job = await service.create_job(
+            job_type="TEST_FAIL",
+            device_ids=test_devices,
+        )
+
+        async def failing_executor(job_id: str, device_ids: list[str], context: dict[str, Any]):
+            raise RuntimeError("boom")
+
+        result = await service.execute_job(
+            job["job_id"], failing_executor, batch_size=2, batch_pause_seconds=0
+        )
+
+        assert result["status"] == "failed"
+        assert "boom" in result["error"]
+
+        fetched = await service.get_job(job["job_id"])
+        assert fetched["status"] == "failed"
+        assert "boom" in (fetched.get("error_message") or "")
+
+    @pytest.mark.asyncio
+    async def test_execute_job_invalid_status(
+        self, db_session: AsyncSession, test_devices: list[str]
+    ) -> None:
+        """Jobs not pending/failed cannot execute."""
+        service = JobService(db_session)
+        created = await service.create_job(
+            job_type="TEST_INVALID",
+            device_ids=test_devices,
+        )
+
+        # Force status to running
+        stmt = select(JobModel).where(JobModel.id == created["job_id"])
+        result = await db_session.execute(stmt)
+        job_obj = result.scalar_one()
+        job_obj.status = "running"
+        await db_session.commit()
+
+        async def noop_executor(job_id: str, device_ids: list[str], context: dict[str, Any]):
+            return {}
+
+        with pytest.raises(ValueError):
+            await service.execute_job(created["job_id"], noop_executor)
+
+    @pytest.mark.asyncio
+    async def test_schedule_retry_success(
+        self, db_session: AsyncSession, test_devices: list[str]
+    ) -> None:
+        """Schedule retry updates status and next_run_at."""
+        service = JobService(db_session)
+        job = await service.create_job(
+            job_type="TEST_RETRY",
+            device_ids=test_devices,
+            max_attempts=2,
+        )
+
+        # Force failed state
+        stmt = select(JobModel).where(JobModel.id == job["job_id"])
+        result = await db_session.execute(stmt)
+        job_obj = result.scalar_one()
+        job_obj.status = "failed"
+        job_obj.attempts = 1
+        await db_session.commit()
+
+        updated = await service.schedule_retry(job["job_id"], delay_seconds=1)
+        assert updated["status"] == "pending"
+        assert updated["next_run_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_schedule_retry_exhausted_attempts(
+        self, db_session: AsyncSession, test_devices: list[str]
+    ) -> None:
+        """Cannot retry when attempts exhausted."""
+        service = JobService(db_session)
+        job = await service.create_job(
+            job_type="TEST_RETRY_FAIL",
+            device_ids=test_devices,
+            max_attempts=1,
+        )
+
+        stmt = select(JobModel).where(JobModel.id == job["job_id"])
+        result = await db_session.execute(stmt)
+        job_obj = result.scalar_one()
+        job_obj.status = "failed"
+        job_obj.attempts = 1
+        await db_session.commit()
+
+        with pytest.raises(ValueError):
+            await service.schedule_retry(job["job_id"])
