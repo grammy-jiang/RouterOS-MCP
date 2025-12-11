@@ -348,7 +348,7 @@ Beyond functional success, v1 must demonstrate MCP best practice compliance:
   - Request correlation: Every tool invocation includes `correlation_id` in logs, linking MCP request → domain logic → RouterOS REST calls → audit log
   - Health check: MCP server exposes `/health` endpoint for load balancer checks
 - **Testing coverage**:
-  - Unit tests: 80% code coverage for domain logic
+  - Unit tests: at least 95% code coverage for core domain modules and at least 85% coverage for all other modules
   - Integration tests: All 40 tools tested with mock RouterOS responses
   - LLM-in-the-loop tests: Automated tests with real LLM clients invoking tools
   - E2E tests: Full workflows (device registration → DNS rollout → verification) tested in lab environment

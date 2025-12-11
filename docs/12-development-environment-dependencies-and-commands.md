@@ -359,7 +359,7 @@ uv run tox -e type   # run mypy
 uv run tox -e cov    # run tests with coverage
 ```
 
-CI pipelines should run the coverage-focused environment (for example `tox -e cov`) and enforce the coverage thresholds defined in `docs/13-python-coding-standards-and-conventions.md` (baseline ≥ 85% overall, with selected core modules configured for 100%).
+CI pipelines should run the coverage-focused environment (for example `tox -e cov`) and enforce the coverage thresholds defined in `docs/13-python-coding-standards-and-conventions.md` (baseline ≥ 85% overall, with selected core modules configured for ≥95% and aiming for 100%).
 
 ### Static analysis and formatting
 

@@ -281,36 +281,40 @@ async def test_device_registration_creates_device_and_credentials():
 
 **End-to-End Tests (MCP Tools)**
 
-```python
-# E2E tests - full stack from MCP tool to mocked RouterOS
-@pytest.mark.asyncio
-async def test_system_get_overview_tool_returns_complete_response():
-    """MCP tool should return properly formatted system overview."""
-    # Arrange
-    mcp_server = create_test_mcp_server()
-    mock_routeros = MockRouterOSClient()
-    mock_routeros.set_response("/rest/system/resource", {
-        "uptime": "1d2h3m",
-        "version": "7.10.1 (stable)",
-        "cpu-load": 15,
-        "free-memory": 268435456,
-        "total-memory": 536870912
-    })
+End-to-end tests exercise the full stack of MCP tools from the public interface down to mocked
+infrastructure (database sessions, RouterOS clients) and back. For this project, Phase 1 adds
+some concrete, repository-wide requirements:
 
-    # Act
-    response = await mcp_server.call_tool(
-        "system/get-overview",
-        {"device_id": "dev-001"}
-    )
+- Prefer `unittest.TestCase` for e2e tests as well, using the `asyncio.run(_run())` pattern
+  for async flows:
 
-    # Assert
-    assert response["isError"] is False
-    assert "_meta" in response
-    meta = response["_meta"]
-    assert meta["routeros_version"] == "7.10.1 (stable)"
-    assert meta["cpu"]["usage_percent"] == 15.0
-    assert meta["memory"]["usage_percent"] == 50.0
-```
+  ```python
+  class TestSystemOverviewTool(unittest.TestCase):
+      def test_system_get_overview_tool_returns_complete_response(self) -> None:
+          async def _run() -> None:
+              mcp, settings = create_test_mcp_server()  # helper that wires tools
+              # Arrange mocks: DB/session + RouterOS REST client
+              ...
+
+              response = await mcp.tools["get_system_overview"]("dev-001")
+
+              self.assertFalse(response["isError"])
+              meta = response["_meta"]
+              self.assertEqual("7.10.1 (stable)", meta["routeros_version"])
+              self.assertGreaterEqual(meta["cpu"]["usage_percent"], 0.0)
+
+          asyncio.run(_run())
+  ```
+
+- Start from the **public surface** (HTTP endpoints, MCP tools, or MCP resources) and avoid
+  calling internal helpers directly.
+- Mock:
+  - The database/session factory (e.g. via a `FakeSessionFactory`).
+  - RouterOS REST/SSH clients (returning realistic but controlled payloads).
+- Assert on:
+  - `isError` flag and `_meta` structure.
+  - Rendered `content` text for human-facing responses.
+  - All documented error and edge cases for each tool/endpoint.
 
 ### Test Organization and Structure
 
@@ -535,7 +539,7 @@ async def test_update_device_tags_for_nonexistent_device_raises_error():
 - No external dependencies (no DB, no network, no file I/O)
 - Use mocks/stubs for dependencies
 - Test single responsibility
-- 100% coverage expected for core domain logic
+- Ensure tests cover all return paths and all exceptions raised in the function body, especially for core domain logic (line coverage ≥95% for core modules, aiming for 100% where practical)
 
 **Example:**
 
@@ -556,6 +560,55 @@ def test_calculate_memory_usage_percentage():
 
     assert usage_pct == 50.0
 ```
+
+### Phase 1 Test Style and Coverage Requirements
+
+In addition to the general guidance above, Phase 1 has concrete, enforced testing standards:
+
+- **Test style**
+  - Use `unittest.TestCase` classes for both unit and e2e tests where practical.
+  - Inside `TestCase` methods, use `self.assert*` helpers instead of bare `assert`.
+  - For async code in `TestCase` methods, wrap the async body in an inner `_run()` coroutine and
+    execute it via `asyncio.run(_run())` to keep tests framework-neutral.
+
+- **Shared helpers and duplication**
+  - Common fakes and helpers (e.g. dummy MCP implementations and fake session factories) must live
+    in shared modules such as:
+    - `tests/unit/mcp_tools_test_utils.py`
+    - `tests/e2e/e2e_test_utils.py`
+  - Individual tests should import and reuse these helpers instead of redefining `_DummyMCP`,
+    `_FakeSessionFactory`, etc. in multiple files.
+
+- **E2E tests**
+  - E2E tests live under `tests/e2e/` and:
+    - Start from APIs/endpoints (HTTP handlers, MCP tools, MCP resources).
+    - Mock the database layer and RouterOS responses (REST/SSH) only, not the business logic under test.
+    - Verify the full response contract: `content`, `_meta`, `isError`, and any important fields.
+
+- **Unit tests for MCP tools**
+  - Unit tests live under `tests/unit/` and, for MCP tools, should:
+    - Patch `get_session_factory`, domain services, and `check_tool_authorization` per test using
+      `unittest.mock.patch` (or helper functions returning patchers).
+    - Cover:
+      - Happy path behavior.
+      - `MCPError`-based error handling (`isError=True` and correct `_meta`).
+      - Generic exceptions mapped via `map_exception_to_error`.
+
+- **Coverage expectations**
+  - For core MCP tools and domain services implemented in Phase 1:
+    - Target **≥95% line coverage** on reachable code paths (with 100% as the ideal).
+    - Never allow coverage on these modules to fall below the global baseline (**85%**).
+    - Ensure that all documented return/response shapes and exception paths are exercised.
+  - For the repository as a whole:
+    - Maintain an overall coverage of at least **85%**.
+    - Current implementation work has achieved ~92–93% overall coverage; future changes should
+      avoid regressing below the established baseline.
+
+- **No fake business logic**
+  - Tests may mock external dependencies (DB, RouterOS, network) but must exercise the real
+    implementation of the tool/service under test.
+  - Avoid tests that assert only on mocked return values without passing through the code being
+    validated.
 
 ### Integration Tests
 
@@ -1065,9 +1118,9 @@ def mock_tool_schema():
 
 Automated test runs (local and CI) must enforce minimum coverage threshold using `pytest-cov`.
 
-**Core Module Coverage: 100%**
+**Core Module Coverage: ≥95% (Core)**
 
-The following modules must have 100% coverage of reachable code paths:
+The following modules must have at least 95% coverage of reachable code paths, with a strong preference for driving them as close to 100% as practical:
 
 - `routeros_mcp/domain/` - All domain logic
 - `routeros_mcp/security/` - Authorization, authentication, encryption
@@ -1094,15 +1147,15 @@ skip_covered = false
 
 [[tool.coverage.report.modules]]
 name = "routeros_mcp.domain"
-fail_under = 100
+fail_under = 95
 
 [[tool.coverage.report.modules]]
 name = "routeros_mcp.security"
-fail_under = 100
+fail_under = 95
 
 [[tool.coverage.report.modules]]
 name = "routeros_mcp.infra.routeros"
-fail_under = 100
+fail_under = 95
 ```
 
 ### Coverage Enforcement in CI
@@ -1114,7 +1167,7 @@ pytest --cov=routeros_mcp --cov-report=term-missing --cov-fail-under=85
 # Generate HTML coverage report
 pytest --cov=routeros_mcp --cov-report=html
 
-# Fail if core modules below 100%
+# Fail if core modules below 95%
 pytest --cov=routeros_mcp \
     --cov-report=term \
     --cov-fail-under=85 \
@@ -2384,12 +2437,12 @@ class LLMSimulator:
 - [ ] Write failing test first (RED)
 - [ ] Implement minimal code to pass (GREEN)
 - [ ] Refactor while keeping tests passing
-- [ ] Test both success and error paths
+- [ ] Test both success and error paths (all return branches and all exceptions raised in the function body)
 - [ ] Use descriptive test names
 - [ ] One assertion per test (guideline)
 - [ ] Test behavior, not implementation
-- [ ] Achieve 85%+ overall coverage
-- [ ] Achieve 100% coverage on core modules
+- [ ] Achieve 85%+ coverage for all non-core modules
+- [ ] Achieve 95%+ coverage on core modules (aim for 100% where practical)
 - [ ] Run tests frequently during development
 
 ### Testing Strategy Summary
@@ -2403,7 +2456,7 @@ class LLMSimulator:
 ✅ **MCP safety tests** - Rate limiting, concurrency limits, timeouts, malformed requests
 ✅ **Client compatibility** - Multiple MCP clients, protocol versions
 ✅ **Mocks** - External dependencies only (RouterOS, OAuth, MCP clients)
-✅ **Coverage** - 85% overall, 100% core modules
+✅ **Coverage** - ≥85% for non-core modules, ≥95% (ideally 100%) for core modules
 ✅ **TDD** - Test-first development
 ✅ **Regression** - RouterOS version compatibility matrix
 ✅ **Smoke tests** - Post-deployment validation

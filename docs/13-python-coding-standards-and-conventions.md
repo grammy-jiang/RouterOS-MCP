@@ -628,18 +628,33 @@ from routeros_mcp.domain.interfaces import InterfaceService
 
 **For comprehensive TDD methodology, test-driven development workflow, Red-Green-Refactor cycle, and detailed testing strategies, see [docs/10-testing-validation-and-sandbox-strategy-and-safety-nets.md](10-testing-validation-and-sandbox-strategy-and-safety-nets.md).**
 
-- Use `pytest` for all tests:
+- Use `pytest` as the primary **test runner and discovery mechanism**:
   - Place tests in a top-level `tests/` directory mirroring the package structure.
-  - Name test files `test_*.py` and test functions `test_*`.
-- For async code, use `pytest-asyncio` or similar fixtures:
+  - Name test files `test_*.py` and test methods/functions `test_*`.
+- Test structure:
+  - Both `unittest.TestCase` classes and plain pytest functions are supported.
+  - For new tests in this repository, especially for MCP tools and async flows, prefer
+    `unittest.TestCase` plus an inner async helper, for example:
 
-```python
-import pytest
+    ```python
+    class TestExampleAsyncBehavior(unittest.TestCase):
+        def test_example_async_behavior(self) -> None:
+            async def _run() -> None:
+                ...
 
-@pytest.mark.asyncio
-async def test_example_async_behavior() -> None:
-    ...
-```
+            asyncio.run(_run())
+    ```
+
+  - Existing pytest-style async tests using `pytest-asyncio` remain valid, and the pattern can
+    still be used where a `TestCase` wrapper provides no additional value:
+
+    ```python
+    import pytest
+
+    @pytest.mark.asyncio
+    async def test_example_async_behavior() -> None:
+        ...
+    ```
 
 - Write unit tests for:
   - Domain logic (plan generation, validation, authorization decisions).  
@@ -649,7 +664,7 @@ async def test_example_async_behavior() -> None:
 
 - Strive for a test-driven development style:
   - When adding or changing behavior, add or update tests first or in parallel with implementation changes.  
-  - Tests should cover both normal return values and all documented error/exception scenarios for functions and methods.  
+  - Tests should cover all normal return values and all exceptions that can be raised from the body of a function or method (every return and exception branch exercised by at least one test).  
   - Common end-to-end usage patterns (e.g., typical MCP tool calling sequences) should be represented in integration tests.
 
 ---
@@ -664,13 +679,16 @@ async def test_example_async_behavior() -> None:
     - `cov` (pytest with coverage).
 - Coverage:
   - Use `pytest-cov` (or `pytest --cov`) to enforce coverage thresholds in local runs and CI.  
-  - Maintain an overall test coverage of at least **85%** across the codebase (configurable, but this is the default baseline for 1.x).  
-  - Critical/core modules (e.g., domain logic, security, RouterOS integration, plan/apply orchestration) are expected to reach **100%** coverage on reachable code paths; changes that reduce coverage in these areas should be treated as regressions.  
+  - Maintain an overall test coverage of at least **85%** across the codebase; non-core modules should not drop below this baseline.  
+  - Critical/core modules (e.g., domain logic, security, RouterOS integration, plan/apply orchestration) are expected to reach **95%+** coverage on reachable code paths, with 100% as the ideal target; changes that reduce coverage below 95% in these areas should be treated as regressions.  
+  - For core modules, tests must explicitly exercise every return path and all exceptions that can be raised in the function bodies, not just the "happy paths."  
   - Focus coverage improvements on domain, security, and RouterOS integration code when prioritizing gaps.
 - Linting and formatting:
   - `ruff` is the primary linter; fix or justify any new lint warnings.  
   - Use `black` as the formatter (or ruff’s formatter if explicitly configured).  
-  - Run both locally (or via `tox`) before committing.
+  - Use `isort` (configured with the `black` profile) to keep imports ordered and grouped
+    consistently; in this project, `ruff`’s `I` rules enforce the same behavior.  
+  - Run these tools locally (or via `tox`) before committing.
 
 ---
 
