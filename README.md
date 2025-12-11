@@ -21,7 +21,7 @@ All design decisions for the 1.x line are captured in the [`docs/`](docs/) direc
 - ✅ **Environment Separation** – Lab, staging, production with capability flags
 - ✅ **Plan/Apply Workflows** – Safe multi-device operations with approvals
 - ✅ **Comprehensive Observability** – Structured logging, metrics, tracing
-- ✅ **Test-Driven Development** – 85% overall coverage, 100% core modules
+- ✅ **Test-Driven Development** – 85%+ coverage for non-core modules, 95%+ (aiming for 100%) for core modules, with tests exercising all return and exception paths
 
 ## Architecture Highlights
 
@@ -106,7 +106,7 @@ Detailed implementation guidelines:
 
 | Doc | Title | Description |
 |-----|-------|-------------|
-| [10](docs/10-testing-validation-and-sandbox-strategy-and-safety-nets.md) | Testing & Validation | TDD methodology, test layers, coverage targets (85% overall, 100% core) |
+| [10](docs/10-testing-validation-and-sandbox-strategy-and-safety-nets.md) | Testing & Validation | TDD methodology, test layers, coverage targets (≥85% non-core, ≥95% core, aiming for 100%) |
 | [11](docs/11-implementation-architecture-and-module-layout.md) | Implementation Architecture | Runtime stack, module layout, key classes |
 | [12](docs/12-development-environment-dependencies-and-commands.md) | Dev Environment & Dependencies | Python 3.11+, dependencies, common commands |
 | [13](docs/13-python-coding-standards-and-conventions.md) | Python Coding Standards | Type hints, async, testing conventions, style guide |
@@ -256,7 +256,14 @@ health_check_jitter_seconds: 5
 
 ### Next Steps
 
-**Note**: Full MCP server implementation (database, RouterOS clients, tools) will be added in subsequent tasks (T2+). For now, the CLI validates configuration and prepares the runtime environment.
+- Explore the design documents in `docs/`, especially:
+  - `docs/10-testing-validation-and-sandbox-strategy-and-safety-nets.md` for testing and coverage expectations.
+  - `docs/11-implementation-architecture-and-module-layout.md` and `PHASE1_IMPLEMENTATION_OVERVIEW.md` for how the current implementation maps to the design.
+- Run the automated test suite with coverage to validate changes:
+
+  ```bash
+  uv run pytest --cov=routeros_mcp
+  ```
 
 Future capabilities (implementation pending):
 
@@ -429,7 +436,7 @@ Each task includes:
 ### 5. Testing Strategy
 
 - Follow [docs/10](docs/10-testing-validation-and-sandbox-strategy-and-safety-nets.md)
-- Achieve 85%+ overall coverage, 100% for core modules
+- Achieve 85%+ coverage for non-core modules and 95%+ coverage for core modules (aim for 100% where practical)
 - Use MCP Inspector for tool validation
 - Test against real RouterOS lab devices
 - Validate LLM tool selection accuracy (90%+ target)
@@ -471,7 +478,7 @@ This design follows official MCP best practices from Anthropic:
 - Python 3.11+ with full type hints
 - Async/await throughout
 - Test-driven development
-- 85% overall coverage, 100% core modules
+- 85%+ coverage for non-core modules, 95%+ (targeting 100%) for core modules, and tests that cover all return and exception branches
 - Ruff + Black + mypy enforcement
 
 ## Community and Contrib
@@ -502,6 +509,6 @@ This design follows official MCP best practices from Anthropic:
 - **6 Phase-1 fallback tools** for tools-only client compatibility (ChatGPT, Mistral)
 - **20 design documents** (~50,000 lines) with comprehensive specifications
 - **3 security tiers** with OAuth 2.1 / OIDC integration
-- **85% test coverage target** (100% for core modules)
+- **Test coverage targets**: at least 85% for non-core modules and at least 95% (ideally 100%) for core modules
 
 For questions or contributions, please open an issue or discussion on GitHub.
