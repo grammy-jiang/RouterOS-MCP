@@ -87,6 +87,7 @@ dev = [
     # Linting and formatting
     "ruff>=0.2.0",
     "black>=24.1.0",
+    "isort>=5.13.0",
     
     # Development tools
     "ipython>=8.20.0",
@@ -212,6 +213,11 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["routeros_mcp"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["routeros_mcp"]
 
 [tool.black]
 line-length = 100
