@@ -904,7 +904,6 @@ except DeviceUnreachableError as e:
 - **MCP Best Practices**: [docs/best_practice/mcp_best_practices_merged.md](docs/best_practice/mcp_best_practices_merged.md)
 - **Design Documents**: [`docs/`](docs/) directory (20+ documents)
 - **Contributing Guide**: [CONTRIBUTING.md](CONTRIBUTING.md)
-- **Implementation Tasks**: [GITHUB-COPILOT-TASKS.md](GITHUB-COPILOT-TASKS.md)
 
 ## Summary
 
