@@ -757,13 +757,7 @@ async def system_get_overview(args: GetOverviewArgs) -> str:
     # 3. Call RouterOS via REST client
     result = await routeros_client.get_system_resource(device)
     
-    # 4. Write audit event
-    await audit_service.log_event(
-        tool_name="system/get-overview",
-        device_id=args.device_id,
-        result=result,
-        sensitive=False
-    )
+    # 4. Audit logging is handled automatically at the observability layer (not directly in tool implementations)
     
     # 5. Return formatted result
     return json.dumps(result, indent=2)
