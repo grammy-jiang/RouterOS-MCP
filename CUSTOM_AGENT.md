@@ -23,41 +23,59 @@
 Default loop: Write failing test → Implement minimum change → Refactor → Re-run checks
 
 ```python
-# Define the Pydantic model (data structure)
-class Interface(BaseModel):
-    """RouterOS network interface."""
-    id: str = Field(alias='.id')
-    name: str
-    type: str
-    running: bool  # Pydantic converts string 'true'/'false' to bool
-    
-    class Config:
-        populate_by_name = True
+# This is a SIMPLIFIED example to demonstrate TDD principles.
+# Actual codebase uses the register_*_tools() pattern (see "Common Patterns" section).
 
 # Step 1: Write the failing test FIRST (Red phase)
-async def test_get_interfaces_returns_interface_list(mock_api, mock_context):
-    """Test that get_interfaces returns all router interfaces."""
-    # Arrange: Set up mock to return RouterOS API response format
-    mock_api.get_resource.return_value.get.return_value = [
-        {'.id': '*1', 'name': 'ether1', 'type': 'ether', 'running': 'true'},  # RouterOS returns string
+async def test_get_interfaces_returns_formatted_result(mock_session, mock_settings):
+    """Test that get_interfaces returns properly formatted tool result."""
+    # Arrange: Mock service layer to return interface data
+    mock_interface_service = Mock()
+    mock_interface_service.list_interfaces.return_value = [
+        {'name': 'ether1', 'type': 'ether', 'running': True, 'disabled': False},
     ]
     
-    # Act: Call the function under test
-    result = await get_interfaces(mock_context)
+    # Act: Call the tool function
+    result = await get_interfaces(device_id="dev-lab-01")
     
-    # Assert: Verify expectations (Pydantic converts 'true' string to True boolean)
-    assert len(result) == 1
-    assert result[0].name == 'ether1'
-    assert result[0].running is True  # Now a proper boolean
+    # Assert: Verify format_tool_result() structure
+    assert "content" in result
+    assert "isError" in result
+    assert result["isError"] is False
+    assert "_meta" in result
+    assert len(result["_meta"]["interfaces"]) == 1
+    assert result["_meta"]["interfaces"][0]["name"] == "ether1"
 
 # Step 2: Then implement the minimum code to pass (Green phase)
+# Actual implementation uses register_interface_tools() pattern
 @mcp.tool()
-async def get_interfaces(ctx: Context) -> list[Interface]:
+async def get_interfaces(device_id: str) -> dict[str, Any]:
     """Get all network interfaces from the router."""
-    api = await get_connection(ctx)
-    raw = api.get_resource('/interface').get()
-    return [Interface.model_validate(i) for i in raw]  # Pydantic handles conversion
+    try:
+        async with session_factory.session() as session:
+            interface_service = InterfaceService(session, settings)
+            interfaces = await interface_service.list_interfaces(device_id)
+            
+            content = f"Found {len(interfaces)} interfaces"
+            return format_tool_result(
+                content=content,
+                meta={"interfaces": interfaces}
+            )
+    except Exception as e:
+        error = map_exception_to_error(e)
+        return format_tool_result(
+            content=error.message,
+            is_error=True,
+            meta=error.data
+        )
 ```
+
+**Key TDD principles:**
+- Write test BEFORE implementation (Red → Green → Refactor)
+- Test the actual return format (dict with content/isError/_meta)
+- Mock at service layer boundaries (not internal details)
+- See actual tool implementations in `routeros_mcp/mcp_tools/` for real patterns
+
 
 
 **2. Safety-First for Network Automation**
@@ -147,11 +165,13 @@ alembic downgrade -1
 ### Development Workflow (TDD-First)
 
 ```bash
-# 1. Create virtual environment
+# 1. Create virtual environment (uv recommended, or standard Python)
 uv venv .venv && source .venv/bin/activate
+# OR: python -m venv .venv && source .venv/bin/activate
 
 # 2. Install dependencies (editable mode with dev tools)
 uv pip install -e .[dev]
+# OR: pip install -e .[dev]
 
 # 3. Run smoke tests
 pytest tests/unit -q
@@ -723,108 +743,190 @@ Essential reading for custom agents (in suggested order):
 
 ### Tool Implementation Pattern
 
+**Actual pattern from `routeros_mcp/mcp_tools/system.py`:**
+
 ```python
-from pydantic import BaseModel
+from typing import Any
+from fastmcp import FastMCP
+from routeros_mcp.config import Settings
+from routeros_mcp.domain.services.device import DeviceService
+from routeros_mcp.domain.services.system import SystemService
+from routeros_mcp.infra.db.session import get_session_factory
+from routeros_mcp.mcp.errors import MCPError, map_exception_to_error
+from routeros_mcp.mcp.protocol.jsonrpc import format_tool_result
+from routeros_mcp.security.authz import ToolTier, check_tool_authorization
 
-# Assume mcp is a FastMCP instance created at module level:
-# from fastmcp import FastMCP
-# mcp = FastMCP("RouterOS-MCP")
+def register_system_tools(mcp: FastMCP, settings: Settings) -> None:
+    """Register system information tools with the MCP server."""
+    session_factory = get_session_factory(settings.database_url)
 
-class GetOverviewArgs(BaseModel):
-    device_id: str
-
-@mcp.tool()
-async def system_get_overview(args: GetOverviewArgs) -> str:
-    """Get comprehensive system overview for a RouterOS device.
-    
-    Use when:
-    - User asks "show me system info for device X"
-    - Need CPU, memory, uptime, RouterOS version
-    - Starting device diagnostics workflow
-    
-    Returns: System overview with version, uptime, resources, health.
-    """
-    # 1. Validate device exists and is accessible
-    device = await device_service.get_device(args.device_id)
-    
-    # 2. Check authorization (environment, capability flags)
-    await authz_service.check_tool_access(
-        tool_name="system/get-overview",
-        tier="fundamental",
-        device=device
-    )
-    
-    # 3. Call system service to get overview
-    result = await system_service.get_system_overview(args.device_id)
-    
-    # 4. Audit logging is handled automatically at the observability layer (not directly in tool implementations)
-    
-    # 5. Return formatted result
-    return json.dumps(result, indent=2)
+    @mcp.tool()
+    async def get_system_overview(device_id: str) -> dict[str, Any]:
+        """Get comprehensive system information.
+        
+        Use when: User asks "show me system status" or "what's the router's health?"
+        Returns: Identity, RouterOS version, uptime, hardware, CPU, memory, temperature.
+        """
+        try:
+            async with session_factory.session() as session:
+                # 1. Get services with session and settings
+                device_service = DeviceService(session, settings)
+                system_service = SystemService(session, settings)
+                
+                # 2. Validate device exists
+                device = await device_service.get_device(device_id)
+                
+                # 3. Check authorization (environment + capability flags)
+                check_tool_authorization(
+                    device_environment=device.environment,
+                    service_environment=settings.environment,
+                    tool_tier=ToolTier.FUNDAMENTAL,
+                    allow_advanced_writes=device.allow_advanced_writes,
+                    allow_professional_workflows=device.allow_professional_workflows,
+                    device_id=device_id,
+                    tool_name="system/get-overview",
+                )
+                
+                # 4. Call service layer (not RouterOS client directly)
+                overview = await system_service.get_system_overview(device_id)
+                
+                # 5. Format content for display
+                content = "\n".join([
+                    f"Device: {overview['device_name']}",
+                    f"Identity: {overview['system_identity']}",
+                    f"RouterOS: {overview['routeros_version']}",
+                    f"CPU: {overview['cpu_usage_percent']:.1f}%",
+                    f"Memory: {overview['memory_usage_percent']:.1f}%",
+                ])
+                
+                # 6. Return formatted result (dict, not JSON string)
+                return format_tool_result(
+                    content=content,
+                    meta=overview,  # Structured data in _meta
+                )
+                
+        except MCPError as e:
+            # MCPError already has proper error code
+            return format_tool_result(
+                content=e.message,
+                is_error=True,
+                meta=e.data,
+            )
+        except Exception as e:
+            # Map generic exceptions to MCPError
+            error = map_exception_to_error(e)
+            return format_tool_result(
+                content=error.message,
+                is_error=True,
+                meta=error.data,
+            )
 ```
+
+**Key points:**
+- Tools return `dict[str, Any]` (not `str`)
+- Use `register_*_tools()` pattern with closures over settings and session_factory
+- Call service layer (not RouterOS clients directly)
+- Use `format_tool_result()` for consistent response structure
+- Audit logging happens at observability layer (not in tools)
+- Use `check_tool_authorization()` function (not a service)
 
 ### Resource Provider Pattern
 
+**Note**: Resources are registered separately in `routeros_mcp/mcp_resources/` directory.
+
 ```python
-@mcp.resource("device://{device_id}/health")
-async def device_health(device_id: str) -> str:
-    """Real-time health metrics for a RouterOS device.
-    
-    Provides: CPU usage, memory usage, temperature, voltage, uptime.
-    Updated: Every 60 seconds by background job.
-    Safe for context: Yes (< 5KB response).
-    """
-    # Read from cache (updated by background job)
-    health_data = await cache_service.get_device_health(device_id)
-    
-    return json.dumps({
-        "device_id": device_id,
-        "timestamp": health_data.timestamp.isoformat(),
-        "cpu_usage_percent": health_data.cpu_usage,
-        "memory_usage_percent": health_data.memory_usage,
-        "temperature_celsius": health_data.temperature,
-        "voltage": health_data.voltage,
-        "uptime_seconds": health_data.uptime
-    })
+# In routeros_mcp/mcp_resources/device.py
+from fastmcp import FastMCP
+from routeros_mcp.config import Settings
+from routeros_mcp.domain.services.health import HealthService
+from routeros_mcp.infra.db.session import get_session_factory
+
+def register_device_resources(mcp: FastMCP, settings: Settings) -> None:
+    """Register device resources with the MCP server."""
+    session_factory = get_session_factory(settings.database_url)
+
+    @mcp.resource("device://{device_id}/health")
+    async def device_health(device_id: str) -> str:
+        """Real-time health metrics for a RouterOS device.
+        
+        Provides: CPU usage, memory usage, temperature, voltage, uptime.
+        Updated: Every 60 seconds by background job.
+        Safe for context: Yes (< 5KB response).
+        """
+        async with session_factory.session() as session:
+            # Health data comes from database (updated by background job)
+            health_service = HealthService(session, settings)
+            health_data = await health_service.get_latest_health(device_id)
+            
+            # Return JSON string for resource content
+            return json.dumps({
+                "device_id": device_id,
+                "timestamp": health_data.timestamp.isoformat(),
+                "cpu_usage_percent": health_data.cpu_usage,
+                "memory_usage_percent": health_data.memory_usage,
+                "temperature_celsius": health_data.temperature,
+                "uptime_seconds": health_data.uptime,
+            })
+
+# In your MCP server startup (e.g., routeros_mcp/main.py)
+from routeros_mcp.mcp_resources.device import register_device_resources
+
+mcp = FastMCP("RouterOS-MCP")
+register_device_resources(mcp, settings)
 ```
 
-> **Resource Registration Pattern**
->
-> Defining a resource with `@mcp.resource(...)` is not sufficient to make it available to the MCP server. You must also register your resource(s) using a registration function, typically in the `routeros_mcp/mcp_resources/` directory. For example:
->
-> ```python
-> # In routeros_mcp/mcp_resources/device_resources.py
-> from routeros_mcp.mcp import MCPServer
-> 
-> def register_device_resources(mcp: MCPServer):
->     mcp.resource("device://{device_id}/health")(device_health)
->     # Register other device resources here
-> 
-> # In your MCP server startup (e.g., routeros_mcp/main.py)
-> from routeros_mcp.mcp_resources.device_resources import register_device_resources
-> 
-> mcp = MCPServer()
-> register_device_resources(mcp)
-> ```
->
-> See the actual implementation files in `routeros_mcp/mcp_resources/` for more complete examples.
+**Key points:**
+- Resources are registered via `register_*_resources()` functions
+- Resource data typically comes from database (via service layer)
+- Resources return JSON strings (unlike tools which return dicts)
+- See actual implementations in `routeros_mcp/mcp_resources/`
+
 ### Error Handling Pattern
+
+**Actual pattern from `routeros_mcp/mcp_tools/system.py`:**
 
 ```python
 from routeros_mcp.mcp.errors import MCPError, map_exception_to_error
-from routeros_mcp.mcp_tools.util import format_tool_result
+from routeros_mcp.mcp.protocol.jsonrpc import format_tool_result
 
 try:
-    result = await device_service.execute_operation(device_id, operation)
-except Exception as exc:
-    # Map the exception to an MCPError (if possible)
-    mcp_error = map_exception_to_error(exc)
+    # Your tool logic here
+    result = await system_service.get_system_overview(device_id)
+    return format_tool_result(content=content, meta=result)
+    
+except MCPError as e:
+    # MCPError already has proper error code and message
     return format_tool_result(
+        content=e.message,
         is_error=True,
-        error=mcp_error,
-        suggestion="Check device ID and network connectivity, or use device/list-devices."
+        meta=e.data,
+    )
+except Exception as e:
+    # Map generic exceptions to MCPError
+    error = map_exception_to_error(e)
+    return format_tool_result(
+        content=error.message,
+        is_error=True,
+        meta=error.data,
     )
 ```
+
+**Available error classes in `routeros_mcp/mcp/errors.py`:**
+- `DeviceNotFoundError` - Device not found in registry
+- `DeviceUnreachableError` - Device not reachable/responding
+- `AuthenticationError` - RouterOS authentication failed
+- `AuthorizationError` - Insufficient permissions
+- `ValidationError` - Input validation failed
+- `MCPTimeoutError` - Operation timed out
+- `RouterOSError` - RouterOS API error
+- `CapabilityRequiredError` - Device capability flag not enabled
+- `EnvironmentMismatchError` - Device/service environment mismatch
+
+**Key points:**
+- Tools use `format_tool_result()` with `is_error=True` (not raising exceptions)
+- `map_exception_to_error()` converts generic exceptions to MCPError
+- Error handling is done within the tool function (try/except)
+- See actual error handling in `routeros_mcp/mcp_tools/system.py` lines 98-108
 
 ## Phase 1 Current Status
 
