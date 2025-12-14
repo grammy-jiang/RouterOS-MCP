@@ -527,7 +527,7 @@ When creating issues for agents, use this structure:
 - [Any other no-touch areas]
 
 ## How to Build & Test / 构建与测试
-\`\`\`bash
+```bash
 # Validate changes
 pytest tests/unit/test_[specific].py -v
 ruff check --fix routeros_mcp/[module]/
@@ -535,7 +535,7 @@ mypy routeros_mcp/[module]/
 
 # Verify specific behavior
 [Specific command or curl/API call that demonstrates success]
-\`\`\`
+```
 
 ## Design References / 设计参考
 - Design doc: [docs/XX-relevant-design.md](docs/XX-relevant-design.md)
@@ -579,14 +579,14 @@ The `device/list-devices` tool returns 500 error when database has devices with 
 - Other device tools (list-devices only)
 
 ## How to Build & Test
-\`\`\`bash
+```bash
 # Quick validation
 pytest tests/unit/test_device_tools.py -v
 pytest tests/unit/test_device_service.py -v
 
 # Verify tool works via MCP
 # (requires MCP Inspector or manual test with Claude Desktop)
-\`\`\`
+```
 
 ## Design References
 - Tool specification: [docs/04-mcp-tools-interface-and-json-schema-specification.md#devicelist-devices](docs/04-mcp-tools-interface-and-json-schema-specification.md)
