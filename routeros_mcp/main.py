@@ -152,10 +152,9 @@ def main() -> int:  # pragma: no cover
                 server = await create_mcp_server(settings)
                 await server.start()
 
-            # Ensure an event loop exists for environments where asyncio.get_event_loop()
-            # would otherwise fail (e.g. Python 3.13 tests that monkeypatch asyncio.run).
+            # Ensure an event loop exists without using deprecated get_event_loop()
             try:
-                asyncio.get_event_loop()
+                asyncio.get_running_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)

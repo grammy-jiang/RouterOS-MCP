@@ -26,7 +26,7 @@ def register_system_tools(mcp: FastMCP, settings: Settings) -> None:
         mcp: FastMCP instance
         settings: Application settings
     """
-    session_factory = get_session_factory(settings.database_url)
+    session_factory = get_session_factory(settings)
 
     @mcp.tool()
     async def get_system_overview(device_id: str) -> dict[str, Any]:
@@ -88,6 +88,14 @@ def register_system_tools(mcp: FastMCP, settings: Settings) -> None:
                     f"Uptime: {overview['uptime_formatted']}",
                 ]
 
+                # Indicate transport/fallback to surface REST failures
+                transport = overview.get("transport", "rest")
+                if overview.get("fallback_used"):
+                    rest_err = overview.get("rest_error") or "rest failed"
+                    content_parts.append(f"Transport: {transport} (REST fallback: {rest_err})")
+                else:
+                    content_parts.append(f"Transport: {transport}")
+
                 content = "\n".join(content_parts)
 
                 return format_tool_result(
@@ -111,18 +119,21 @@ def register_system_tools(mcp: FastMCP, settings: Settings) -> None:
 
     @mcp.tool()
     async def get_system_packages(device_id: str) -> dict[str, Any]:
-        """List all installed RouterOS packages and their versions.
+        """List RouterOS packages (installed + available) without losing information.
 
         Use when:
-        - User asks "what packages are installed?" or "what version is wireless package?"
+        - User asks "what packages are installed?" or "what packages are available?"
         - Verifying software capabilities before attempting feature-specific operations
         - Troubleshooting missing features (checking if required package is installed)
         - Auditing software inventory across fleet
-        - Planning package upgrades
 
-        Returns: List of packages with name, version, build time, and disabled status.
+        Returns: List of packages including both installed packages (with version/build time)
+        and available-but-not-installed packages (typically flagged XA), including size when
+        present.
 
-        Note: Does not show available upgrades (use RouterOS upgrade tools for that).
+        Notes:
+        - This is read-only and does not install/upgrade packages.
+        - RouterOS REST output may omit available packages; SSH parsing is used as fallback.
 
         Args:
             device_id: Device identifier (e.g., 'dev-lab-01')
@@ -152,7 +163,13 @@ def register_system_tools(mcp: FastMCP, settings: Settings) -> None:
                 # Get packages
                 packages = await system_service.get_system_packages(device_id)
 
-                content = f"Found {len(packages)} installed packages"
+                installed_count = sum(1 for p in packages if p.get("installed"))
+                available_count = sum(1 for p in packages if p.get("available") and not p.get("installed"))
+
+                content = (
+                    f"Found {len(packages)} total packages "
+                    f"({installed_count} installed, {available_count} available)"
+                )
 
                 return format_tool_result(
                     content=content,
@@ -160,6 +177,8 @@ def register_system_tools(mcp: FastMCP, settings: Settings) -> None:
                         "device_id": device_id,
                         "packages": packages,
                         "total_count": len(packages),
+                        "installed_count": installed_count,
+                        "available_count": available_count,
                     },
                 )
 
@@ -216,27 +235,50 @@ def register_system_tools(mcp: FastMCP, settings: Settings) -> None:
                     tool_name="system/get-clock",
                 )
 
-                # Get clock info
-                client = await device_service.get_rest_client(device_id)
-                try:
-                    clock_data = await client.get("/rest/system/clock")
+                system_service = SystemService(session, settings)
 
-                    time_str = clock_data.get("time", "")
-                    timezone = clock_data.get("time-zone-name", "UTC")
+                # Get clock info with REST→SSH fallback
+                clock_data = await system_service.get_system_clock(device_id)
 
-                    content = f"System time: {time_str} {timezone}"
+                # Extract clock fields (handle both hyphen and underscore variants)
+                date_str = clock_data.get("date", "")
+                time_str = clock_data.get("time", "")
+                timezone = clock_data.get("time-zone-name") or clock_data.get("time_zone_name", "Unknown")
+                gmt_offset = clock_data.get("gmt-offset") or clock_data.get("gmt_offset", "")
+                dst_active = clock_data.get("dst-active") or clock_data.get("dst_active", "")
+                
+                content_parts = []
+                if date_str and time_str:
+                    content_parts.append(f"Date/Time: {date_str} {time_str}")
+                elif time_str:
+                    content_parts.append(f"Time: {time_str}")
+                
+                if timezone and timezone != "Unknown":
+                    content_parts.append(f"Timezone: {timezone}")
+                
+                if gmt_offset:
+                    content_parts.append(f"GMT Offset: {gmt_offset}")
+                
+                if dst_active:
+                    content_parts.append(f"DST Active: {dst_active}")
 
-                    return format_tool_result(
-                        content=content,
-                        meta={
-                            "device_id": device_id,
-                            "time": time_str,
-                            "time_zone_autodetect": clock_data.get("time-zone-autodetect", False),
-                            "time_zone_name": timezone,
-                        },
-                    )
-                finally:
-                    await client.close()
+                transport = clock_data.get("transport", "rest")
+                if clock_data.get("fallback_used"):
+                    rest_err = clock_data.get("rest_error") or "rest failed"
+                    content_parts.append(f"Transport: {transport} (REST fallback: {rest_err})")
+                else:
+                    content_parts.append(f"Transport: {transport}")
+
+                content = "\n".join(content_parts)
+
+                return format_tool_result(
+                    content=content,
+                    meta={
+                        "device_id": device_id,
+                        "time_zone_name": timezone,
+                        **clock_data,
+                    },
+                )
 
         except MCPError as e:
             return format_tool_result(

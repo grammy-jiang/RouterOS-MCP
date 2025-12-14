@@ -26,7 +26,7 @@ def register_routing_tools(mcp: FastMCP, settings: Settings) -> None:
         mcp: FastMCP instance
         settings: Application settings
     """
-    session_factory = get_session_factory(settings.database_url)
+    session_factory = get_session_factory(settings)
 
     @mcp.tool()
     async def get_routing_summary(device_id: str) -> dict[str, Any]:
@@ -145,7 +145,41 @@ def register_routing_tools(mcp: FastMCP, settings: Settings) -> None:
                 # Get route
                 route = await routing_service.get_route(device_id, route_id)
 
-                content = f"Route: {route['dst_address']} via {route['gateway']}"
+                if not route:
+                    # Provide helpful message if route not found
+                    # First get the routing summary to see available routes
+                    summary = await routing_service.get_routing_summary(device_id)
+                    route_count = summary.get("total_routes", 0)
+                    
+                    if route_count > 0:
+                        return format_tool_result(
+                            content=(
+                                f"Route {route_id} not found on {device_id}. "
+                                f"Device has {route_count} routes. "
+                                f"Use routing/get-summary to see available routes."
+                            ),
+                            is_error=False,
+                            meta={
+                                "device_id": device_id,
+                                "route_id": route_id,
+                                "found": False,
+                                "available_routes": route_count,
+                            },
+                        )
+                    else:
+                        return format_tool_result(
+                            content=f"No routes found on {device_id}",
+                            is_error=False,
+                            meta={
+                                "device_id": device_id,
+                                "found": False,
+                            },
+                        )
+
+                # Safely access route keys
+                dst_address = route.get("dst_address", "")
+                gateway = route.get("gateway", "")
+                content = f"Route: {dst_address} via {gateway}"
 
                 return format_tool_result(
                     content=content,

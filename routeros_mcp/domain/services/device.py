@@ -5,7 +5,9 @@ and connectivity checks. Abstracts database and RouterOS client details.
 """
 
 import logging
+import time
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +23,21 @@ from routeros_mcp.domain.models import (
 )
 from routeros_mcp.infra.db.models import Credential as CredentialORM
 from routeros_mcp.infra.db.models import Device as DeviceORM
+from routeros_mcp.infra.routeros.exceptions import (
+    RouterOSAuthenticationError,
+    RouterOSAuthorizationError,
+    RouterOSClientError,
+    RouterOSNetworkError,
+    RouterOSNotFoundError,
+    RouterOSSSHAuthenticationError,
+    RouterOSSSHCommandNotAllowedError,
+    RouterOSSSHError,
+    RouterOSSSHTimeoutError,
+    RouterOSServerError,
+    RouterOSTimeoutError,
+)
 from routeros_mcp.infra.routeros.rest_client import RouterOSRestClient
+from routeros_mcp.infra.routeros.ssh_client import RouterOSSSHClient
 from routeros_mcp.mcp.errors import (
     AuthenticationError,
     DeviceNotFoundError,
@@ -31,6 +47,9 @@ from routeros_mcp.mcp.errors import (
 from routeros_mcp.security.crypto import decrypt_string, encrypt_string
 
 logger = logging.getLogger(__name__)
+
+REST_KIND = "rest"
+SSH_KIND = "ssh"
 
 
 class DeviceService:
@@ -50,20 +69,21 @@ class DeviceService:
             device = await service.register_device(DeviceCreate(
                 id="dev-lab-01",
                 name="router-lab-01",
-                management_address="192.168.1.1:443",
+                management_ip="192.168.1.1",
+                management_port=443,
                 environment="lab",
             ))
 
             # Add credentials
             await service.add_credential(CredentialCreate(
                 device_id="dev-lab-01",
-                kind="routeros_rest",
+                credential_type="rest",
                 username="admin",
                 password="secret",
             ))
 
             # Check connectivity
-            is_reachable = await service.check_connectivity("dev-lab-01")
+            is_reachable, meta = await service.check_connectivity("dev-lab-01")
     """
 
     def __init__(
@@ -121,8 +141,9 @@ class DeviceService:
         # Create device ORM instance
         device_orm = DeviceORM(
             id=device_data.id,
-            name=device_data.name,
-            management_address=device_data.management_address,
+            name=device_data.name or device_data.id,
+            management_ip=device_data.management_ip,
+            management_port=device_data.management_port,
             environment=device_data.environment,
             status="pending",
             tags=device_data.tags,
@@ -266,9 +287,9 @@ class DeviceService:
 
         # Create credential
         credential_orm = CredentialORM(
-            id=f"cred-{credential_data.device_id}-{credential_data.kind}",
+            id=f"cred-{credential_data.device_id}-{credential_data.credential_type}",
             device_id=credential_data.device_id,
-            kind=credential_data.kind,
+            credential_type=credential_data.credential_type,
             username=credential_data.username,
             encrypted_secret=encrypted_secret,
             active=True,
@@ -281,7 +302,7 @@ class DeviceService:
             "Added credential",
             extra={
                 "device_id": credential_data.device_id,
-                "kind": credential_data.kind,
+                "credential_type": credential_data.credential_type,
                 "username": credential_data.username,
             },
         )
@@ -316,11 +337,11 @@ class DeviceService:
         """
         device = await self.get_device(device_id)
 
-        # Get REST credentials
+        # Get REST credentials (no fallback)
         result = await self.session.execute(
             select(CredentialORM).where(
                 CredentialORM.device_id == device_id,
-                CredentialORM.kind == "routeros_rest",
+                CredentialORM.credential_type == REST_KIND,
                 CredentialORM.active == True,  # noqa: E712
             )
         )
@@ -344,20 +365,62 @@ class DeviceService:
                 data={"device_id": device_id},
             )
 
-        # Parse management address
-        host_port = device.management_address.rsplit(":", 1)
-        host = host_port[0]
-        port = int(host_port[1]) if len(host_port) > 1 else 443
-
-        # Create client
+        # Create client using separate IP and port fields
         client = RouterOSRestClient(
-            host=host,
-            port=port,
+            host=device.management_ip,
+            port=device.management_port,
             username=credential.username,
             password=password,
             timeout_seconds=self.settings.routeros_rest_timeout_seconds,
             max_retries=self.settings.routeros_retry_attempts,
-            verify_ssl=False,  # RouterOS often uses self-signed certs
+            verify_ssl=self.settings.routeros_verify_ssl,
+        )
+
+        return client
+
+    async def get_ssh_client(
+        self,
+        device_id: str,
+    ) -> RouterOSSSHClient:
+        """Get SSH client for device with decrypted credentials.
+
+        Caller must close the returned client (`await client.close()`).
+        """
+        device = await self.get_device(device_id)
+
+        result = await self.session.execute(
+            select(CredentialORM).where(
+                CredentialORM.device_id == device_id,
+                CredentialORM.credential_type == SSH_KIND,
+                CredentialORM.active == True,  # noqa: E712
+            )
+        )
+        credential = result.scalar_one_or_none()
+
+        if not credential:
+            raise AuthenticationError(
+                f"No active SSH credentials found for device '{device_id}'",
+                data={"device_id": device_id},
+            )
+
+        try:
+            password = decrypt_string(
+                credential.encrypted_secret,
+                self.settings.encryption_key,
+            )
+        except Exception as e:
+            raise AuthenticationError(
+                f"Failed to decrypt SSH credentials for device '{device_id}': {e}",
+                data={"device_id": device_id},
+            )
+
+        client = RouterOSSSHClient(
+            host=device.management_ip,
+            port=22,
+            username=credential.username,
+            password=password,
+            timeout_seconds=self.settings.routeros_rest_timeout_seconds,
+            max_retries=self.settings.routeros_retry_attempts,
         )
 
         return client
@@ -365,33 +428,109 @@ class DeviceService:
     async def check_connectivity(
         self,
         device_id: str,
-    ) -> bool:
-        """Check if device is reachable via REST API.
+    ) -> tuple[bool, dict[str, Any]]:
+        """Check device reachability.
 
-        Args:
-            device_id: Device identifier
-
-        Returns:
-            True if device is reachable
-
-        Raises:
-            DeviceNotFoundError: If device doesn't exist
+        Attempts REST first; on REST failure, falls back to a whitelisted SSH
+        read-only probe. Returns `(reachable, meta)` including which transport
+        succeeded/failed and classified failure reasons.
         """
+        rest_client: RouterOSRestClient | None = None
+        ssh_client: RouterOSSSHClient | None = None
+        rest_failure_reason: str | None = None
+        ssh_failure_reason: str | None = None
+        rest_time_ms: float | None = None
+        ssh_time_ms: float | None = None
+        rest_start: float | None = None
+        ssh_start: float | None = None
+        attempted_transports: list[str] = []
+        meta: dict[str, Any] = {
+            "device_id": device_id,
+            "attempts": self.settings.routeros_retry_attempts,
+            "timeout_seconds": self.settings.routeros_rest_timeout_seconds,
+        }
+
+        # --- REST attempt (primary, only if REST credential exists) ---
+        rest_credential_exists = await self.session.execute(
+            select(CredentialORM.id).where(
+                CredentialORM.device_id == device_id,
+                CredentialORM.credential_type == REST_KIND,
+                CredentialORM.active == True,  # noqa: E712
+            ).limit(1)
+        )
+        if rest_credential_exists.scalar_one_or_none():
+            attempted_transports.append("rest")
+            try:
+                rest_client = await self.get_rest_client(device_id)
+                rest_start = time.perf_counter()
+                await rest_client.get("/rest/system/resource")
+                rest_time_ms = (time.perf_counter() - rest_start) * 1000
+
+                await self.update_device(device_id, DeviceUpdate(status="healthy"))
+                result = await self.session.execute(
+                    select(DeviceORM).where(DeviceORM.id == device_id)
+                )
+                device_orm = result.scalar_one()
+                device_orm.last_seen_at = datetime.now(UTC)
+                await self.session.commit()
+
+                meta.update(
+                    {
+                        "reachable": True,
+                        "failure_reason": None,
+                        "transport": "rest",
+                        "fallback_used": False,
+                        "attempted_transports": attempted_transports,
+                        "rest_time_ms": rest_time_ms,
+                        "ssh_time_ms": ssh_time_ms,
+                    }
+                )
+                return True, meta
+
+            except RouterOSTimeoutError as e:
+                rest_failure_reason = "timeout"
+                meta["rest_error"] = str(e)
+            except RouterOSNetworkError as e:
+                rest_failure_reason = "network_error"
+                meta["rest_error"] = str(e)
+            except (RouterOSAuthenticationError, AuthenticationError) as e:
+                rest_failure_reason = "auth_failed"
+                meta["rest_error"] = str(e)
+            except RouterOSAuthorizationError as e:
+                rest_failure_reason = "authz_failed"
+                meta["rest_error"] = str(e)
+            except RouterOSNotFoundError as e:
+                rest_failure_reason = "not_found"
+                meta["rest_error"] = str(e)
+            except RouterOSClientError as e:
+                rest_failure_reason = "client_error"
+                meta["rest_error"] = str(e)
+                meta["status_code"] = getattr(e, "status_code", None)
+            except RouterOSServerError as e:
+                rest_failure_reason = "server_error"
+                meta["rest_error"] = str(e)
+                meta["status_code"] = getattr(e, "status_code", None)
+            except Exception as e:  # pragma: no cover - safety net
+                rest_failure_reason = "unknown"
+                meta["rest_error"] = str(e)
+            finally:
+                if rest_time_ms is None and rest_start is not None:
+                    rest_time_ms = (time.perf_counter() - rest_start) * 1000
+                if rest_client:
+                    try:
+                        await rest_client.close()
+                    except Exception:  # pragma: no cover - defensive
+                        logger.debug("Failed to close RouterOS REST client", exc_info=True)
+
+        # --- SSH fallback (secondary) ---
         try:
-            client = await self.get_rest_client(device_id)
+            attempted_transports.append("ssh")
+            ssh_client = await self.get_ssh_client(device_id)
+            ssh_start = time.perf_counter()
+            await ssh_client.execute("/system/resource/print")
+            ssh_time_ms = (time.perf_counter() - ssh_start) * 1000
 
-            # Try to get system resource
-            await client.get("/rest/system/resource")
-
-            # Update device status and last_seen_at
-            await self.update_device(
-                device_id,
-                DeviceUpdate(
-                    status="healthy",
-                ),
-            )
-
-            # Update last_seen_at directly (not part of DeviceUpdate)
+            await self.update_device(device_id, DeviceUpdate(status="healthy"))
             result = await self.session.execute(
                 select(DeviceORM).where(DeviceORM.id == device_id)
             )
@@ -399,19 +538,70 @@ class DeviceService:
             device_orm.last_seen_at = datetime.now(UTC)
             await self.session.commit()
 
-            await client.close()
-            return True
-
-        except Exception as e:
-            logger.warning(
-                "Device connectivity check failed",
-                extra={"device_id": device_id, "error": str(e)},
+            meta.update(
+                {
+                    "reachable": True,
+                    "failure_reason": None,
+                    "transport": "ssh",
+                    "fallback_used": True,
+                    "attempted_transports": attempted_transports,
+                    "rest_time_ms": rest_time_ms,
+                    "ssh_time_ms": ssh_time_ms,
+                }
             )
+            return True, meta
 
-            # Update device status to unreachable
-            await self.update_device(
-                device_id,
-                DeviceUpdate(status="unreachable"),
-            )
+        except AuthenticationError as e:
+            ssh_failure_reason = "auth_failed"
+            meta["ssh_error"] = str(e)
+        except RouterOSSSHAuthenticationError as e:
+            ssh_failure_reason = "auth_failed"
+            meta["ssh_error"] = str(e)
+        except RouterOSSSHTimeoutError as e:
+            ssh_failure_reason = "timeout"
+            meta["ssh_error"] = str(e)
+        except RouterOSSSHCommandNotAllowedError as e:
+            ssh_failure_reason = "client_error"
+            meta["ssh_error"] = str(e)
+        except RouterOSSSHError as e:
+            ssh_failure_reason = "network_error"
+            meta["ssh_error"] = str(e)
+        except Exception as e:  # pragma: no cover - safety net
+            ssh_failure_reason = "unknown"
+            meta["ssh_error"] = str(e)
+        finally:
+            if ssh_time_ms is None and ssh_start is not None:
+                ssh_time_ms = (time.perf_counter() - ssh_start) * 1000
+            if ssh_client:
+                try:
+                    await ssh_client.close()
+                except Exception:  # pragma: no cover - defensive
+                    logger.debug("Failed to close RouterOS SSH client", exc_info=True)
 
-            return False
+        failure_reason = ssh_failure_reason or rest_failure_reason or "unknown"
+
+        logger.warning(
+            "Device connectivity check failed",
+            extra={
+                "device_id": device_id,
+                "failure_reason": failure_reason,
+                "rest_error": meta.get("rest_error"),
+                "ssh_error": meta.get("ssh_error"),
+            },
+        )
+
+        await self.update_device(device_id, DeviceUpdate(status="unreachable"))
+
+        meta.update(
+            {
+                "reachable": False,
+                "failure_reason": failure_reason,
+                "transport": attempted_transports[-1] if attempted_transports else None,
+                "fallback_used": "ssh" in attempted_transports,
+                "attempted_transports": attempted_transports,
+                "rest_time_ms": rest_time_ms,
+                "ssh_time_ms": ssh_time_ms,
+            }
+        )
+
+        return False, meta

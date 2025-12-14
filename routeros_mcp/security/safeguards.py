@@ -56,13 +56,13 @@ def validate_mcp_owned_list(list_name: str) -> None:
 
 
 def check_management_ip_protection(
-    device_management_address: str,
+    device_management_ip: str,
     ip_to_remove: str,
 ) -> None:
     """Check if removing an IP would break management connectivity.
 
     Args:
-        device_management_address: Device's management address (host:port)
+        device_management_ip: Device's management IP address
         ip_to_remove: IP address being removed (CIDR format)
 
     Raises:
@@ -70,12 +70,12 @@ def check_management_ip_protection(
 
     Example:
         check_management_ip_protection(
-            "192.168.1.1:443",
+            "192.168.1.1",
             "192.168.1.1/24"  # Would raise error
         )
     """
-    # Extract host from management address (remove port)
-    mgmt_host = device_management_address.split(":")[0]
+    # Use IP directly (no longer need to parse host:port)
+    mgmt_host = device_management_ip
 
     try:
         # Parse management IP

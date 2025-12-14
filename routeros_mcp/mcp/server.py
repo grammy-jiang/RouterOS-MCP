@@ -15,7 +15,10 @@ from fastmcp import FastMCP
 from routeros_mcp.config import Settings
 from routeros_mcp.domain.services.health import HealthService
 from routeros_mcp.domain.services.system import SystemService
-from routeros_mcp.infra.db.session import get_session_factory
+from routeros_mcp.infra.db.session import (
+    get_session_factory,
+    initialize_session_manager,
+)
 from routeros_mcp.mcp.errors import MCPError, map_exception_to_error
 from routeros_mcp.mcp.protocol.jsonrpc import format_tool_result
 
@@ -88,7 +91,6 @@ require appropriate device capabilities and permissions.
         from routeros_mcp.mcp_tools import (
             register_config_tools,
             register_device_tools,
-            register_diagnostics_tools,
             register_dns_ntp_tools,
             register_firewall_logs_tools,
             register_firewall_write_tools,
@@ -216,7 +218,6 @@ require appropriate device capabilities and permissions.
         register_routing_tools(self.mcp, self.settings)
         register_firewall_logs_tools(self.mcp, self.settings)
         register_firewall_write_tools(self.mcp, self.settings)
-        register_diagnostics_tools(self.mcp, self.settings)
         register_config_tools(self.mcp, self.settings)
 
         logger.info("Registered all MCP tools")
@@ -301,9 +302,18 @@ require appropriate device capabilities and permissions.
 
             logger.info("MCP server running in stdio mode")
 
-            # Run FastMCP server (blocks until exit)
-            # Note: FastMCP.run() doesn't return a value, we call it for side effects
-            await self.mcp.run()  # noqa: PLE1111
+            # Run FastMCP server using the async stdio helper when available, otherwise fall back
+            # to a generic run() for test doubles that do not implement run_stdio_async.
+            run_stdio = getattr(self.mcp, "run_stdio_async", None)
+            if callable(run_stdio):
+                await run_stdio(
+                    show_banner=True,
+                    log_level=self.settings.log_level.lower(),
+                )
+            elif hasattr(self.mcp, "run"):
+                await self.mcp.run()
+            else:  # pragma: no cover - defensive branch
+                raise AttributeError("MCP instance missing run/run_stdio_async")
 
         else:
             raise NotImplementedError(

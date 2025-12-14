@@ -28,7 +28,7 @@ def register_audit_resources(
         settings: Application settings
     """
 
-    @mcp.resource("audit://events/recent")
+    @mcp.resource("audit://events/recent/{limit}")
     async def audit_events_recent(limit: int = 100) -> str:
         """Recent audit events across all devices.
 

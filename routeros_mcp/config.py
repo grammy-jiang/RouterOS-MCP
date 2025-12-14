@@ -141,6 +141,12 @@ class Settings(BaseSettings):
         default=1.0, ge=0.1, le=60.0, description="Exponential backoff base for retries"
     )
 
+    routeros_verify_ssl: bool = Field(
+        default=True,
+        description="Verify SSL certificates for RouterOS REST API. "
+        "Set to False for self-signed certificates (lab environments only)",
+    )
+
     # ========================================
     # Health Checks & Metrics
     # ========================================

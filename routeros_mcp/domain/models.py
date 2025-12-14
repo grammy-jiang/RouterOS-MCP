@@ -5,33 +5,58 @@ These are separate from SQLAlchemy ORM models to maintain clean separation
 between domain and infrastructure layers.
 """
 
+import ipaddress
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class DeviceCreate(BaseModel):
     """DTO for creating a new device."""
 
     id: str = Field(..., description="Unique device identifier (e.g., 'dev-lab-01')")
-    name: str = Field(..., description="Human-friendly device name")
-    management_address: str = Field(..., description="Management address (host:port)")
+    name: str | None = Field(default=None, description="Human-friendly device name")
+    management_ip: str = Field(..., description="Management IP address (IPv4 or IPv6)")
+    management_port: int = Field(default=443, ge=1, le=65535, description="Management port (1-65535)")
     environment: Literal["lab", "staging", "prod"] = Field(..., description="Environment")
     tags: dict[str, str] = Field(default_factory=dict, description="Device tags")
     allow_advanced_writes: bool = Field(default=False, description="Allow advanced writes")
     allow_professional_workflows: bool = Field(default=False, description="Allow professional workflows")
+
+    @field_validator("management_ip")
+    @classmethod
+    def validate_ip_address(cls, v: str) -> str:
+        """Validate IP address format (IPv4 or IPv6)."""
+        try:
+            ipaddress.ip_address(v)
+            return v
+        except ValueError:
+            raise ValueError(f"Invalid IP address: '{v}'. Must be a valid IPv4 or IPv6 address.")
 
 
 class DeviceUpdate(BaseModel):
     """DTO for updating device information."""
 
     name: str | None = None
-    management_address: str | None = None
+    management_ip: str | None = None
+    management_port: int | None = Field(default=None, ge=1, le=65535)
     tags: dict[str, str] | None = None
     allow_advanced_writes: bool | None = None
     allow_professional_workflows: bool | None = None
     status: Literal["healthy", "degraded", "unreachable", "pending", "decommissioned"] | None = None
+
+    @field_validator("management_ip")
+    @classmethod
+    def validate_ip_address(cls, v: str | None) -> str | None:
+        """Validate IP address format (IPv4 or IPv6)."""
+        if v is None:
+            return v
+        try:
+            ipaddress.ip_address(v)
+            return v
+        except ValueError:
+            raise ValueError(f"Invalid IP address: '{v}'. Must be a valid IPv4 or IPv6 address.")
 
 
 class Device(BaseModel):
@@ -39,7 +64,8 @@ class Device(BaseModel):
 
     id: str
     name: str
-    management_address: str
+    management_ip: str
+    management_port: int
     environment: Literal["lab", "staging", "prod"]
     status: Literal["healthy", "degraded", "unreachable", "pending", "decommissioned"]
     tags: dict[str, str]
@@ -67,7 +93,7 @@ class CredentialCreate(BaseModel):
     """DTO for creating device credentials."""
 
     device_id: str = Field(..., description="Device ID")
-    kind: Literal["routeros_rest", "routeros_ssh"] = Field(..., description="Credential type")
+    credential_type: Literal["rest", "ssh"] = Field(..., description="Credential type")
     username: str = Field(..., description="Username")
     password: str = Field(..., description="Password (will be encrypted)")
 

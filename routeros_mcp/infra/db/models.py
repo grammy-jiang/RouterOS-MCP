@@ -99,8 +99,12 @@ class Device(Base):
         String(255), nullable=False, unique=True, index=True, comment="Human-friendly device name"
     )
 
-    management_address: Mapped[str] = mapped_column(
-        String(255), nullable=False, comment="Management address (host:port)"
+    management_ip: Mapped[str] = mapped_column(
+        String(45), nullable=False, comment="Management IP address (IPv4 or IPv6)"
+    )
+
+    management_port: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=443, comment="Management port (1-65535)"
     )
 
     environment: Mapped[str] = mapped_column(
@@ -217,8 +221,8 @@ class Credential(Base):
         index=True,
     )
 
-    kind: Mapped[str] = mapped_column(
-        String(32), nullable=False, comment="Credential type: routeros_rest/routeros_ssh"
+    credential_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, comment="Credential type: rest/ssh"
     )
 
     username: Mapped[str] = mapped_column(
@@ -240,7 +244,7 @@ class Credential(Base):
     # Relationship
     device: Mapped["Device"] = relationship("Device", back_populates="credentials")
 
-    __table_args__ = (Index("idx_credential_device_kind", "device_id", "kind"),)
+    __table_args__ = (Index("idx_credential_device_credential_type", "device_id", "credential_type"),)
 
 
 class HealthCheck(Base):

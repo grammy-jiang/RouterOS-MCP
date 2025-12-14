@@ -26,7 +26,7 @@ def register_firewall_logs_tools(mcp: FastMCP, settings: Settings) -> None:
         mcp: FastMCP instance
         settings: Application settings
     """
-    session_factory = get_session_factory(settings.database_url)
+    session_factory = get_session_factory(settings)
 
     @mcp.tool()
     async def list_firewall_filter_rules(device_id: str) -> dict[str, Any]:
@@ -247,6 +247,9 @@ def register_firewall_logs_tools(mcp: FastMCP, settings: Settings) -> None:
         device_id: str,
         limit: int = 100,
         topics: list[str] | None = None,
+        start_time: str | None = None,
+        end_time: str | None = None,
+        message: str | None = None,
     ) -> dict[str, Any]:
         """Retrieve recent system logs with optional filtering.
 
@@ -263,6 +266,8 @@ def register_firewall_logs_tools(mcp: FastMCP, settings: Settings) -> None:
         Constraints:
         - Max 1000 entries per call (use limit parameter)
         - Filter by topics to narrow results (e.g., ["system", "error"])
+        - Optional time window (start_time/end_time, format e.g. "2025-12-11 22:52:33")
+        - Optional message substring match (case-insensitive)
         - Bounded query - cannot stream unlimited logs
 
         Tip: Start with small limit (e.g., 100) and specific topics to avoid overwhelming response.
@@ -271,6 +276,9 @@ def register_firewall_logs_tools(mcp: FastMCP, settings: Settings) -> None:
             device_id: Device identifier (e.g., 'dev-lab-01')
             limit: Maximum number of entries to return (default 100, max 1000)
             topics: Optional list of topics to filter by (e.g., ['system', 'error'])
+            start_time: Optional inclusive lower bound timestamp (string, best-effort parsed)
+            end_time: Optional inclusive upper bound timestamp (string, best-effort parsed)
+            message: Optional case-insensitive substring filter on message text
 
         Returns:
             Formatted tool result with log entries
@@ -296,7 +304,7 @@ def register_firewall_logs_tools(mcp: FastMCP, settings: Settings) -> None:
 
                 # Get recent logs
                 log_entries, total_count = await fw_logs_service.get_recent_logs(
-                    device_id, limit, topics
+                    device_id, limit, topics, start_time, end_time, message
                 )
 
                 content = f"Retrieved {len(log_entries)} log entries"

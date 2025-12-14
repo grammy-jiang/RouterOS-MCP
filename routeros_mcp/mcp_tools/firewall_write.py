@@ -26,7 +26,7 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
         mcp: FastMCP instance
         settings: Application settings
     """
-    session_factory = get_session_factory(settings.database_url)
+    session_factory = get_session_factory(settings)
 
     @mcp.tool()
     async def update_firewall_address_list(

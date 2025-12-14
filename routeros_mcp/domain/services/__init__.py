@@ -14,7 +14,6 @@ Services in this package:
 - DNSNTPService: DNS and NTP configuration operations
 - RoutingService: Routing table operations
 - FirewallLogsService: Firewall rules and system logs operations
-- DiagnosticsService: Network diagnostic operations (ping, traceroute)
 - PlanService: Plan/apply workflow for multi-device changes
 - JobService: Job execution and coordination
 """

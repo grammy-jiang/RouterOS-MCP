@@ -62,11 +62,11 @@ def register_device_resources(
                 device = await device_service.get_device(device_id)
 
                 # Get system overview
-                overview = await system_service.get_overview(device_id)
+                overview = await system_service.get_system_overview(device_id)
 
                 # Get current health
                 try:
-                    health = await health_service.get_current_health(device_id)
+                    health = await health_service.run_health_check(device_id)
                     health_data = {
                         "status": health.status,
                         "last_check": health.last_check_timestamp.isoformat()
@@ -85,7 +85,8 @@ def register_device_resources(
                     "device_id": device.id,
                     "name": device.name,
                     "environment": device.environment,
-                    "management_address": device.management_address,
+                    "management_ip": device.management_ip,
+                    "management_port": device.management_port,
                     "tags": device.tags or [],
                     "system": overview,
                     "health": health_data,
@@ -141,7 +142,7 @@ def register_device_resources(
                 device = await device_service.get_device(device_id)
 
                 # Get current health
-                health = await health_service.get_current_health(device_id)
+                health = await health_service.run_health_check(device_id)
 
                 result = {
                     "device_id": device.id,

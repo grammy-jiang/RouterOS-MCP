@@ -26,7 +26,7 @@ def register_ip_tools(mcp: FastMCP, settings: Settings) -> None:
         mcp: FastMCP instance
         settings: Application settings
     """
-    session_factory = get_session_factory(settings.database_url)
+    session_factory = get_session_factory(settings)
 
     @mcp.tool()
     async def list_ip_addresses(device_id: str) -> dict[str, Any]:
@@ -141,6 +141,10 @@ def register_ip_tools(mcp: FastMCP, settings: Settings) -> None:
                 # Get IP address
                 address = await ip_service.get_address(device_id, address_id)
 
+                # Defensive check for empty dict (should not happen with proper exception handling)
+                if not address or "address" not in address:
+                    raise ValueError(f"Address {address_id} not found or invalid response")
+
                 content = f"IP address {address['address']} on {address['interface']}"
 
                 return format_tool_result(
@@ -246,7 +250,7 @@ def register_ip_write_tools(mcp: FastMCP, settings: Settings) -> None:
         mcp: FastMCP instance
         settings: Application settings
     """
-    session_factory = get_session_factory(settings.database_url)
+    session_factory = get_session_factory(settings)
 
     @mcp.tool()
     async def add_secondary_ip_address(

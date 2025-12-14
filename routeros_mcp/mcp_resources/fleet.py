@@ -64,7 +64,7 @@ def register_fleet_resources(
 
                 for device in devices:
                     try:
-                        health = await health_service.get_current_health(device.id)
+                        health = await health_service.run_health_check(device.id)
 
                         if health.status == "healthy":
                             healthy_count += 1
@@ -153,14 +153,14 @@ def register_fleet_resources(
                     data={"error": str(e)},
                 )
 
-    @mcp.resource("fleet://devices")
+    @mcp.resource("fleet://devices/{environment}")
     async def fleet_devices(
-        environment: str | None = None,
+        environment: str = "all",
     ) -> str:
         """List of all managed devices with optional filtering.
 
         Args:
-            environment: Filter by environment (lab/staging/prod)
+            environment: Filter by environment (lab/staging/prod). Use "all" for no filter.
 
         Returns:
             JSON array of device summaries
@@ -173,8 +173,10 @@ def register_fleet_resources(
                 devices = await device_service.list_devices()
 
                 # Apply environment filter
-                if environment:
-                    devices = [d for d in devices if d.environment == environment]
+                env_filter = None if environment in (None, "", "all") else environment
+
+                if env_filter:
+                    devices = [d for d in devices if d.environment == env_filter]
 
                 # Build device summaries
                 device_summaries = [
@@ -182,7 +184,8 @@ def register_fleet_resources(
                         "device_id": d.id,
                         "name": d.name,
                         "environment": d.environment,
-                        "management_address": d.management_address,
+                        "management_ip": d.management_ip,
+                        "management_port": d.management_port,
                         "tags": d.tags or {},
                         "capability_flags": {
                             "allow_advanced_writes": getattr(d, "allow_advanced_writes", False),
@@ -198,7 +201,7 @@ def register_fleet_resources(
                     "devices": device_summaries,
                     "count": len(device_summaries),
                     "filters": {
-                        "environment": environment,
+                        "environment": env_filter,
                     },
                     "timestamp": datetime.now(UTC).isoformat(),
                 }

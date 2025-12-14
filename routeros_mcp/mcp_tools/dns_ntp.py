@@ -26,7 +26,7 @@ def register_dns_ntp_tools(mcp: FastMCP, settings: Settings) -> None:
         mcp: FastMCP instance
         settings: Application settings
     """
-    session_factory = get_session_factory(settings.database_url)
+    session_factory = get_session_factory(settings)
 
     @mcp.tool()
     async def get_dns_status(device_id: str) -> dict[str, Any]:

@@ -8,7 +8,7 @@ This package contains all MCP tool implementations organized by topic:
 - dns_ntp: DNS and NTP configuration
 - routing: Routing table operations
 - firewall_logs: Firewall rules and system logs
-- diagnostics: Network diagnostic tools (ping, traceroute)
+- diagnostics: Network diagnostics (ping, traceroute)
 - config: Multi-device configuration workflows (plan/apply)
 """
 

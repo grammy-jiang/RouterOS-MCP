@@ -25,7 +25,7 @@ def register_device_tools(mcp: FastMCP, settings: Settings) -> None:
         mcp: FastMCP instance
         settings: Application settings
     """
-    session_factory = get_session_factory(settings.database_url)
+    session_factory = get_session_factory(settings)
 
     @mcp.tool()
     async def list_devices(
@@ -77,7 +77,8 @@ def register_device_tools(mcp: FastMCP, settings: Settings) -> None:
                     devices_data.append({
                         "id": device.id,
                         "name": device.name,
-                        "management_address": device.management_address,
+                        "management_ip": device.management_ip,
+                        "management_port": device.management_port,
                         "environment": device.environment,
                         "status": device.status,
                         "routeros_version": device.routeros_version,
@@ -119,22 +120,7 @@ def register_device_tools(mcp: FastMCP, settings: Settings) -> None:
     async def check_connectivity(device_id: str) -> dict[str, Any]:
         """Verify if a device is reachable and responsive.
 
-        Use when:
-        - User asks "is device X reachable?" or "can you ping this router?"
-        - Troubleshooting connectivity issues before attempting configuration changes
-        - Validating device registration (checking if new device responds)
-        - Quick health check without full system overview
-        - Pre-flight check before plan execution
-
-        Returns: Reachability status, response time, RouterOS version.
-
-        Note: Lightweight check (only tests API connectivity, not full health).
-
-        Args:
-            device_id: Device identifier (e.g., 'dev-lab-01')
-
-        Returns:
-            Formatted tool result with connectivity status
+        Returns actionable guidance in failure cases (reason + suggestions).
         """
         try:
             async with session_factory.session() as session:
@@ -154,34 +140,91 @@ def register_device_tools(mcp: FastMCP, settings: Settings) -> None:
                     tool_name="device/check-connectivity",
                 )
 
-                # Check connectivity
-                import time
-                start_time = time.time()
-                is_reachable = await device_service.check_connectivity(device_id)
-                response_time_ms = (time.time() - start_time) * 1000
+                reachable, details = await device_service.check_connectivity(device_id)
 
-                if is_reachable:
-                    # Refresh device to get updated version
+                transport = details.get("transport") or "rest"
+                if transport == "ssh":
+                    response_time_ms = details.get("ssh_time_ms")
+                else:
+                    response_time_ms = details.get("rest_time_ms")
+
+                if response_time_ms is None:
+                    # Fallback to a generic total if provided (defensive)
+                    response_time_ms = details.get("response_time_ms")
+                if response_time_ms is None:
+                    response_time_ms = 0.0
+
+                failure_reason = details.get("failure_reason")
+                suggestions_map = {
+                    "timeout": [
+                        "Verify device is powered on and reachable on the management IP/port",
+                        "Check firewall or NAT rules blocking HTTPS/SSH to the device",
+                        "Increase routeros_rest_timeout_seconds for slow links",
+                    ],
+                    "network_error": [
+                        "Confirm DNS/IP/port are correct and reachable",
+                        "Check physical connectivity and routing to the device",
+                        "Inspect upstream firewalls for HTTPS/SSH blocks",
+                    ],
+                    "auth_failed": [
+                        "Validate username/password for the device",
+                        "Ensure credentials are active for RouterOS REST and SSH (if used)",
+                        "Rotate credentials if recently changed",
+                    ],
+                    "authz_failed": [
+                        "Verify user permissions for RouterOS REST",
+                        "Try an account with REST API rights",
+                    ],
+                    "client_error": [
+                        "Confirm REST API path is enabled on the device",
+                        "Check RouterOS version and REST API availability",
+                    ],
+                    "server_error": [
+                        "Retry later; device REST service may be overloaded",
+                        "Check device health or restart API service",
+                    ],
+                    "not_found": [
+                        "Confirm device registration and ID",
+                        "Ensure credentials exist for this device",
+                    ],
+                    "unknown": [
+                        "Review server logs for stack traces",
+                        "Validate device network access and credentials",
+                    ],
+                }
+
+                suggestions = suggestions_map.get(failure_reason, [])
+
+                if reachable:
                     device = await device_service.get_device(device_id)
-                    
+                    transport_label = "REST API" if transport == "rest" else "SSH fallback"
                     return format_tool_result(
-                        content=f"Device {device_id} is reachable",
+                        content=f"Device {device_id} is reachable via {transport_label}",
                         meta={
+                            **details,
                             "device_id": device_id,
                             "reachable": True,
                             "response_time_ms": round(response_time_ms, 2),
                             "routeros_version": device.routeros_version,
+                            "suggestions": [],
                         },
                     )
-                else:
-                    return format_tool_result(
-                        content=f"Device {device_id} is not reachable",
-                        is_error=True,
-                        meta={
-                            "device_id": device_id,
-                            "reachable": False,
-                        },
-                    )
+
+                return format_tool_result(
+                    content=(
+                        f"Device {device_id} is not reachable via REST/SSH"
+                        f" (reason: {failure_reason or 'unknown'})"
+                    ),
+                    is_error=True,
+                    meta={
+                        **details,
+                        "device_id": device_id,
+                        "reachable": False,
+                        "response_time_ms": round(response_time_ms, 2),
+                        "transport": transport,
+                        "suggestions": suggestions,
+                    },
+                )
 
         except MCPError as e:
             return format_tool_result(

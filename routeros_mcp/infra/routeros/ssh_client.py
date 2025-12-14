@@ -36,6 +36,26 @@ logger = logging.getLogger(__name__)
 ALLOWED_SSH_COMMANDS: Final[set[str]] = {
     "/export",  # Full configuration export
     "/export compact",  # Compact configuration export
+    "/system/resource/print",  # Read-only health probe (standard format: key: value)
+    "/system/package/print",  # Package listing (standard table format)
+    "/system/clock/print",  # Clock info (standard format: key: value)
+    "/system/identity/print",  # Identity (standard format: key: value)
+    "/interface/print",  # Interface listing (standard table format)
+    "/ip/address/print",  # IP address listing (standard table format)
+    "/ip/arp/print",  # ARP table (standard table format)
+    "/ip/firewall/filter/print",  # Firewall filter rules (standard table format)
+    "/ip/firewall/nat/print",  # NAT rules (standard table format)
+    "/ip/firewall/address-list/print",  # Address lists (standard table format)
+    "/log/print",  # System logs (standard table format)
+    "/system/logging/print",  # Logging configuration (standard table format)
+    "/ip/route/print",  # Routing table (standard table format)
+    "/ip/dns/print",  # DNS configuration (standard format: key: value)
+    "/system/ntp/client/print",  # NTP configuration (standard format: key: value)
+    "/ip/dns/cache/print",  # DNS cache (standard table format)
+    "/interface/monitor-traffic",  # Interface traffic statistics (with 'once' parameter)
+    "/ping",  # ICMP ping
+    "/tool/ping",  # ICMP ping via tool
+    "/tool/traceroute",  # Traceroute
 }
 
 
@@ -169,12 +189,21 @@ class RouterOSSSHClient:
         # Normalize command (strip leading/trailing whitespace)
         normalized_command = command.strip()
 
-        # Check whitelist
-        if normalized_command not in ALLOWED_SSH_COMMANDS:
-            raise RouterOSSSHCommandNotAllowedError(
-                f"SSH command not allowed: '{command}'. "
-                f"Allowed commands: {', '.join(ALLOWED_SSH_COMMANDS)}"
-            )
+        # Check whitelist - exact match or prefix match for parameterized commands
+        exact_match = normalized_command in ALLOWED_SSH_COMMANDS
+        if exact_match:
+            return
+        
+        # Allow prefix matching for commands with parameters
+        # e.g., "/interface/monitor-traffic ether1 once" matches "/interface/monitor-traffic"
+        for allowed_cmd in ALLOWED_SSH_COMMANDS:
+            if normalized_command.startswith(allowed_cmd + " "):
+                return
+        
+        raise RouterOSSSHCommandNotAllowedError(
+            f"SSH command not allowed: '{command}'. "
+            f"Allowed commands: {', '.join(ALLOWED_SSH_COMMANDS)}"
+        )
 
     async def execute(self, command: str) -> str:
         """Execute whitelisted SSH command.
