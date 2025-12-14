@@ -797,36 +797,18 @@ async def device_health(device_id: str) -> str:
 ### Error Handling Pattern
 
 ```python
-from routeros_mcp.mcp.errors import (
-    DeviceNotFoundError,
-    DeviceUnreachableError,
-    UnauthorizedError
-)
+from routeros_mcp.mcp.errors import MCPError, map_exception_to_error
+from routeros_mcp.mcp_tools.util import format_tool_result
 
 try:
     result = await device_service.execute_operation(device_id, operation)
-except DeviceNotFoundError as e:
-    # JSON-RPC error code -32602 (Invalid params)
-    raise MCPError(
-        code=-32602,
-        message="Invalid device_id",
-        data={
-            "mcp_error_code": "DEVICE_NOT_FOUND",
-            "device_id": device_id,
-            "suggestion": "Use device/list-devices to see available devices"
-        }
-    )
-except DeviceUnreachableError as e:
-    # JSON-RPC error code -32000 (Server error)
-    raise MCPError(
-        code=-32000,
-        message="Device unreachable",
-        data={
-            "mcp_error_code": "DEVICE_UNREACHABLE",
-            "device_id": device_id,
-            "management_address": e.management_address,
-            "suggestion": "Check network connectivity and device status"
-        }
+except Exception as exc:
+    # Map the exception to an MCPError (if possible)
+    mcp_error = map_exception_to_error(exc)
+    return format_tool_result(
+        is_error=True,
+        error=mcp_error,
+        suggestion="Check device ID and network connectivity, or use device/list-devices."
     )
 ```
 
