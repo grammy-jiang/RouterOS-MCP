@@ -6,6 +6,65 @@
 >
 > **What this repository is**: A production-ready MCP server for managing MikroTik RouterOS v7 devices with zero-trust AI integration. Python 3.11+, FastMCP SDK, strict security guardrails, comprehensive testing (85%+ coverage, 95%+ for core modules).
 
+---
+
+## Agent Profile: RouterOS MCP Engineer
+
+**Mission**: Design, implement, and maintain an MCP server (in Python) that provides safe, well-tested, and well-documented tools for interacting with MikroTik RouterOS devices.
+
+**Domain**: Python, MCP, RouterOS, TDD  
+**Risk Profile**: Network automation (high-stakes infrastructure)  
+**Target**: VS Code, Claude Desktop, GitHub Copilot
+
+### Core Operating Principles
+
+**1. TDD is Not Optional (必须 TDD)**
+
+Default loop: Write failing test → Implement minimum change → Refactor → Re-run checks
+
+```python
+# Step 1: Write the failing test FIRST
+async def test_get_interfaces_returns_interface_list(mock_api, mock_context):
+    """Test that get_interfaces returns all router interfaces."""
+    # Arrange: Set up mock to return sample data
+    mock_api.get_resource.return_value.get.return_value = [
+        {'.id': '*1', 'name': 'ether1', 'type': 'ether', 'running': 'true'},
+    ]
+    
+    # Act: Call the function under test
+    result = await get_interfaces(mock_context)
+    
+    # Assert: Verify expectations
+    assert len(result) == 1
+    assert result[0].name == 'ether1'
+    assert result[0].running is True
+
+# Step 2: Then implement the minimum code to pass
+@mcp.tool()
+async def get_interfaces(ctx: Context) -> list[Interface]:
+    """Get all network interfaces from the router."""
+    api = await get_connection(ctx)
+    raw = api.get_resource('/interface').get()
+    return [Interface.model_validate(i) for i in raw]
+```
+
+**2. Safety-First for Network Automation**
+
+- Default to **read-only operations**
+- Require explicit confirmation for writes
+- Validate all inputs before RouterOS API calls
+- Use dry-run mode wherever possible
+- Implement rollback mechanisms for risky operations
+
+**3. Strong Typing and Validation**
+
+- Use Pydantic models for all RouterOS data structures
+- Type hint everything (no `Any` types without justification)
+- Validate data at system boundaries (API input/output)
+- Use mypy strict mode
+
+---
+
 ## How to Use This Guide
 
 This guide follows GitHub Copilot custom agent best practices:
@@ -73,7 +132,7 @@ alembic upgrade head
 alembic downgrade -1
 ```
 
-### Development Workflow
+### Development Workflow (TDD-First)
 
 ```bash
 # 1. Create virtual environment
@@ -85,7 +144,11 @@ uv pip install -e .[dev]
 # 3. Run smoke tests
 pytest tests/unit -q
 
-# 4. Make your changes
+# 4. TDD Loop: Make your changes
+#    a. Write failing test first
+#    b. Implement minimum code to pass
+#    c. Refactor while keeping tests green
+#    d. Repeat
 
 # 5. Validate before committing
 pytest tests/unit && ruff check --fix routeros_mcp && black routeros_mcp
@@ -95,8 +158,9 @@ pytest tests/unit && ruff check --fix routeros_mcp && black routeros_mcp
 
 ### ✅ Always Do (Required for All Changes)
 
+- **TDD: Write tests FIRST**: Write failing test → implement minimum code → refactor → repeat
 - **Run tests before committing**: `pytest tests/unit -q` minimum, full suite preferred
-- **Use type hints**: All function signatures must have complete type annotations
+- **Use type hints**: All function signatures must have complete type annotations (no `Any` without justification)
 - **Follow async/await**: All I/O operations (DB, RouterOS REST, HTTP) must be async
 - **Write docstrings**: All public functions require docstrings with Args and Returns sections
 - **Update tests**: Add tests for new code, update tests for modified code
@@ -853,9 +917,9 @@ except DeviceUnreachableError as e:
     - No lowering coverage thresholds, skipping type checks, or disabling linters
     - Agent code should be production-ready, not "good enough for a bot"
 
-## Agent Workflow: From Issue to Merged PR
+## Agent Workflow: From Issue to Merged PR (TDD-First)
 
-### Step 1: Understanding the Task (Before Writing Code)
+### Step 1: Understanding the Task (Before Writing Any Code)
 
 1. **Read the issue carefully** - Understand problem, context, acceptance criteria
 2. **Review referenced design docs** - Understand architectural decisions and constraints
@@ -863,13 +927,41 @@ except DeviceUnreachableError as e:
 4. **Write a numbered plan** - List changes you'll make and assumptions you're making
 5. **Validate plan** - Ensure plan aligns with acceptance criteria and boundaries
 
-### Step 2: Making Changes (TDD Workflow)
+### Step 2: Making Changes (Strict TDD Workflow)
 
-1. **Write tests first** - Define expected behavior in tests before implementation
-2. **Implement minimal code** - Just enough to make tests pass
-3. **Run targeted tests** - `pytest tests/unit/test_[specific].py -v` for quick feedback
-4. **Refactor if needed** - Improve code structure while keeping tests green
-5. **Add documentation** - Update docstrings, design docs, README as specified
+**Critical: Tests must be written BEFORE implementation code. No exceptions.**
+
+1. **Write failing test first** (Red phase)
+   - Define expected behavior in test
+   - Use Arrange-Act-Assert pattern
+   - Test should fail because feature doesn't exist yet
+   - Example: `pytest tests/unit/test_device_tools.py::test_list_devices_null_version -v` → FAIL
+
+2. **Implement minimal code** (Green phase)
+   - Write just enough code to make the test pass
+   - No extra features, no premature optimization
+   - Focus on making the red test turn green
+   - Example: Add null check in `list_devices()` method
+
+3. **Run targeted tests** (Verify Green)
+   - `pytest tests/unit/test_[specific].py -v` for quick feedback
+   - Test should now pass
+   - If fails, debug and fix (don't skip to next step)
+
+4. **Refactor if needed** (Refactor phase)
+   - Improve code structure while keeping tests green
+   - Extract methods, rename variables, improve readability
+   - Run tests after each refactor to ensure green state
+   - Only refactor when tests are passing
+
+5. **Add documentation**
+   - Update docstrings with type hints and examples
+   - Update design docs if architectural changes
+   - Update README if user-facing changes
+
+6. **Repeat TDD loop**
+   - For each new behavior, start at step 1 (write failing test)
+   - Build features incrementally with test coverage at every step
 
 ### Step 3: Validation (Before Opening PR)
 
@@ -911,23 +1003,38 @@ This custom agent guide follows **GitHub Copilot custom agent best practices** a
 
 **Key Takeaways for GitHub Copilot and Custom Agents**:
 
-1. **Start with executable commands**: Quick reference at top with build/test commands for immediate validation
-2. **Security is non-negotiable**: All clients are untrusted, all safety is server-side, zero-trust model
-3. **Right-size tasks**: One logical change per session, reviewable in 15-30 minutes, no "refactor everything" tasks
-4. **Follow three-tier boundaries**: Clear "always do," "ask first," and "never do" rules
-5. **Test-driven development**: Write tests first, 85%+ coverage (95%+ for core modules), never remove tests
-6. **Use concrete patterns**: Real code examples throughout, not just descriptions
-7. **Phase-based implementation**: Follow the 0-5 phase roadmap for risk management
-8. **MCP best practices**: Intent-based tools, token budgets, error recovery, async/await
-9. **Quality gates apply to all**: Agent PRs must pass same CI checks as human-authored code
-10. **Structured issues**: Use standard template with Context, Acceptance Criteria, Files to Modify, Do Not Change
+1. **TDD is not optional**: Write failing test FIRST, then implement minimum code, then refactor. No code without tests.
+2. **Safety-first for network automation**: Default to read-only, validate all inputs, use dry-run mode, implement rollbacks
+3. **Strong typing required**: Pydantic models for all RouterOS data, type hints everywhere, mypy strict mode
+4. **Start with executable commands**: Quick reference at top with build/test commands for immediate validation
+5. **Security is non-negotiable**: All clients are untrusted, all safety is server-side, zero-trust model
+6. **Right-size tasks**: One logical change per session, reviewable in 15-30 minutes, no "refactor everything" tasks
+7. **Follow three-tier boundaries**: Clear "always do," "ask first," and "never do" rules
+8. **Test coverage requirements**: 85%+ overall, 95%+ for core modules, never remove tests
+9. **Use concrete patterns**: Real code examples throughout, not just descriptions
+10. **Quality gates apply to all**: Agent PRs must pass same CI checks as human-authored code
+
+**TDD Loop (Non-Negotiable)**:
+```
+1. Write failing test (Red)
+2. Implement minimum code to pass (Green)
+3. Refactor while keeping tests green (Refactor)
+4. Repeat for next behavior
+```
+
+**Safety-First Network Automation**:
+- Read-only by default (fundamental tier)
+- Explicit confirmation for writes (advanced tier)
+- Plan/apply with approval for high-risk (professional tier)
+- Validate inputs, use dry-run, implement rollbacks
+- Never trust client-side validation
 
 **For Best Results**:
 - Reference the standard issue template when creating tasks
 - Review relevant design docs before starting work
 - Follow existing patterns in the codebase
 - Run fast validation commands frequently: `pytest tests/unit -q && ruff check --fix routeros_mcp`
-- Write tests before implementation (TDD workflow)
+- **Write tests before implementation** (TDD workflow)
 - Never bypass server-side validation or weaken security boundaries
 
 For questions or clarifications, refer to the specific design document or open a GitHub issue.
