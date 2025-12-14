@@ -788,6 +788,26 @@ async def device_health(device_id: str) -> str:
     })
 ```
 
+> **Resource Registration Pattern**
+>
+> Defining a resource with `@mcp.resource(...)` is not sufficient to make it available to the MCP server. You must also register your resource(s) using a registration function, typically in the `routeros_mcp/mcp_resources/` directory. For example:
+>
+> ```python
+> # In routeros_mcp/mcp_resources/device_resources.py
+> from routeros_mcp.mcp import MCPServer
+> 
+> def register_device_resources(mcp: MCPServer):
+>     mcp.resource("device://{device_id}/health")(device_health)
+>     # Register other device resources here
+> 
+> # In your MCP server startup (e.g., routeros_mcp/main.py)
+> from routeros_mcp.mcp_resources.device_resources import register_device_resources
+> 
+> mcp = MCPServer()
+> register_device_resources(mcp)
+> ```
+>
+> See the actual implementation files in `routeros_mcp/mcp_resources/` for more complete examples.
 ### Error Handling Pattern
 
 ```python
