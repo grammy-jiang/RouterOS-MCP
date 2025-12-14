@@ -6,7 +6,7 @@ This document provides comprehensive guidance for custom agents working on the R
 
 ## Project Summary
 
-**RouterOS-MCP** is a production-ready MCP service for managing MikroTik RouterOS v7 devices with strong security guardrails, comprehensive audit logging, and AI-friendly tool interfaces. The service exposes safe, well-typed, auditable operations to AI tools (e.g., ChatGPT via Claude Desktop) and human operators.
+**RouterOS-MCP** is a production-ready MCP service for managing MikroTik RouterOS v7 devices with strong security guardrails, comprehensive audit logging, and AI-friendly tool interfaces. The service exposes safe, well-typed, auditable operations to AI tools (e.g., Claude Desktop, ChatGPT, VS Code Copilot) and human operators.
 
 ### Key Characteristics
 
@@ -229,22 +229,54 @@ Guided workflow templates:
 ### REST API Endpoints (41 Endpoints)
 
 **Read-only endpoints (25)**:
-- System: `/rest/system/resource`, `/rest/system/health`, `/rest/system/identity`, `/rest/system/clock`, `/rest/system/routerboard`, `/rest/system/package`
-- Interface: `/rest/interface`, `/rest/interface/ethernet`, `/rest/interface/vlan`, `/rest/interface/wireless`
-- IP: `/rest/ip/address`, `/rest/ip/arp`, `/rest/ip/firewall/address-list`, `/rest/ip/route`, `/rest/ip/dns`, `/rest/ip/dhcp-server`, `/rest/ip/dhcp-server/lease`
-- NTP: `/rest/system/ntp/client`, `/rest/system/ntp/server`
-- Firewall: `/rest/ip/firewall/filter`, `/rest/ip/firewall/nat`
-- Logs: `/rest/log`
-- Wireless: `/rest/interface/wireless/registration-table`
+- System:
+  - `/rest/system/resource`
+  - `/rest/system/health`
+  - `/rest/system/identity`
+  - `/rest/system/clock`
+  - `/rest/system/routerboard`
+  - `/rest/system/package`
+- Interface:
+  - `/rest/interface`
+  - `/rest/interface/ethernet`
+  - `/rest/interface/vlan`
+  - `/rest/interface/wireless`
+- IP:
+  - `/rest/ip/address`
+  - `/rest/ip/arp`
+  - `/rest/ip/firewall/address-list`
+  - `/rest/ip/route`
+  - `/rest/ip/dns`
+  - `/rest/ip/dhcp-server`
+  - `/rest/ip/dhcp-server/lease`
+- NTP:
+  - `/rest/system/ntp/client`
+  - `/rest/system/ntp/server`
+- Firewall:
+  - `/rest/ip/firewall/filter`
+  - `/rest/ip/firewall/nat`
+- Logs:
+  - `/rest/log`
+- Wireless:
+  - `/rest/interface/wireless/registration-table`
 
 **Advanced write endpoints (10)**:
-- System: `POST /rest/system/identity`, `PATCH /rest/interface/{id}`
-- DNS/NTP: `POST /rest/ip/dns`, `POST /rest/system/ntp/client`
-- Interface: `POST /rest/ip/address`
+- System:
+  - `POST /rest/system/identity`
+  - `PATCH /rest/interface/{id}`
+- DNS/NTP:
+  - `POST /rest/ip/dns`
+  - `POST /rest/system/ntp/client`
+- Interface:
+  - `POST /rest/ip/address`
 
 **High-risk endpoints (6)**:
-- Firewall: `POST /rest/ip/firewall/filter`, `DELETE /rest/ip/firewall/filter/{id}`
-- Routing: `POST /rest/ip/route`, `DELETE /rest/ip/route/{id}`
+- Firewall:
+  - `POST /rest/ip/firewall/filter`
+  - `DELETE /rest/ip/firewall/filter/{id}`
+- Routing:
+  - `POST /rest/ip/route`
+  - `DELETE /rest/ip/route/{id}`
 - **Note**: High-risk endpoints are professional-tier only, require plan/apply + approval tokens
 
 ### SSH Fallback
@@ -317,6 +349,8 @@ export ROUTEROS_MCP_ENCRYPTION_KEY="<base64-encoded-32-byte-key>"
 
 ## Key Design Documents
 
+> **Note**: All document paths are relative to the repository root. View this file from the repository root directory, or use the GitHub web interface for clickable links.
+
 Essential reading for custom agents (in suggested order):
 
 1. **[00-requirements-and-scope-specification.md](docs/00-requirements-and-scope-specification.md)**
@@ -364,8 +398,11 @@ Essential reading for custom agents (in suggested order):
 ### Tool Implementation Pattern
 
 ```python
-from fastmcp import FastMCP
 from pydantic import BaseModel
+
+# Assume mcp is a FastMCP instance created at module level:
+# from fastmcp import FastMCP
+# mcp = FastMCP("RouterOS-MCP")
 
 class GetOverviewArgs(BaseModel):
     device_id: str
@@ -577,9 +614,9 @@ alembic current
 
 ## Additional Resources
 
-- **MCP Specification**: https://modelcontextprotocol.io/
-- **FastMCP SDK**: https://github.com/jlowin/fastmcp
-- **RouterOS v7 REST API**: https://help.mikrotik.com/docs/display/ROS/REST+API
+- **MCP Specification**: https://spec.modelcontextprotocol.io/ (Official MCP protocol specification)
+- **FastMCP SDK**: https://github.com/jlowin/fastmcp (Python MCP SDK)
+- **RouterOS v7 REST API**: https://help.mikrotik.com/docs/display/ROS/REST+API (Official MikroTik documentation)
 - **Design Documents**: [`docs/`](docs/) directory (20+ documents)
 - **Contributing Guide**: [CONTRIBUTING.md](CONTRIBUTING.md)
 - **Implementation Tasks**: [GITHUB-COPILOT-TASKS.md](GITHUB-COPILOT-TASKS.md)
