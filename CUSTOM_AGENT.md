@@ -1,8 +1,133 @@
 # RouterOS-MCP Custom Agent Guide
 
+> **For GitHub Copilot Coding Agent**
+> 
+> This document provides comprehensive guidance for GitHub Copilot and other custom agents working on the RouterOS Model Context Protocol (MCP) Service. Following GitHub's official best practices, it synthesizes key information from the 20+ design documents in this repository to help you understand the system architecture, design principles, and implementation patterns.
+>
+> **What this repository is**: A production-ready MCP server for managing MikroTik RouterOS v7 devices with zero-trust AI integration. Python 3.11+, FastMCP SDK, strict security guardrails, comprehensive testing (85%+ coverage, 95%+ for core modules).
+
+## How to Use This Guide
+
+This guide follows GitHub Copilot custom agent best practices:
+
+1. **Executable commands are listed early** - See "Quick Reference" section below for immediate build/test commands
+2. **Concrete code examples** - Real implementation patterns throughout
+3. **Three-tier boundaries** - Clear "always do," "ask first," and "never do" rules
+4. **Complete tech stack** - All frameworks, libraries, and versions specified
+5. **Fast validation commands** - Targeted test commands, not just full suite
+
 ## Overview
 
-This document provides comprehensive guidance for custom agents working on the RouterOS Model Context Protocol (MCP) Service. It synthesizes key information from the 20+ design documents in this repository to help you understand the system architecture, design principles, and implementation patterns.
+## Quick Reference: Essential Commands
+
+> **⚡ Start here for fast validation**
+
+### Build and Run
+
+```bash
+# Start MCP server (STDIO mode for Claude Desktop)
+routeros-mcp --config config/lab.yaml
+
+# Debug mode with verbose logging
+routeros-mcp --debug --log-level DEBUG
+
+# With environment variables
+export ROUTEROS_MCP_ENVIRONMENT=lab
+export ROUTEROS_MCP_LOG_LEVEL=DEBUG
+routeros-mcp
+```
+
+### Fast Validation (Run These Before Committing)
+
+```bash
+# Quick unit tests only (fastest, ~20s)
+pytest tests/unit -q
+
+# Tests with coverage (preferred)
+pytest --cov=routeros_mcp --cov-report=html --cov-fail-under=85
+
+# Specific test file
+pytest tests/unit/test_config.py -v
+
+# Type check (strict mode)
+mypy routeros_mcp
+
+# Lint and auto-fix
+ruff check --fix routeros_mcp
+
+# Format code
+black routeros_mcp
+
+# All quality checks (what CI runs)
+ruff check routeros_mcp && black --check routeros_mcp && mypy routeros_mcp && pytest
+```
+
+### Database Migrations
+
+```bash
+# Create new migration
+alembic revision --autogenerate -m "Description"
+
+# Apply migrations
+alembic upgrade head
+
+# Rollback one migration
+alembic downgrade -1
+```
+
+### Development Workflow
+
+```bash
+# 1. Create virtual environment
+uv venv .venv && source .venv/bin/activate
+
+# 2. Install dependencies (editable mode with dev tools)
+uv pip install -e .[dev]
+
+# 3. Run smoke tests
+pytest tests/unit -q
+
+# 4. Make your changes
+
+# 5. Validate before committing
+pytest tests/unit && ruff check --fix routeros_mcp && black routeros_mcp
+```
+
+## Three-Tier Boundaries: What to Do, Ask, or Never Do
+
+### ✅ Always Do (Required for All Changes)
+
+- **Run tests before committing**: `pytest tests/unit -q` minimum, full suite preferred
+- **Use type hints**: All function signatures must have complete type annotations
+- **Follow async/await**: All I/O operations (DB, RouterOS REST, HTTP) must be async
+- **Write docstrings**: All public functions require docstrings with Args and Returns sections
+- **Update tests**: Add tests for new code, update tests for modified code
+- **Run formatters**: `ruff check --fix routeros_mcp && black routeros_mcp` before every commit
+- **Respect security model**: All clients are untrusted, all safety enforced server-side
+- **Log to stderr in STDIO mode**: Never write to stdout (corrupts JSON-RPC protocol)
+- **Check design docs**: Link to relevant design doc when implementing from specifications
+
+### ⚠️ Ask First (Requires Discussion/Approval)
+
+- **Adding new dependencies**: Must check `gh-advisory-database` for vulnerabilities
+- **Modifying database schema**: Requires Alembic migration and backward compatibility check
+- **Changing MCP tool signatures**: Breaking changes require version bump and deprecation notice
+- **Adding high-risk RouterOS endpoints**: Professional-tier tools require plan/apply + approval
+- **Modifying security/auth logic**: Zero-trust model must be preserved
+- **Changing environment/capability flags**: Could affect production safety guardrails
+- **Large refactorings**: Split into multiple PRs with incremental validation
+
+### 🚫 Never Do (Hard Boundaries)
+
+- **Write to stdout in STDIO mode**: Corrupts MCP JSON-RPC protocol (use stderr for logs)
+- **Bypass server-side validation**: All safety controls must be server-side, never client-side
+- **Log secrets**: RouterOS credentials, OIDC tokens, approval tokens must never appear in logs
+- **Remove existing tests**: Tests can only be updated or extended, never deleted
+- **Ignore coverage requirements**: 85% minimum (non-core), 95% minimum (core modules)
+- **Use blocking I/O**: All RouterOS calls, DB operations, HTTP must use async/await
+- **Skip audit logging**: All writes and sensitive reads must be logged
+- **Modify production configs**: Configuration changes go through proper channels only
+- **Weaken security boundaries**: Environment tags, capability flags always enforced
 
 ## Project Summary
 
@@ -347,6 +472,133 @@ export ROUTEROS_MCP_ENCRYPTION_KEY="<base64-encoded-32-byte-key>"
 - **Tracing**: OpenTelemetry SDK (FastAPI/HTTPX instrumentation)
 - **Correlation IDs**: Every tool invocation links MCP request → domain logic → RouterOS calls → audit log
 
+## Task Scope and Issue Structure
+
+### Right-Sizing Tasks for Agent Sessions
+
+GitHub Copilot coding agent runs in **finite, autonomous sessions** (tens of minutes, not hours). Design tasks that:
+
+- **One logical change per task**: Implement a feature flag, refactor a module, add tests for a surface area
+- **Reviewable in 15-30 minutes**: Changes should be small enough for human review in one sitting
+- **Touch a well-defined slice**: One service, module, or tool category (not "refactor everything")
+- **Split naturally**: If a feature requires multiple PRs, create multiple issues
+
+✅ **Good agent tasks:**
+- Implement `dns/get-status` tool following tool pattern in `docs/04`
+- Add unit tests for `DeviceService.register_device()` method
+- Refactor `routeros_mcp/infra/routeros/rest_client.py` to use connection pooling
+- Update README.md with Phase 1 status and tool count
+
+❌ **Bad agent tasks:**
+- "Modernize the whole codebase"
+- "Improve performance everywhere"
+- "Implement all Phase 2 tools"
+- "Fix all bugs"
+
+### Standard Issue Template for Agents
+
+When creating issues for agents, use this structure:
+
+```markdown
+## Problem / 问题
+[Brief description of what's broken or what's needed - 1-2 sentences]
+
+## Context / 背景
+[Business/technical context - why this matters, usage patterns, constraints]
+- This [tool/module/endpoint] is [used for X / called Y times per day / critical for Z]
+- [Any historical context, previous attempts, or related issues]
+
+## Acceptance Criteria / 验收标准
+- [ ] [Specific, measurable outcome 1]
+- [ ] [Specific, measurable outcome 2]
+- [ ] Tests added/updated with coverage ≥ [85% or 95%]
+- [ ] Documentation updated in [specific file]
+- [ ] [Specific test scenario] passes
+
+## Files to Modify / 需要修改的文件
+- `routeros_mcp/[module]/[file].py` - [What to change]
+- `tests/unit/test_[file].py` - [What tests to add]
+- `docs/[doc].md` - [What to document]
+
+## Do Not Change / 禁止修改
+- Authentication/authorization middleware
+- Database schema (requires Alembic migration)
+- Existing test coverage (can extend, not remove)
+- [Any other no-touch areas]
+
+## How to Build & Test / 构建与测试
+\`\`\`bash
+# Validate changes
+pytest tests/unit/test_[specific].py -v
+ruff check --fix routeros_mcp/[module]/
+mypy routeros_mcp/[module]/
+
+# Verify specific behavior
+[Specific command or curl/API call that demonstrates success]
+\`\`\`
+
+## Design References / 设计参考
+- Design doc: [docs/XX-relevant-design.md](docs/XX-relevant-design.md)
+- Related issue: #123
+- Pattern to follow: [point to existing code example]
+
+## Known Edge Cases / 已知边界情况
+- [Edge case 1 to handle]
+- [Edge case 2 to test]
+- [Historical bug to avoid re-introducing]
+```
+
+### Example: Well-Scoped Agent Issue
+
+```markdown
+## Problem
+The `device/list-devices` tool returns 500 error when database has devices with null `routeros_version` field.
+
+## Context
+- This is a fundamental-tier tool used by all MCP clients for device discovery
+- Called ~50 times per user session
+- Some lab devices registered before version tracking was added (v0.2.0) have null version field
+
+## Acceptance Criteria
+- [ ] `device/list-devices` returns 200 with version="unknown" for devices with null version
+- [ ] Add unit tests covering null version edge case
+- [ ] Add integration test with mixed version/null version devices
+- [ ] Tool response schema documented in docs/04-mcp-tools-interface-and-json-schema-specification.md
+- [ ] Test case: `pytest tests/unit/test_device_tools.py::test_list_devices_null_version -v` passes
+
+## Files to Modify
+- `routeros_mcp/mcp_tools/device.py` - Add null check in `list_devices()` handler
+- `routeros_mcp/domain/devices.py` - Update `DeviceService.list_devices()` to handle null version
+- `tests/unit/test_device_tools.py` - Add test case for null version
+- `tests/unit/test_device_service.py` - Add test case for service layer
+- `docs/04-mcp-tools-interface-and-json-schema-specification.md` - Update response schema
+
+## Do Not Change
+- Device registration logic (separate issue)
+- Database schema (version field must remain nullable for backward compat)
+- Other device tools (list-devices only)
+
+## How to Build & Test
+\`\`\`bash
+# Quick validation
+pytest tests/unit/test_device_tools.py -v
+pytest tests/unit/test_device_service.py -v
+
+# Verify tool works via MCP
+# (requires MCP Inspector or manual test with Claude Desktop)
+\`\`\`
+
+## Design References
+- Tool specification: [docs/04-mcp-tools-interface-and-json-schema-specification.md#devicelist-devices](docs/04-mcp-tools-interface-and-json-schema-specification.md)
+- Device model: [docs/18-database-schema-and-orm-specification.md](docs/18-database-schema-and-orm-specification.md)
+- Pattern to follow: See `system/get-overview` tool in `routeros_mcp/mcp_tools/system.py`
+
+## Known Edge Cases
+- Null version field (main issue)
+- Empty device list should return empty array, not error
+- Device with disabled status should still be listed
+```
+
 ## Key Design Documents
 
 > **Note**: All document paths are relative to the repository root. View this file from the repository root directory, or use the GitHub web interface for clickable links.
@@ -526,111 +778,159 @@ except DeviceUnreachableError as e:
 - ❌ HTTP/SSE transport (Phase 4)
 - ❌ OAuth/OIDC integration (Phase 4)
 
-## Common Pitfalls to Avoid
+## Common Pitfalls to Avoid (Anti-Patterns)
 
-1. **NEVER write to stdout in STDIO mode** - This corrupts JSON-RPC messages. Use stderr for all logs.
+### Critical "Never Do" Items
 
-2. **NEVER bypass server-side validation** - All safety controls must be enforced server-side, even for "trusted" clients.
+1. **NEVER write to stdout in STDIO mode**
+   - This corrupts JSON-RPC messages. Use stderr for all logs.
+   - In STDIO mode, stdout is reserved exclusively for MCP protocol messages
+   - All `print()` statements, debug output, and logs must go to stderr
 
-3. **NEVER log secrets** - RouterOS credentials, OIDC client secrets, approval tokens must never appear in logs (even in debug mode).
+2. **NEVER bypass server-side validation**
+   - All safety controls must be enforced server-side, even for "trusted" clients
+   - Zero-trust model: LLMs cannot be trusted to "read carefully" or "use best judgment"
+   - Client-side prompts provide zero security guarantees
 
-4. **NEVER ignore environment/capability flags** - Even admin users respect `environment` tags and device `allow_*` flags.
+3. **NEVER log secrets**
+   - RouterOS credentials, OIDC client secrets, approval tokens must never appear in logs (even in debug mode)
+   - Mask passwords and API keys in returned configurations
+   - Use structured logging with secret filtering
 
-5. **NEVER make unbounded RouterOS calls** - Always use timeouts, retries, and per-device rate limiting.
+4. **NEVER ignore environment/capability flags**
+   - Even admin users respect `environment` tags and device `allow_*` flags
+   - Environment tags (`lab`/`staging`/`prod`) are immutable after registration
+   - Capability flags control which tools are allowed per device
 
-6. **NEVER skip audit logging** - All writes and sensitive reads must be logged with correlation IDs.
+5. **NEVER make unbounded RouterOS calls**
+   - Always use timeouts, retries, and per-device rate limiting
+   - Default: at most 2-3 concurrent REST calls per device
+   - Implement circuit breakers for misbehaving devices
 
-7. **NEVER assume well-behaved clients** - Validate all tool arguments against JSON schemas.
+6. **NEVER skip audit logging**
+   - All writes and sensitive reads must be logged with correlation IDs
+   - Audit log writes are non-blocking but failures trigger alerts
+   - Correlation IDs link MCP request → domain logic → RouterOS calls → audit log
 
-8. **NEVER use blocking I/O** - All RouterOS calls, DB operations, HTTP requests must use async/await.
+7. **NEVER assume well-behaved clients**
+   - Validate all tool arguments against JSON schemas
+   - Enforce maximum batch sizes (e.g., 50 devices per plan)
+   - Sanitize and validate all user input
 
-## Quick Reference
+8. **NEVER use blocking I/O**
+   - All RouterOS calls, DB operations, HTTP requests must use async/await
+   - Use `httpx` (async) for REST, `asyncssh` for SSH, SQLAlchemy async sessions for DB
+   - Blocking I/O kills concurrent performance in async runtime
 
-### Run MCP Server (STDIO)
+### Agent-Specific Anti-Patterns
 
-```bash
-# With lab config
-routeros-mcp --config config/lab.yaml
+9. **Don't create massive, ambiguous tasks**
+   - ❌ "Refactor the whole service so it's cleaner"
+   - ❌ "Fix all performance issues in this repo"
+   - ✅ "Refactor `RouterOSRestClient` to use connection pooling"
+   - ✅ "Add unit tests for `DeviceService.register_device()`"
 
-# With environment variables
-export ROUTEROS_MCP_ENVIRONMENT=lab
-export ROUTEROS_MCP_LOG_LEVEL=DEBUG
-routeros-mcp
+10. **Don't skip environment setup**
+    - Agent time is limited; re-installing dependencies wastes precious minutes
+    - Use `.github/workflows/copilot-setup-steps.yml` for pre-warming
+    - Cache Python packages, system tools, and dependencies
 
-# With debug mode
-routeros-mcp --debug --log-level DEBUG
-```
+11. **Don't write vague acceptance criteria**
+    - ❌ "Add tests" → produces inconsistent results
+    - ✅ "Add pytest unit tests in tests/unit/test_device.py with ≥95% coverage for DeviceService.register_device()"
+    - ✅ "Tool must return 200 for test device ID `test-device-001`"
 
-### Run Tests
+12. **Don't ignore existing patterns**
+    - Before implementing new code, look for similar patterns in the codebase
+    - Follow existing patterns for tool implementation, error handling, testing
+    - Reference design docs for architectural decisions
 
-```bash
-# All tests with coverage
-pytest --cov=routeros_mcp --cov-report=html
+13. **Don't remove tests to "fix" failures**
+    - Tests can be updated or extended, never deleted
+    - If a test fails, fix the code or update the test assertion (with justification)
+    - Removing tests weakens quality and masks regressions
 
-# Unit tests only
-pytest tests/unit -v
+14. **Don't weaken quality gates for automation**
+    - Agent PRs must pass same CI checks as human-authored code
+    - No lowering coverage thresholds, skipping type checks, or disabling linters
+    - Agent code should be production-ready, not "good enough for a bot"
 
-# Specific test file
-pytest tests/unit/test_config.py -v
+## Agent Workflow: From Issue to Merged PR
 
-# With coverage threshold enforcement
-pytest --cov=routeros_mcp --cov-fail-under=85
-```
+### Step 1: Understanding the Task (Before Writing Code)
 
-### Code Quality
+1. **Read the issue carefully** - Understand problem, context, acceptance criteria
+2. **Review referenced design docs** - Understand architectural decisions and constraints
+3. **Check existing patterns** - Look for similar implementations to follow
+4. **Write a numbered plan** - List changes you'll make and assumptions you're making
+5. **Validate plan** - Ensure plan aligns with acceptance criteria and boundaries
 
-```bash
-# Lint
-ruff check routeros_mcp
+### Step 2: Making Changes (TDD Workflow)
 
-# Auto-fix linting issues
-ruff check --fix routeros_mcp
+1. **Write tests first** - Define expected behavior in tests before implementation
+2. **Implement minimal code** - Just enough to make tests pass
+3. **Run targeted tests** - `pytest tests/unit/test_[specific].py -v` for quick feedback
+4. **Refactor if needed** - Improve code structure while keeping tests green
+5. **Add documentation** - Update docstrings, design docs, README as specified
 
-# Format
-black routeros_mcp
+### Step 3: Validation (Before Opening PR)
 
-# Type check
-mypy routeros_mcp
+1. **Run full test suite** - `pytest --cov=routeros_mcp --cov-fail-under=85`
+2. **Check coverage** - Ensure ≥85% overall, ≥95% for core modules
+3. **Run type checker** - `mypy routeros_mcp` must pass with no errors
+4. **Run linter** - `ruff check --fix routeros_mcp` to auto-fix issues
+5. **Format code** - `black routeros_mcp` for consistent style
+6. **Manual smoke test** - If applicable, test the tool/feature manually
 
-# All checks
-ruff check routeros_mcp && black --check routeros_mcp && mypy routeros_mcp && pytest
-```
+### Step 4: Opening PR
 
-### Database Migrations
+1. **Review changed files** - Ensure only intended files modified
+2. **Write clear PR description** - Reference issue, list changes, note any trade-offs
+3. **Self-review code** - Read diff as if you're the reviewer
+4. **Check CI status** - Ensure all checks pass before requesting review
+5. **Tag reviewers** - Use CODEOWNERS or mention specific reviewers
 
-```bash
-# Create new migration
-alembic revision --autogenerate -m "Add device capability flags"
+### Step 5: Addressing Review Feedback
 
-# Apply migrations
-alembic upgrade head
-
-# Rollback
-alembic downgrade -1
-
-# Show current revision
-alembic current
-```
+1. **Batch feedback** - If multiple comments, address them together in one update
+2. **Test fixes** - Run tests after each change to avoid breaking things
+3. **Explain trade-offs** - If you disagree with feedback, explain reasoning
+4. **Request re-review** - After addressing feedback, ask for another look
 
 ## Additional Resources
 
 - **MCP Specification**: https://spec.modelcontextprotocol.io/ (Official MCP protocol specification)
 - **FastMCP SDK**: https://github.com/jlowin/fastmcp (Python MCP SDK)
 - **RouterOS v7 REST API**: https://help.mikrotik.com/docs/display/ROS/REST+API (Official MikroTik documentation)
+- **GitHub Copilot Best Practices**: [docs/best_practice/github-copilot-coding-agent-best-practices.md](docs/best_practice/github-copilot-coding-agent-best-practices.md)
+- **MCP Best Practices**: [docs/best_practice/mcp_best_practices_merged.md](docs/best_practice/mcp_best_practices_merged.md)
 - **Design Documents**: [`docs/`](docs/) directory (20+ documents)
 - **Contributing Guide**: [CONTRIBUTING.md](CONTRIBUTING.md)
 - **Implementation Tasks**: [GITHUB-COPILOT-TASKS.md](GITHUB-COPILOT-TASKS.md)
 
 ## Summary
 
-This custom agent guide synthesizes the comprehensive design documentation into actionable guidance. The RouterOS-MCP service is a well-designed, security-first MCP implementation with clear phase boundaries, strong testing requirements, and production-ready architecture.
+This custom agent guide follows **GitHub Copilot custom agent best practices** and synthesizes the comprehensive design documentation into actionable guidance. The RouterOS-MCP service is a well-designed, security-first MCP implementation with clear phase boundaries, strong testing requirements, and production-ready architecture.
 
-**Key Takeaways for Custom Agents**:
+**Key Takeaways for GitHub Copilot and Custom Agents**:
 
-1. **Security is non-negotiable**: All clients are untrusted, all safety is server-side
-2. **Phase-based implementation**: Follow the 0-5 phase roadmap for risk management
-3. **Test-driven development**: 85%+ coverage (95%+ for core modules)
-4. **MCP best practices**: Intent-based tools, token budgets, error recovery
-5. **Zero compromises on quality**: Type hints, async/await, linting, formatting
+1. **Start with executable commands**: Quick reference at top with build/test commands for immediate validation
+2. **Security is non-negotiable**: All clients are untrusted, all safety is server-side, zero-trust model
+3. **Right-size tasks**: One logical change per session, reviewable in 15-30 minutes, no "refactor everything" tasks
+4. **Follow three-tier boundaries**: Clear "always do," "ask first," and "never do" rules
+5. **Test-driven development**: Write tests first, 85%+ coverage (95%+ for core modules), never remove tests
+6. **Use concrete patterns**: Real code examples throughout, not just descriptions
+7. **Phase-based implementation**: Follow the 0-5 phase roadmap for risk management
+8. **MCP best practices**: Intent-based tools, token budgets, error recovery, async/await
+9. **Quality gates apply to all**: Agent PRs must pass same CI checks as human-authored code
+10. **Structured issues**: Use standard template with Context, Acceptance Criteria, Files to Modify, Do Not Change
+
+**For Best Results**:
+- Reference the standard issue template when creating tasks
+- Review relevant design docs before starting work
+- Follow existing patterns in the codebase
+- Run fast validation commands frequently: `pytest tests/unit -q && ruff check --fix routeros_mcp`
+- Write tests before implementation (TDD workflow)
+- Never bypass server-side validation or weaken security boundaries
 
 For questions or clarifications, refer to the specific design document or open a GitHub issue.
