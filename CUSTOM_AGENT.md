@@ -18,7 +18,7 @@
 
 ### Core Operating Principles
 
-**1. TDD is Not Optional (必须 TDD)**
+**1. TDD is Not Optional** *(Test-Driven Development is mandatory)*
 
 Default loop: Write failing test → Implement minimum change → Refactor → Re-run checks
 
@@ -158,7 +158,7 @@ pytest tests/unit && ruff check --fix routeros_mcp && black routeros_mcp
 
 ### ✅ Always Do (Required for All Changes)
 
-- **TDD: Write tests FIRST**: Write failing test → implement minimum code → refactor → repeat
+- **TDD: Write tests FIRST**: Write failing test → implement minimum code → refactor → repeat (see [Agent Workflow Step 2](#step-2-making-changes-strict-tdd-workflow) for details)
 - **Run tests before committing**: `pytest tests/unit -q` minimum, full suite preferred
 - **Use type hints**: All function signatures must have complete type annotations (no `Any` without justification)
 - **Follow async/await**: All I/O operations (DB, RouterOS REST, HTTP) must be async
