@@ -14,10 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from routeros_mcp.config import Settings
 from routeros_mcp.domain.models import DeviceCreate
 from routeros_mcp.domain.services.device import DeviceService
-from routeros_mcp.domain.services.diagnostics import MAX_PING_COUNT, DiagnosticsService
 from routeros_mcp.domain.utils import parse_routeros_uptime
 from routeros_mcp.infra.db.models import Base, Device
-from routeros_mcp.mcp.errors import AuthenticationError, EnvironmentMismatchError, ValidationError
+from routeros_mcp.mcp.errors import AuthenticationError, EnvironmentMismatchError
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -81,7 +80,8 @@ async def test_register_device_environment_mismatch(
             DeviceCreate(
                 id="dev-prod-01",
                 name="prod-router",
-                management_address="10.0.0.1:443",
+                management_ip="10.0.0.1",
+                management_port=443,
                 environment="prod",
             )
         )
@@ -98,7 +98,8 @@ async def test_get_rest_client_missing_credentials(
         Device(
             id="dev-lab-01",
             name="router-lab-01",
-            management_address="192.168.1.1:443",
+            management_ip="192.168.1.1",
+            management_port=443,
             environment="lab",
             status="pending",
             tags={},
@@ -122,6 +123,16 @@ async def test_check_connectivity_failure_marks_unreachable(
 
     service = DeviceService(session=None, settings=settings)  # session unused in this path
 
+    # Provide a stub session to satisfy internal credential existence check
+    class _StubResult:
+        @staticmethod
+        def scalar_one_or_none() -> None:
+            return None
+
+    stub_session = AsyncMock()
+    stub_session.execute = AsyncMock(return_value=_StubResult())
+    service.session = stub_session
+
     # Force rest client acquisition to fail
     monkeypatch.setattr(service, "get_rest_client", AsyncMock(side_effect=RuntimeError("boom")))
 
@@ -129,9 +140,10 @@ async def test_check_connectivity_failure_marks_unreachable(
     update_mock = AsyncMock()
     monkeypatch.setattr(service, "update_device", update_mock)
 
-    result = await service.check_connectivity("dev-lab-99")
+    reachable, meta = await service.check_connectivity("dev-lab-99")
 
-    assert result is False
+    assert reachable is False
+    assert meta["failure_reason"] == "unknown"
     update_mock.assert_awaited_once()
     args, kwargs = update_mock.await_args
     assert args[0] == "dev-lab-99"
@@ -139,92 +151,3 @@ async def test_check_connectivity_failure_marks_unreachable(
     assert updated is not None
     assert updated.status == "unreachable"
 
-
-# ---------------------------------------------------------------------------
-# DiagnosticsService coverage
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_diagnostics_ping_success(
-    monkeypatch: pytest.MonkeyPatch, settings: Settings
-) -> None:
-    """Ping parses RouterOS responses into aggregates and closes the client."""
-
-    # Build service with mocked device_service
-    service = DiagnosticsService(session=None, settings=settings)
-    service.device_service = Mock()
-    service.device_service.get_device = AsyncMock()
-
-    class _FakeClient:
-        def __init__(self) -> None:
-            self.closed = False
-
-        async def post(self, _path: str, _params: dict[str, str]) -> list[dict[str, str]]:
-            return [
-                {"status": "echo reply", "time": "10ms"},
-                {"status": "echo reply", "time": "20ms"},
-            ]
-
-        async def close(self) -> None:
-            self.closed = True
-
-    fake_client = _FakeClient()
-    service.device_service.get_rest_client = AsyncMock(return_value=fake_client)
-
-    result = await service.ping("dev-lab-01", "8.8.8.8", count=2)
-
-    assert result["packets_sent"] == 2
-    assert result["packets_received"] == 2
-    assert result["min_rtt_ms"] == 10.0
-    assert result["max_rtt_ms"] == 20.0
-    assert fake_client.closed is True
-
-
-@pytest.mark.asyncio
-async def test_diagnostics_ping_validates_count(
-    monkeypatch: pytest.MonkeyPatch, settings: Settings
-) -> None:
-    """Ping enforces an upper bound on count to protect devices."""
-
-    service = DiagnosticsService(session=None, settings=settings)
-    service.device_service = Mock()
-    service.device_service.get_device = AsyncMock()
-
-    with pytest.raises(ValidationError):
-        await service.ping("dev-lab-01", "8.8.8.8", count=MAX_PING_COUNT + 1)
-
-
-@pytest.mark.asyncio
-async def test_diagnostics_traceroute_parses_hops(
-    monkeypatch: pytest.MonkeyPatch, settings: Settings
-) -> None:
-    """Traceroute normalizes hop results and closes the client."""
-
-    service = DiagnosticsService(session=None, settings=settings)
-    service.device_service = Mock()
-    service.device_service.get_device = AsyncMock()
-
-    class _FakeClient:
-        def __init__(self) -> None:
-            self.closed = False
-
-        async def post(self, _path: str, _params: dict[str, str]) -> list[dict[str, str]]:
-            return [
-                {"hop": 1, "address": "192.0.2.1", "time": "5ms"},
-                {"hop": 2, "address": "198.51.100.1", "time": "8ms"},
-            ]
-
-        async def close(self) -> None:
-            self.closed = True
-
-    fake_client = _FakeClient()
-    service.device_service.get_rest_client = AsyncMock(return_value=fake_client)
-
-    result = await service.traceroute("dev-lab-01", "9.9.9.9", count=2)
-
-    assert result["hops"] == [
-        {"hop": 1, "address": "192.0.2.1", "rtt_ms": 5.0},
-        {"hop": 2, "address": "198.51.100.1", "rtt_ms": 8.0},
-    ]
-    assert fake_client.closed is True

@@ -481,3 +481,93 @@ class TestRouterOSRestClient:
         """close should be safe to call when client was never created."""
         client = RouterOSRestClient(host="127.0.0.1")
         await client.close()
+
+
+class TestRouterOSRestClientSSLVerification:
+    """Tests for SSL certificate verification configuration."""
+
+    def test_verify_ssl_default_true(self) -> None:
+        """Test that verify_ssl defaults to True."""
+        client = RouterOSRestClient(
+            host="127.0.0.1",
+            username="admin",
+            password="secret",
+        )
+
+        assert client.verify_ssl is True
+
+    def test_verify_ssl_can_be_disabled(self) -> None:
+        """Test that verify_ssl can be set to False for self-signed certs."""
+        client = RouterOSRestClient(
+            host="127.0.0.1",
+            username="admin",
+            password="secret",
+            verify_ssl=False,
+        )
+
+        assert client.verify_ssl is False
+
+    def test_verify_ssl_explicit_true(self) -> None:
+        """Test that verify_ssl can be explicitly set to True."""
+        client = RouterOSRestClient(
+            host="127.0.0.1",
+            username="admin",
+            password="secret",
+            verify_ssl=True,
+        )
+
+        assert client.verify_ssl is True
+
+    @pytest.mark.asyncio
+    async def test_get_client_passes_verify_ssl_true(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """_get_client should pass verify=True to httpx.AsyncClient when enabled."""
+        created_clients: list[tuple[object, dict]] = []
+
+        def fake_async_client(**kwargs):
+            client_obj = AsyncMock()
+            created_clients.append((client_obj, kwargs))
+            return client_obj
+
+        monkeypatch.setattr(httpx, "AsyncClient", fake_async_client)
+
+        client = RouterOSRestClient(
+            host="10.0.0.1",
+            username="user",
+            password="pass",
+            verify_ssl=True,
+        )
+
+        await client._get_client()
+
+        assert len(created_clients) == 1
+        args = created_clients[0][1]
+        assert args["verify"] is True
+
+    @pytest.mark.asyncio
+    async def test_get_client_passes_verify_ssl_false(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """_get_client should pass verify=False to httpx.AsyncClient when disabled."""
+        created_clients: list[tuple[object, dict]] = []
+
+        def fake_async_client(**kwargs):
+            client_obj = AsyncMock()
+            created_clients.append((client_obj, kwargs))
+            return client_obj
+
+        monkeypatch.setattr(httpx, "AsyncClient", fake_async_client)
+
+        client = RouterOSRestClient(
+            host="10.0.0.1",
+            username="user",
+            password="pass",
+            verify_ssl=False,
+        )
+
+        await client._get_client()
+
+        assert len(created_clients) == 1
+        args = created_clients[0][1]
+        assert args["verify"] is False

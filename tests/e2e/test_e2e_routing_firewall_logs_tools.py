@@ -100,7 +100,15 @@ class _FakeFirewallLogsService:
             return [e for e in entries if e["list_name"] == list_name]
         return entries
 
-    async def get_recent_logs(self, device_id: str, limit: int, topics: list[str] | None):
+    async def get_recent_logs(
+        self,
+        device_id: str,
+        limit: int,
+        topics: list[str] | None,
+        start_time: str | None = None,
+        end_time: str | None = None,
+        message: str | None = None,
+    ):
         entries = [
             {
                 "id": "1",
@@ -268,6 +276,9 @@ class TestE2ERoutingFirewallLogsTools(unittest.TestCase):
                     device_id: str,
                     limit: int,
                     topics: list[str] | None,
+                    start_time: str | None = None,
+                    end_time: str | None = None,
+                    message: str | None = None,
                 ):
                     raise ValueError("recent-logs failed in e2e")
 

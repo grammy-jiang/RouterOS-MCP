@@ -26,7 +26,7 @@ class FakeDeviceService:
     async def get_rest_client(self, device_id):
         class Client:
             async def get(self, path):
-                return {"time": "12:00:00", "time-zone-name": "UTC", "time-zone-autodetect": True}
+                return {"time": "12:00:00", "date": "2025-12-13", "time-zone-name": "UTC", "time-zone-autodetect": True, "gmt-offset": "+00:00", "dst-active": False}
 
             async def close(self):
                 return None
@@ -54,6 +54,19 @@ class FakeSystemService:
 
     async def get_system_packages(self, device_id):
         return [{"name": "system", "version": "7"}]
+
+    async def get_system_clock(self, device_id):
+        return {
+            "time": "12:00:00",
+            "date": "2025-12-13",
+            "time-zone-name": "UTC",
+            "time-zone-autodetect": True,
+            "gmt-offset": "+00:00",
+            "dst-active": False,
+            "transport": "rest",
+            "fallback_used": False,
+            "rest_error": None,
+        }
 
     async def update_system_identity(self, device_id, identity, dry_run=False):
         if dry_run:
@@ -186,6 +199,41 @@ class TestMCPToolsSystemExtra(unittest.TestCase):
 
         asyncio.run(_run())
 
+    def test_system_overview_with_fallback_metadata(self) -> None:
+        async def _run() -> None:
+            class FallbackSystem(FakeSystemService):
+                async def get_system_overview(self, *_args, **_kwargs):  # type: ignore[override]
+                    return {
+                        "device_name": "dev",
+                        "system_identity": "dev",
+                        "routeros_version": "7",
+                        "hardware_model": "hEX",
+                        "cpu_usage_percent": 1.0,
+                        "cpu_count": 1,
+                        "memory_usage_percent": 2.0,
+                        "memory_used_bytes": 1024,
+                        "memory_total_bytes": 2048,
+                        "uptime_formatted": "1d",
+                        "transport": "ssh",
+                        "fallback_used": True,
+                        "rest_error": "timeout",
+                    }
+
+            patch_session, patch_device, patch_system, patch_auth = self._common_patches(
+                FallbackSystem()
+            )
+
+            with patch_session, patch_device, patch_system, patch_auth:
+                mcp, _ = self._register_tools()
+                fn = mcp.tools["get_system_overview"]
+                result = await fn("dev1")
+
+                self.assertIn("Transport: ssh (REST fallback: timeout)", result["content"][0]["text"])
+                self.assertTrue(result["_meta"].get("fallback_used"))
+                self.assertEqual("ssh", result["_meta"].get("transport"))
+
+        asyncio.run(_run())
+
     def test_system_packages_generic_error(self) -> None:
         async def _run() -> None:
             class BoomSystem(FakeSystemService):
@@ -213,16 +261,9 @@ class TestMCPToolsSystemExtra(unittest.TestCase):
         async def _run() -> None:
             from routeros_mcp.mcp.errors import MCPError
 
-            class FakeDeviceServiceError(FakeDeviceService):
-                async def get_rest_client(self, *_args, **_kwargs):  # type: ignore[override]
-                    class Client:
-                        async def get(self, path):
-                            raise MCPError("clock", data={"path": path})
-
-                        async def close(self):
-                            return None
-
-                    return Client()
+            class FakeSystemServiceError(FakeSystemService):
+                async def get_system_clock(self, *_args, **_kwargs):  # type: ignore[override]
+                    raise MCPError("clock", data={"path": "/rest/system/clock"})
 
             with (
                 patch.object(
@@ -230,8 +271,8 @@ class TestMCPToolsSystemExtra(unittest.TestCase):
                     "get_session_factory",
                     return_value=FakeSessionFactory(),
                 ),
-                patch.object(system_module, "DeviceService", FakeDeviceServiceError),
-                patch.object(system_module, "SystemService", FakeSystemService),
+                patch.object(system_module, "DeviceService", FakeDeviceService),
+                patch.object(system_module, "SystemService", FakeSystemServiceError),
                 patch.object(system_module, "check_tool_authorization", lambda **_kwargs: None),
             ):
                 mcp, _ = self._register_tools()

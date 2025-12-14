@@ -114,7 +114,7 @@ async def mcp_resources(session_factory, settings, seed_audit_events):
 
 @pytest.mark.asyncio
 async def test_audit_recent_events(mcp_resources):
-    result = await mcp_resources.resources["audit://events/recent"]()
+    result = await mcp_resources.resources["audit://events/recent/{limit}"]()
     payload = json.loads(result)
     assert payload["count"] == 2
     assert payload["events"][0]["id"]

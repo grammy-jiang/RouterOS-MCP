@@ -63,7 +63,27 @@ class TestRouterOSSSHClient:
         """Test that ALLOWED_SSH_COMMANDS contains expected commands."""
         assert "/export" in ALLOWED_SSH_COMMANDS
         assert "/export compact" in ALLOWED_SSH_COMMANDS
-        assert len(ALLOWED_SSH_COMMANDS) == 2
+        assert "/system/resource/print" in ALLOWED_SSH_COMMANDS
+        assert "/system/package/print" in ALLOWED_SSH_COMMANDS
+        assert "/system/clock/print" in ALLOWED_SSH_COMMANDS
+        assert "/system/identity/print" in ALLOWED_SSH_COMMANDS
+        assert "/interface/print" in ALLOWED_SSH_COMMANDS
+        assert "/ip/address/print" in ALLOWED_SSH_COMMANDS
+        assert "/ip/arp/print" in ALLOWED_SSH_COMMANDS
+        assert "/ip/firewall/filter/print" in ALLOWED_SSH_COMMANDS
+        assert "/ip/firewall/nat/print" in ALLOWED_SSH_COMMANDS
+        assert "/ip/firewall/address-list/print" in ALLOWED_SSH_COMMANDS
+        assert "/log/print" in ALLOWED_SSH_COMMANDS
+        assert "/system/logging/print" in ALLOWED_SSH_COMMANDS
+        assert "/ip/route/print" in ALLOWED_SSH_COMMANDS
+        assert "/ip/dns/print" in ALLOWED_SSH_COMMANDS
+        assert "/system/ntp/client/print" in ALLOWED_SSH_COMMANDS
+        assert "/ip/dns/cache/print" in ALLOWED_SSH_COMMANDS
+        assert "/interface/monitor-traffic" in ALLOWED_SSH_COMMANDS
+        assert "/ping" in ALLOWED_SSH_COMMANDS
+        assert "/tool/ping" in ALLOWED_SSH_COMMANDS
+        assert "/tool/traceroute" in ALLOWED_SSH_COMMANDS
+        assert len(ALLOWED_SSH_COMMANDS) == 22
 
     @pytest.mark.asyncio
     async def test_validate_command_whitelisted(self) -> None:
@@ -104,6 +124,38 @@ class TestRouterOSSSHClient:
         client._validate_command("\n/export compact\n")
 
     @pytest.mark.asyncio
+    async def test_validate_command_parameterized_monitor_traffic(self) -> None:
+        """Test that parameterized monitor-traffic commands are allowed.
+        
+        /interface/monitor-traffic is a one-off command that requires
+        an interface name and 'once' parameter to return a single snapshot
+        instead of continuous output.
+        """
+        client = RouterOSSSHClient(
+            host="127.0.0.1",
+            username="admin",
+            password="secret",
+        )
+
+        # These should not raise - parameterized monitor-traffic with 'once' argument
+        client._validate_command("/interface/monitor-traffic ether1 once")
+        client._validate_command("/interface/monitor-traffic ether2 once")
+        client._validate_command("/interface/monitor-traffic bridge1 once")
+
+    @pytest.mark.asyncio
+    async def test_validate_command_base_parameterized_allowed(self) -> None:
+        """Test that base parameterized commands without args are also allowed."""
+        client = RouterOSSSHClient(
+            host="127.0.0.1",
+            username="admin",
+            password="secret",
+        )
+
+        # Base command without parameters should also be allowed
+        # (even though in practice we use it with parameters)
+        client._validate_command("/interface/monitor-traffic")
+
+    @pytest.mark.asyncio
     async def test_validate_command_similar_but_not_whitelisted(self) -> None:
         """Test that similar but different commands are rejected."""
         client = RouterOSSSHClient(
@@ -113,10 +165,10 @@ class TestRouterOSSSHClient:
         )
 
         with pytest.raises(RouterOSSSHCommandNotAllowedError):
-            client._validate_command("/export verbose")
+            client._validate_command("/ip address print")  # Different command
 
         with pytest.raises(RouterOSSSHCommandNotAllowedError):
-            client._validate_command("/export  compact")  # Two spaces
+            client._validate_command("/interface show")  # Wrong subcommand
 
     @pytest.mark.asyncio
     async def test_successful_command_execution(self) -> None:

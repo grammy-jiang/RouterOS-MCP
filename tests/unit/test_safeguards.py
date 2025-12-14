@@ -52,7 +52,7 @@ class TestManagementPathProtection:
         """Removing management IP should be blocked."""
         with pytest.raises(ManagementPathProtectionError, match="management IP"):
             check_management_ip_protection(
-                device_management_address="192.168.1.1:443",
+                device_management_ip="192.168.1.1",
                 ip_to_remove="192.168.1.1/24",
             )
 
@@ -60,7 +60,7 @@ class TestManagementPathProtection:
         """Removing non-management IP should be allowed."""
         # Should not raise
         check_management_ip_protection(
-            device_management_address="192.168.1.1:443",
+            device_management_ip="192.168.1.1",
             ip_to_remove="10.0.0.1/24",
         )
 
@@ -68,7 +68,7 @@ class TestManagementPathProtection:
         """Removing subnet containing management IP should be blocked."""
         with pytest.raises(ManagementPathProtectionError):
             check_management_ip_protection(
-                device_management_address="192.168.1.100:443",
+                device_management_ip="192.168.1.100",
                 ip_to_remove="192.168.1.0/24",
             )
 
@@ -78,7 +78,7 @@ class TestManagementPathProtection:
 
         # Invalid management address will trigger ValueError in ipaddress
         check_management_ip_protection(
-            device_management_address="not-an-ip",
+            device_management_ip="not-an-ip",
             ip_to_remove="invalid-cidr",
         )
 

@@ -40,7 +40,8 @@ async def test_devices(db_session: AsyncSession) -> list[str]:
         device = Device(
             id=device_id,
             name=f"router-{device_id}",
-            management_address="192.168.1.1:443",
+            management_ip="192.168.1.1",
+            management_port=443,
             environment="lab",
             status="healthy",
             tags={},

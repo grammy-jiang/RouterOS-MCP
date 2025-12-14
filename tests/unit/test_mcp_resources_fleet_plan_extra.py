@@ -39,7 +39,8 @@ class _Device:
         self.id = id_
         self.name = name
         self.environment = env
-        self.management_address = "10.0.0.1"
+        self.management_ip = "10.0.0.1"
+        self.management_port = 443
         self.tags = ["edge"]
         self.capability_flags = flags or {
             "allow_advanced_writes": True,
@@ -71,7 +72,7 @@ class FakeHealthService:
         self.settings = settings
         self.calls = 0
 
-    async def get_current_health(self, device_id):
+    async def run_health_check(self, device_id):
         self.calls += 1
         if device_id == "d2":
             raise RuntimeError("unreachable")
@@ -146,7 +147,7 @@ async def test_fleet_health_summary(fleet_resources):
 
 @pytest.mark.asyncio
 async def test_fleet_devices_filter(fleet_resources):
-    fn = fleet_resources["fleet://devices"]
+    fn = fleet_resources["fleet://devices/{environment}"]
     content = await fn(environment="lab")
     data = json.loads(content)
     assert data["count"] == 1

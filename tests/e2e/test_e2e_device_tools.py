@@ -20,7 +20,8 @@ class _FakeDevice:
     ) -> None:
         self.id = device_id
         self.name = name
-        self.management_address = "192.0.2.1:443"
+        self.management_ip = "192.0.2.1"
+        self.management_port = 443
         self.environment = environment
         self.status = "healthy"
         self.routeros_version = "7.10"
@@ -56,10 +57,16 @@ class _FakeDeviceService:
         # For connectivity checks we treat unknown IDs as existing but separate devices
         return _FakeDevice(device_id, f"router-{device_id}", "lab", {"site": "dc3"})
 
-    async def check_connectivity(self, device_id: str) -> bool:
+    async def check_connectivity(self, device_id: str):
         self.__class__.last_checked_ids.append(device_id)
         # Simulate one reachable and one unreachable device
-        return device_id != "dev-unreachable"
+        reachable = device_id != "dev-unreachable"
+        return reachable, {
+            "failure_reason": None if reachable else "timeout",
+            "transport": "rest" if reachable else "ssh",
+            "fallback_used": not reachable,
+            "attempted_transports": ["rest"] if reachable else ["rest", "ssh"],
+        }
 
 
 class TestE2EDeviceTools(unittest.TestCase):
@@ -115,10 +122,14 @@ class TestE2EDeviceTools(unittest.TestCase):
                 ok = await check_fn("dev-lab-01")
                 self.assertFalse(ok["isError"])
                 self.assertTrue(ok["_meta"]["reachable"])
+                self.assertIsNone(ok["_meta"].get("failure_reason"))
+                self.assertEqual("rest", ok["_meta"].get("transport"))
 
                 bad = await check_fn("dev-unreachable")
                 self.assertTrue(bad["isError"])
                 self.assertFalse(bad["_meta"]["reachable"])
+                self.assertEqual("timeout", bad["_meta"].get("failure_reason"))
+                self.assertEqual("ssh", bad["_meta"].get("transport"))
 
                 self.assertEqual(
                     ["dev-lab-01", "dev-unreachable"],

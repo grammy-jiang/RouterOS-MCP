@@ -40,7 +40,15 @@ class FakeFirewallLogsService:
         self.calls.append(("addr", device_id, list_name))
         return [{"id": "a1", "list": list_name or "all"}]
 
-    async def get_recent_logs(self, device_id, limit=100, topics=None):
+    async def get_recent_logs(
+        self,
+        device_id,
+        limit=100,
+        topics=None,
+        start_time=None,
+        end_time=None,
+        message=None,
+    ):
         self.calls.append(("logs", limit, topics))
         return [{"message": "ok"}], 1
 

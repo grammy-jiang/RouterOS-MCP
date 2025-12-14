@@ -79,7 +79,6 @@ async def test_mcp_server_start_stdio(monkeypatch: pytest.MonkeyPatch):
     for name in [
         "register_config_tools",
         "register_device_tools",
-        "register_diagnostics_tools",
         "register_dns_ntp_tools",
         "register_firewall_logs_tools",
         "register_firewall_write_tools",
@@ -161,7 +160,6 @@ async def test_mcp_server_start_http_not_implemented(monkeypatch: pytest.MonkeyP
     for name in [
         "register_config_tools",
         "register_device_tools",
-        "register_diagnostics_tools",
         "register_dns_ntp_tools",
         "register_firewall_logs_tools",
         "register_firewall_write_tools",

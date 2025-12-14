@@ -37,7 +37,7 @@ class _FakeRestClient:
         self.closed = False
 
     async def get(self, _path: str):
-        return {"time": "12:00:00", "time-zone-name": "UTC", "time-zone-autodetect": True}
+        return {"time": "12:00:00", "date": "2025-12-13", "time-zone-name": "UTC", "time-zone-autodetect": True, "gmt-offset": "+00:00", "dst-active": False}
 
     async def close(self):
         self.closed = True
@@ -114,6 +114,20 @@ class _FakeSystemService:
     async def get_system_packages(self, device_id: str):
         return [{"name": "routeros", "version": "7.10"}]
 
+    async def get_system_clock(self, device_id: str):
+        return {
+            "time": "12:00:00",
+            "date": "2025-12-13",
+            "time-zone-name": "UTC",
+            "time_zone_name": "UTC",
+            "time-zone-autodetect": True,
+            "gmt-offset": "+00:00",
+            "dst-active": False,
+            "transport": "rest",
+            "fallback_used": False,
+            "rest_error": None,
+        }
+
     async def update_system_identity(self, device_id: str, identity: str, dry_run: bool):
         if dry_run:
             return {
@@ -140,7 +154,15 @@ class _FakeFirewallLogsService:
             return [e for e in entries if e["list"] == list_name]
         return entries
 
-    async def get_recent_logs(self, device_id: str, limit: int, topics: list[str] | None):
+    async def get_recent_logs(
+        self,
+        device_id: str,
+        limit: int,
+        topics: list[str] | None,
+        start_time: str | None = None,
+        end_time: str | None = None,
+        message: str | None = None,
+    ):
         entries = [
             {"id": "1", "time": "jan/01", "topics": ["system"], "message": "started"},
             {"id": "2", "time": "jan/01", "topics": ["firewall"], "message": "allow"},

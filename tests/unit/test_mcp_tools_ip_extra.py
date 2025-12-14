@@ -28,7 +28,7 @@ class FakeDeviceService:
 
     async def check_connectivity(self, device_id):
         self.calls.append(("connect", device_id))
-        return True
+        return True, {"failure_reason": None}
 
     async def list_devices(self, environment=None):
         return [FakeDevice()]
@@ -118,6 +118,60 @@ class TestMCPToolsIPExtra(unittest.TestCase):
                 fn = mcp.tools["get_ip_address"]
                 result = await fn("dev1", "*1")
                 self.assertEqual("eth1", result["_meta"]["address"]["interface"])
+
+        asyncio.run(_run())
+
+    def test_get_ip_address_empty_response(self) -> None:
+        """Test get_ip_address tool with empty dict response (defensive check)."""
+        async def _run() -> None:
+            fake_device_service = FakeDeviceService()
+            # Create a fake service that returns empty dict
+            class EmptyIPService(FakeIPService):
+                async def get_address(self, device_id, address_id):
+                    return {}  # Empty dict - simulates the old bug
+            
+            fake_ip_service = EmptyIPService()
+            with (
+                patch.object(ip_module, "get_session_factory", return_value=FakeSessionFactory()),
+                patch.object(
+                    ip_module, "DeviceService", lambda *args, **kwargs: fake_device_service
+                ),
+                patch.object(ip_module, "IPService", lambda *args, **kwargs: fake_ip_service),
+                patch.object(ip_module, "check_tool_authorization", lambda **_kwargs: None),
+            ):
+                mcp, _ = self._register_tools()
+                fn = mcp.tools["get_ip_address"]
+                result = await fn("dev1", "*1")
+                # Should return error, not crash with KeyError
+                self.assertTrue(result["isError"])
+                self.assertIn("not found or invalid response", result["content"][0]["text"])
+
+        asyncio.run(_run())
+
+    def test_get_ip_address_missing_address_key(self) -> None:
+        """Test get_ip_address tool when response is missing 'address' key."""
+        async def _run() -> None:
+            fake_device_service = FakeDeviceService()
+            # Create a fake service that returns dict without 'address' key
+            class PartialIPService(FakeIPService):
+                async def get_address(self, device_id, address_id):
+                    return {"interface": "eth1"}  # Missing 'address' key
+            
+            fake_ip_service = PartialIPService()
+            with (
+                patch.object(ip_module, "get_session_factory", return_value=FakeSessionFactory()),
+                patch.object(
+                    ip_module, "DeviceService", lambda *args, **kwargs: fake_device_service
+                ),
+                patch.object(ip_module, "IPService", lambda *args, **kwargs: fake_ip_service),
+                patch.object(ip_module, "check_tool_authorization", lambda **_kwargs: None),
+            ):
+                mcp, _ = self._register_tools()
+                fn = mcp.tools["get_ip_address"]
+                result = await fn("dev1", "*1")
+                # Should return error, not crash with KeyError
+                self.assertTrue(result["isError"])
+                self.assertIn("not found or invalid response", result["content"][0]["text"])
 
         asyncio.run(_run())
 

@@ -30,7 +30,7 @@ class _DummyMCP:
 
 
 class _FakeSystemService:
-    async def get_overview(self, device_id: str):
+    async def get_system_overview(self, device_id: str):
         return {"routeros_version": "7.15", "board_name": "rb5009"}
 
 
@@ -45,7 +45,7 @@ class _FakeHealthService:
     def __init__(self, raise_error: bool = False):
         self.raise_error = raise_error
 
-    async def get_current_health(self, device_id: str):
+    async def run_health_check(self, device_id: str):
         if self.raise_error:
             raise RuntimeError("health unavailable")
         return _FakeHealth()
@@ -84,7 +84,8 @@ async def seed_devices(session_factory, settings):
             DeviceCreate(
                 id="dev-1",
                 name="router-1",
-                management_address="10.0.0.1",
+                management_ip="10.0.0.1",
+                management_port=443,
                 environment="lab",
             )
         )
@@ -92,7 +93,8 @@ async def seed_devices(session_factory, settings):
             DeviceCreate(
                 id="dev-2",
                 name="router-2",
-                management_address="10.0.0.2",
+                management_ip="10.0.0.2",
+                management_port=443,
                 environment="lab",
             )
         )
@@ -264,7 +266,7 @@ async def _setup_fleet_resources(
     monkeypatch: pytest.MonkeyPatch, session_factory, settings, seed_devices
 ):
     class _HealthServiceWithUnreachable(_FakeHealthService):
-        async def get_current_health(self, device_id: str):
+        async def run_health_check(self, device_id: str):
             if device_id == "dev-2":
                 raise RuntimeError("unreachable")
             return _FakeHealth(
@@ -297,7 +299,7 @@ async def test_fleet_devices_filter(session_factory, settings, seed_devices):
     mcp = _DummyMCP()
     fleet_resources.register_fleet_resources(mcp, session_factory, settings)
 
-    devices_func = mcp.resources["fleet://devices"]
+    devices_func = mcp.resources["fleet://devices/{environment}"]
     payload = json.loads(await devices_func(environment="lab"))
     assert payload["count"] == 2
     device_ids = {d["device_id"] for d in payload["devices"]}
@@ -335,6 +337,6 @@ async def test_fleet_devices_error(monkeypatch: pytest.MonkeyPatch, session_fact
     mcp = _DummyMCP()
     fleet_resources.register_fleet_resources(mcp, session_factory, settings)
 
-    devices_func = mcp.resources["fleet://devices"]
+    devices_func = mcp.resources["fleet://devices/{environment}"]
     with pytest.raises(MCPError):
         await devices_func()

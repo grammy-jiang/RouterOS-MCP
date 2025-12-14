@@ -20,7 +20,8 @@ class FakeDevice:
         self.routeros_version = "7"
         self.hardware_model = "hEX"
         self.tags = {"site": "lab"}
-        self.management_address = "10.0.0.1"
+        self.management_ip = "10.0.0.1"
+        self.management_port = 443
 
 
 class FakeDeviceService:
@@ -34,7 +35,12 @@ class FakeDeviceService:
         return FakeDevice()
 
     async def check_connectivity(self, device_id):
-        return True
+        return True, {
+            "failure_reason": None,
+            "transport": "rest",
+            "fallback_used": False,
+            "attempted_transports": ["rest"],
+        }
 
 
 class FakeSession:
@@ -89,5 +95,65 @@ class TestMCPToolsDeviceExtra(unittest.TestCase):
                 fn = mcp.tools["check_connectivity"]
                 result = await fn("dev1")
                 self.assertTrue(result["_meta"]["reachable"])
+                self.assertIsNone(result["_meta"].get("failure_reason"))
+                self.assertEqual("rest", result["_meta"].get("transport"))
+
+        asyncio.run(_run())
+
+    def test_device_health_tool(self) -> None:
+        async def _run() -> None:
+            with (
+                patch.object(
+                    device_module,
+                    "get_session_factory",
+                    return_value=FakeSessionFactory(),
+                ),
+                patch.object(device_module, "DeviceService", FakeDeviceService),
+                patch.object(device_module, "check_tool_authorization", lambda **_kwargs: None),
+            ):
+                mcp, _ = self._register_tools()
+                fn = mcp.tools.get("device_health")
+                if fn:
+                    result = await fn("dev1")
+                    self.assertIsNotNone(result)
+
+        asyncio.run(_run())
+
+    def test_list_devices_with_tags_filter(self) -> None:
+        async def _run() -> None:
+            with (
+                patch.object(
+                    device_module,
+                    "get_session_factory",
+                    return_value=FakeSessionFactory(),
+                ),
+                patch.object(device_module, "DeviceService", FakeDeviceService),
+                patch.object(device_module, "check_tool_authorization", lambda **_kwargs: None),
+            ):
+                mcp, _ = self._register_tools()
+                fn = mcp.tools["list_devices"]
+                result = await fn(environment=None, tags={"site": "lab"})
+                self.assertIn("_meta", result)
+                self.assertGreaterEqual(result["_meta"]["total_count"], 0)
+
+        asyncio.run(_run())
+
+    def test_list_devices_all(self) -> None:
+        async def _run() -> None:
+            with (
+                patch.object(
+                    device_module,
+                    "get_session_factory",
+                    return_value=FakeSessionFactory(),
+                ),
+                patch.object(device_module, "DeviceService", FakeDeviceService),
+                patch.object(device_module, "check_tool_authorization", lambda **_kwargs: None),
+            ):
+                mcp, _ = self._register_tools()
+                fn = mcp.tools["list_devices"]
+                result = await fn()
+                self.assertIn("_meta", result)
+                self.assertIn("total_count", result["_meta"])
+                self.assertGreaterEqual(result["_meta"]["total_count"], 0)
 
         asyncio.run(_run())
