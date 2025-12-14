@@ -836,6 +836,7 @@ def register_system_tools(mcp: FastMCP, settings: Settings) -> None:
 
 ```python
 # In routeros_mcp/mcp_resources/device.py
+import json
 from fastmcp import FastMCP
 from routeros_mcp.config import Settings
 from routeros_mcp.domain.services.health import HealthService
