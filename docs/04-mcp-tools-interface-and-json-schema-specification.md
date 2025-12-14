@@ -4,7 +4,27 @@
 
 Define the MCP-facing API—tool taxonomy, capability tiers (fundamental/advanced/professional), input/output JSON schemas, and safety guardrails that map cleanly to RouterOS operations. This document is the contract between MCP clients (including AI tools) and the RouterOS MCP service.
 
+## Phase 1 (current implementation) tool snapshot
+
+The running service currently registers **34 tools**. This list is authoritative for Phase 1; the larger catalogs below remain forward-looking. SSH fallback commands used by these tools are documented in [Doc 15](15-mcp-resources-and-prompts-design.md#ssh-commands-used-by-phase-1-resourcestools-reference).
+
+- **Platform/health helpers (3):** `echo`, `service_health`, `device_health`
+- **Device registry (2):** `list_devices`, `check_connectivity`
+- **System (4):** `get_system_overview`, `get_system_packages`, `get_system_clock`, `set_system_identity` (advanced)
+- **Interface (3):** `list_interfaces`, `get_interface`, `get_interface_stats`
+- **IP addressing (5):** `list_ip_addresses`, `get_ip_address`, `get_arp_table`, `add_secondary_ip_address` (advanced), `remove_secondary_ip_address` (advanced)
+- **DNS / NTP (6):** `get_dns_status`, `get_dns_cache`, `get_ntp_status`, `update_dns_servers` (advanced), `flush_dns_cache` (advanced), `update_ntp_servers` (advanced)
+- **Routing (2):** `get_routing_summary`, `get_route`
+- **Firewall & logs (5):** `list_firewall_filter_rules`, `list_firewall_nat_rules`, `list_firewall_address_lists`, `get_recent_logs`, `get_logging_config`
+- **Firewall write (1):** `update_firewall_address_list` (advanced)
+- **Professional workflow (3):** `config_plan_dns_ntp_rollout`, `config_apply_dns_ntp_rollout`, `config_rollback_plan`
+
+> Diagnostics (`ping`, `traceroute`) are implemented in code but **not registered** in Phase 1; they will be enabled in a later phase once guardrails are finalized.
+
+Prompts and resources currently exposed are listed in [Doc 15](15-mcp-resources-and-prompts-design.md#phase-1-current-implementation-snapshot).
+
 **Related Documents:**
+
 - [Doc 03: RouterOS Integration & Endpoint Mappings](03-routeros-integration-and-platform-constraints-rest-and-ssh.md) - Complete endpoint catalog with 41 REST API endpoints
 - [Doc 19: JSON-RPC Error Codes & MCP Protocol](19-json-rpc-error-codes-and-mcp-protocol-specification.md) - Error taxonomy and protocol compliance
 
@@ -42,11 +62,13 @@ Each MCP tool:
 ## Feature tier definitions (fundamental read-only; advanced writes; professional workflows)
 
 - **Fundamental**:
+
   - Read-only operations and non-mutating diagnostics.
   - Safe to expose broadly to `read_only` users (Phase 4) or all users (Phase 1).
   - Examples: list devices, fetch system health, read interface status, run limited ping/traceroute.
 
 - **Advanced**:
+
   - Single-device configuration writes with low to moderate risk.
   - Exposed to `ops_rw` and `admin` users (Phase 4) on devices where `allow_advanced_writes=true`.
   - Examples: change system identity, update interface comments, modify DNS/NTP on lab devices.
@@ -138,6 +160,7 @@ This section provides complete JSON-RPC request/response schemas for **all tools
 ##### `device/list-devices`
 
 **Description:**
+
 ```
 List all registered RouterOS devices in the MCP service.
 
@@ -158,6 +181,7 @@ Tip: Use tags parameter to narrow results (e.g., {"site": "datacenter-1"}).
 **MCP Method**: `tools/call`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -166,14 +190,15 @@ Tip: Use tags parameter to narrow results (e.g., {"site": "datacenter-1"}).
   "params": {
     "name": "device/list-devices",
     "arguments": {
-      "environment": "lab",  // Optional filter
-      "tags": {"site": "main"}  // Optional filter
+      "environment": "lab", // Optional filter
+      "tags": { "site": "main" } // Optional filter
     }
   }
 }
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -195,7 +220,7 @@ Tip: Use tags parameter to narrow results (e.g., {"site": "datacenter-1"}).
           "environment": "lab",
           "status": "healthy",
           "routeros_version": "7.10.1",
-          "tags": {"site": "main", "role": "edge"},
+          "tags": { "site": "main", "role": "edge" },
           "allow_advanced_writes": true,
           "allow_professional_workflows": false
         }
@@ -211,8 +236,16 @@ Tip: Use tags parameter to narrow results (e.g., {"site": "datacenter-1"}).
 ##### `device/check-connectivity`
 
 **Description:**
+
 ```
 Verify if a device is reachable and responsive.
+
+Probe order:
+1. REST API (`GET /rest/system/resource`)
+2. SSH fallback (whitelisted `"/system/resource/print"`) if REST fails
+
+On success, the response states whether REST or SSH was used. On failure,
+the tool reports the classified reason and 2–3 safe remediation steps.
 
 Use when:
 - User asks "is device X reachable?" or "can you ping this router?"
@@ -223,7 +256,7 @@ Use when:
 
 Returns: Reachability status, response time, RouterOS version.
 
-Note: Lightweight check (only tests API connectivity, not full health).
+Note: Lightweight connectivity probe (REST first, SSH fallback); not a full health check.
 ```
 
 **Tier**: Fundamental
@@ -231,6 +264,7 @@ Note: Lightweight check (only tests API connectivity, not full health).
 **MCP Method**: `tools/call`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -245,7 +279,8 @@ Note: Lightweight check (only tests API connectivity, not full health).
 }
 ```
 
-**Response**:
+**Response (success)**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -262,11 +297,50 @@ Note: Lightweight check (only tests API connectivity, not full health).
       "device_id": "dev-lab-01",
       "reachable": true,
       "response_time_ms": 45,
-      "routeros_version": "7.10.1"
+      "routeros_version": "7.10.1",
+      "failure_reason": null,
+      "transport": "rest", // or "ssh" when fallback succeeds
+      "fallback_used": false,
+      "attempted_transports": ["rest"],
+      "suggestions": []
     }
   }
 }
 ```
+
+**Response (failure with guidance)**:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-002",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Device dev-lab-01 is not reachable (reason: timeout)"
+      }
+    ],
+    "isError": true,
+    "_meta": {
+      "device_id": "dev-lab-01",
+      "reachable": false,
+      "response_time_ms": 3000,
+      "failure_reason": "timeout",
+      "transport": "ssh", // last attempted transport
+      "fallback_used": true,
+      "attempted_transports": ["rest", "ssh"],
+      "suggestions": [
+        "Verify device is powered on and reachable on the management IP/port",
+        "Check firewall or NAT rules blocking HTTPS/SSH to the device",
+        "Increase routeros_rest_timeout_seconds for slow links"
+      ]
+    }
+  }
+}
+```
+
+**Requirement:** On failure, the tool MUST include a classified `failure_reason`, structured meta (including retries/timeout when available), and 2–3 actionable remediation steps (suggestions) that are safe to surface to users.
 
 ---
 
@@ -275,6 +349,7 @@ Note: Lightweight check (only tests API connectivity, not full health).
 ##### `system/get-overview`
 
 **Description:**
+
 ```
 Get comprehensive system information including identity, hardware, resource usage, and health metrics.
 
@@ -294,11 +369,13 @@ Tip: This is the primary "health dashboard" tool - use it as a starting point fo
 **Tier**: Fundamental
 **Phase**: Phase 1
 **RouterOS Endpoints**:
+
 - `GET /rest/system/resource`
 - `GET /rest/system/identity`
 - `GET /rest/system/routerboard`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -314,6 +391,7 @@ Tip: This is the primary "health dashboard" tool - use it as a starting point fo
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -357,6 +435,7 @@ Tip: This is the primary "health dashboard" tool - use it as a starting point fo
 ##### `system/get-packages`
 
 **Description:**
+
 ```
 List all installed RouterOS packages and their versions.
 
@@ -377,6 +456,7 @@ Note: Does not show available upgrades (use RouterOS upgrade tools for that).
 **RouterOS Endpoint**: `GET /rest/system/package`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -392,6 +472,7 @@ Note: Does not show available upgrades (use RouterOS upgrade tools for that).
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -431,6 +512,7 @@ Note: Does not show available upgrades (use RouterOS upgrade tools for that).
 ##### `system/get-clock`
 
 **Description:**
+
 ```
 Get current system time, timezone, and time configuration.
 
@@ -451,6 +533,7 @@ Tip: Compare with ntp/get-status to verify time synchronization health.
 **RouterOS Endpoint**: `GET /rest/system/clock`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -466,6 +549,7 @@ Tip: Compare with ntp/get-status to verify time synchronization health.
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -496,6 +580,7 @@ Tip: Compare with ntp/get-status to verify time synchronization health.
 ##### `interface/list-interfaces`
 
 **Description:**
+
 ```
 List all network interfaces with operational status and metadata.
 
@@ -517,6 +602,7 @@ Tip: Use this first to discover interface names/IDs, then use interface/get-inte
 **RouterOS Endpoint**: `GET /rest/interface`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -532,6 +618,7 @@ Tip: Use this first to discover interface names/IDs, then use interface/get-inte
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -579,6 +666,7 @@ Tip: Use this first to discover interface names/IDs, then use interface/get-inte
 ##### `interface/get-interface`
 
 **Description:**
+
 ```
 Get detailed information about a specific interface.
 
@@ -599,6 +687,7 @@ Note: Requires interface ID (from interface/list-interfaces) or name.
 **RouterOS Endpoint**: `GET /rest/interface/{id}`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -615,6 +704,7 @@ Note: Requires interface ID (from interface/list-interfaces) or name.
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -650,6 +740,7 @@ Note: Requires interface ID (from interface/list-interfaces) or name.
 ##### `interface/get-stats`
 
 **Description:**
+
 ```
 Get real-time traffic statistics for network interfaces.
 
@@ -670,6 +761,7 @@ Tip: This is a snapshot at the time of the call. For trends, compare multiple ca
 **RouterOS Endpoint**: `GET /rest/interface/monitor-traffic`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -679,13 +771,14 @@ Tip: This is a snapshot at the time of the call. For trends, compare multiple ca
     "name": "interface/get-stats",
     "arguments": {
       "device_id": "dev-lab-01",
-      "interface_names": ["ether1", "ether2"]  // Optional filter
+      "interface_names": ["ether1", "ether2"] // Optional filter
     }
   }
 }
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -728,6 +821,7 @@ Tip: This is a snapshot at the time of the call. For trends, compare multiple ca
 ##### `ip/list-addresses`
 
 **Description:**
+
 ```
 List all IP addresses configured on the device.
 
@@ -749,6 +843,7 @@ Tip: Returns both primary and secondary addresses on all interfaces.
 **RouterOS Endpoint**: `GET /rest/ip/address`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -764,6 +859,7 @@ Tip: Returns both primary and secondary addresses on all interfaces.
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -807,6 +903,7 @@ Tip: Returns both primary and secondary addresses on all interfaces.
 ##### `ip/get-address`
 
 **Description:**
+
 ```
 Get details of a specific IP address configuration.
 
@@ -826,6 +923,7 @@ Note: Requires address ID (from ip/list-addresses).
 **RouterOS Endpoint**: `GET /rest/ip/address/{id}`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -842,6 +940,7 @@ Note: Requires address ID (from ip/list-addresses).
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -876,6 +975,7 @@ Note: Requires address ID (from ip/list-addresses).
 ##### `ip/get-arp-table`
 
 **Description:**
+
 ```
 Get ARP (Address Resolution Protocol) table entries.
 
@@ -896,6 +996,7 @@ Tip: Only shows devices that have recently communicated with the router.
 **RouterOS Endpoint**: `GET /rest/ip/arp`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -911,6 +1012,7 @@ Tip: Only shows devices that have recently communicated with the router.
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -947,6 +1049,7 @@ Tip: Only shows devices that have recently communicated with the router.
 ##### `dns/get-status`
 
 **Description:**
+
 ```
 Get DNS server configuration and cache statistics.
 
@@ -968,6 +1071,7 @@ Tip: Use with tool/ping to verify DNS server reachability.
 **RouterOS Endpoint**: `GET /rest/ip/dns`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -983,6 +1087,7 @@ Tip: Use with tool/ping to verify DNS server reachability.
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1011,6 +1116,7 @@ Tip: Use with tool/ping to verify DNS server reachability.
 ##### `dns/get-cache`
 
 **Description:**
+
 ```
 View DNS cache entries (recently resolved domains).
 
@@ -1031,6 +1137,7 @@ Note: Limited to 1000 entries max. Use limit parameter to control result size.
 **RouterOS Endpoint**: `GET /rest/ip/dns/cache`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1040,13 +1147,14 @@ Note: Limited to 1000 entries max. Use limit parameter to control result size.
     "name": "dns/get-cache",
     "arguments": {
       "device_id": "dev-lab-01",
-      "limit": 100  // Optional, max 1000
+      "limit": 100 // Optional, max 1000
     }
   }
 }
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1083,6 +1191,7 @@ Note: Limited to 1000 entries max. Use limit parameter to control result size.
 ##### `ntp/get-status`
 
 **Description:**
+
 ```
 Get NTP client configuration and synchronization status.
 
@@ -1102,10 +1211,12 @@ Tip: Check offset_ms - large values indicate sync problems. Compare with system/
 **Tier**: Fundamental
 **Phase**: Phase 1
 **RouterOS Endpoints**:
+
 - `GET /rest/system/ntp/client`
 - `GET /rest/system/ntp/client/monitor`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1121,6 +1232,7 @@ Tip: Check offset_ms - large values indicate sync problems. Compare with system/
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1153,6 +1265,7 @@ Tip: Check offset_ms - large values indicate sync problems. Compare with system/
 ##### `routing/get-summary`
 
 **Description:**
+
 ```
 Get routing table summary with route counts and key routes.
 
@@ -1174,6 +1287,7 @@ Tip: For detailed single route info, use routing/get-route.
 **RouterOS Endpoint**: `GET /rest/ip/route`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1189,6 +1303,7 @@ Tip: For detailed single route info, use routing/get-route.
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1226,6 +1341,7 @@ Tip: For detailed single route info, use routing/get-route.
 ##### `routing/get-route`
 
 **Description:**
+
 ```
 Get detailed information about a specific route.
 
@@ -1245,6 +1361,7 @@ Note: Requires route ID (from routing/get-summary).
 **RouterOS Endpoint**: `GET /rest/ip/route/{id}`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1261,6 +1378,7 @@ Note: Requires route ID (from routing/get-summary).
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1298,6 +1416,7 @@ Note: Requires route ID (from routing/get-summary).
 ##### `firewall/list-filter-rules`
 
 **Description:**
+
 ```
 List firewall filter rules (input/forward/output chains).
 
@@ -1319,6 +1438,7 @@ Note: Read-only in Phase 1. Modification requires Phase 2+.
 **RouterOS Endpoint**: `GET /rest/ip/firewall/filter`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1334,6 +1454,7 @@ Note: Read-only in Phase 1. Modification requires Phase 2+.
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1370,6 +1491,7 @@ Note: Read-only in Phase 1. Modification requires Phase 2+.
 ##### `firewall/list-nat-rules`
 
 **Description:**
+
 ```
 List NAT (Network Address Translation) rules.
 
@@ -1390,6 +1512,7 @@ Note: Read-only in Phase 1.
 **RouterOS Endpoint**: `GET /rest/ip/firewall/nat`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1405,6 +1528,7 @@ Note: Read-only in Phase 1.
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1440,6 +1564,7 @@ Note: Read-only in Phase 1.
 ##### `firewall/list-address-lists`
 
 **Description:**
+
 ```
 List firewall address-list entries (IP-based allow/deny lists).
 
@@ -1461,6 +1586,7 @@ Tip: Filter by list_name parameter to view specific list. Only MCP-managed lists
 **RouterOS Endpoint**: `GET /rest/ip/firewall/address-list`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1470,13 +1596,14 @@ Tip: Filter by list_name parameter to view specific list. Only MCP-managed lists
     "name": "firewall/list-address-lists",
     "arguments": {
       "device_id": "dev-lab-01",
-      "list_name": "mcp-managed-hosts"  // Optional filter
+      "list_name": "mcp-managed-hosts" // Optional filter
     }
   }
 }
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1513,6 +1640,7 @@ Tip: Filter by list_name parameter to view specific list. Only MCP-managed lists
 ##### `logs/get-recent`
 
 **Description:**
+
 ```
 Retrieve recent system logs with optional filtering.
 
@@ -1539,6 +1667,7 @@ Tip: Start with small limit (e.g., 100) and specific topics to avoid overwhelmin
 **RouterOS Endpoint**: `GET /rest/log`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1548,14 +1677,15 @@ Tip: Start with small limit (e.g., 100) and specific topics to avoid overwhelmin
     "name": "logs/get-recent",
     "arguments": {
       "device_id": "dev-lab-01",
-      "limit": 100,  // Max 1000
-      "topics": ["system", "error"]  // Optional filter
+      "limit": 100, // Max 1000
+      "topics": ["system", "error"] // Optional filter
     }
   }
 }
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1589,6 +1719,7 @@ Tip: Start with small limit (e.g., 100) and specific topics to avoid overwhelmin
 ##### `logs/get-config`
 
 **Description:**
+
 ```
 Get logging configuration (which topics log to which destinations).
 
@@ -1609,6 +1740,7 @@ Note: Configuration is read-only in Phase 1.
 **RouterOS Endpoint**: `GET /rest/system/logging`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1624,6 +1756,7 @@ Note: Configuration is read-only in Phase 1.
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1658,6 +1791,7 @@ Note: Configuration is read-only in Phase 1.
 ##### `tool/ping`
 
 **Description:**
+
 ```
 Run ICMP ping test from the router to a target address.
 
@@ -1683,6 +1817,7 @@ Tip: Use interval_ms parameter to control ping frequency.
 **RouterOS Endpoint**: `POST /rest/tool/ping`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1693,7 +1828,7 @@ Tip: Use interval_ms parameter to control ping frequency.
     "arguments": {
       "device_id": "dev-lab-01",
       "address": "8.8.8.8",
-      "count": 4,  // Max 10
+      "count": 4, // Max 10
       "interval_ms": 1000
     }
   }
@@ -1701,6 +1836,7 @@ Tip: Use interval_ms parameter to control ping frequency.
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1732,6 +1868,7 @@ Tip: Use interval_ms parameter to control ping frequency.
 ##### `tool/traceroute`
 
 **Description:**
+
 ```
 Run traceroute to show network path to destination.
 
@@ -1756,6 +1893,7 @@ Tip: Some hops may not respond (shown as * in results).
 **RouterOS Endpoint**: `POST /rest/tool/traceroute`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1766,13 +1904,14 @@ Tip: Some hops may not respond (shown as * in results).
     "arguments": {
       "device_id": "dev-lab-01",
       "address": "8.8.8.8",
-      "count": 1  // Max 3 probes per hop
+      "count": 1 // Max 3 probes per hop
     }
   }
 }
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1811,6 +1950,7 @@ Tip: Some hops may not respond (shown as * in results).
 ##### `tool/bandwidth-test`
 
 **Description:**
+
 ```
 Run bandwidth test between router and target RouterOS device.
 
@@ -1836,6 +1976,7 @@ Note: This is an active test that consumes bandwidth.
 **RouterOS Endpoint**: `POST /rest/tool/bandwidth-test`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1846,14 +1987,15 @@ Note: This is an active test that consumes bandwidth.
     "arguments": {
       "device_id": "dev-lab-01",
       "address": "192.168.1.254",
-      "direction": "both",  // send, receive, both
-      "duration_seconds": 10  // Max 60
+      "direction": "both", // send, receive, both
+      "duration_seconds": 10 // Max 60
     }
   }
 }
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1890,6 +2032,7 @@ Note: This is an active test that consumes bandwidth.
 ##### `device/get-health-data`
 
 **Description:**
+
 ```
 Get complete device health data including current metrics and historical trends.
 
@@ -1909,6 +2052,7 @@ In clients supporting Resources, use the resource URI directly for more efficien
 **Phase**: 1 (Fallback for Phase 2 resource)
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1926,6 +2070,7 @@ In clients supporting Resources, use the resource URI directly for more efficien
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -1967,6 +2112,7 @@ In clients supporting Resources, use the resource URI directly for more efficien
 ##### `device/get-config-snapshot`
 
 **Description:**
+
 ```
 Get device configuration snapshot (export).
 
@@ -1985,6 +2131,7 @@ Note: Phase-1 fallback for device://{device_id}/config resource.
 **Phase**: 1 (Fallback)
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2001,6 +2148,7 @@ Note: Phase-1 fallback for device://{device_id}/config resource.
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2031,6 +2179,7 @@ Note: Phase-1 fallback for device://{device_id}/config resource.
 ##### `fleet/get-summary`
 
 **Description:**
+
 ```
 Get fleet-wide summary and health status.
 
@@ -2049,6 +2198,7 @@ Note: Phase-1 fallback for fleet://{environment}/summary resource.
 **Phase**: 1 (Fallback)
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2064,6 +2214,7 @@ Note: Phase-1 fallback for fleet://{environment}/summary resource.
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2108,6 +2259,7 @@ Note: Phase-1 fallback for fleet://{environment}/summary resource.
 ##### `plan/get-details`
 
 **Description:**
+
 ```
 Get complete plan details including all target devices and proposed changes.
 
@@ -2126,6 +2278,7 @@ Note: Phase-1 fallback for plan://{plan_id} resource.
 **Phase**: 1 (Fallback)
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2141,6 +2294,7 @@ Note: Phase-1 fallback for plan://{plan_id} resource.
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2187,6 +2341,7 @@ Note: Phase-1 fallback for plan://{plan_id} resource.
 ##### `audit/get-events`
 
 **Description:**
+
 ```
 Get audit events with optional filtering.
 
@@ -2206,6 +2361,7 @@ Note: Phase-1 fallback for audit://{device_id}?start_time={ts}&action={action} r
 **Phase**: 1 (Fallback)
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2224,6 +2380,7 @@ Note: Phase-1 fallback for audit://{device_id}?start_time={ts}&action={action} r
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2265,6 +2422,7 @@ Note: Phase-1 fallback for audit://{device_id}?start_time={ts}&action={action} r
 ##### `snapshot/get-content`
 
 **Description:**
+
 ```
 Get configuration snapshot content by snapshot ID.
 
@@ -2283,6 +2441,7 @@ Note: Phase-1 fallback for snapshot://{snapshot_id} resource.
 **Phase**: 1 (Fallback)
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2298,6 +2457,7 @@ Note: Phase-1 fallback for snapshot://{snapshot_id} resource.
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2339,6 +2499,7 @@ Note: Phase-1 fallback for snapshot://{snapshot_id} resource.
 ##### `system/update-identity`
 
 **Description:**
+
 ```
 Update the system identity (device hostname).
 
@@ -2364,6 +2525,7 @@ Safety: Requires allow_advanced_writes=true on device. Use dry_run=true to previ
 **RouterOS Endpoint**: `PATCH /rest/system/identity`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2374,13 +2536,14 @@ Safety: Requires allow_advanced_writes=true on device. Use dry_run=true to previ
     "arguments": {
       "device_id": "dev-lab-01",
       "identity": "router-lab-01-new",
-      "dry_run": false  // Optional, default false
+      "dry_run": false // Optional, default false
     }
   }
 }
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2410,6 +2573,7 @@ Safety: Requires allow_advanced_writes=true on device. Use dry_run=true to previ
 ##### `interface/update-comment`
 
 **Description:**
+
 ```
 Update interface comment (description field).
 
@@ -2433,6 +2597,7 @@ Safety: Low-risk operation. Requires allow_advanced_writes=true.
 **RouterOS Endpoint**: `PATCH /rest/interface/{id}`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2451,6 +2616,7 @@ Safety: Low-risk operation. Requires allow_advanced_writes=true.
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2482,6 +2648,7 @@ Safety: Low-risk operation. Requires allow_advanced_writes=true.
 ##### `ip/add-secondary-address`
 
 **Description:**
+
 ```
 Add a secondary IP address to an interface.
 
@@ -2511,6 +2678,7 @@ Safety:
 **RouterOS Endpoint**: `PUT /rest/ip/address`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2530,6 +2698,7 @@ Safety:
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2558,6 +2727,7 @@ Safety:
 ##### `ip/remove-secondary-address`
 
 **Description:**
+
 ```
 Remove a secondary IP address (with safety checks).
 
@@ -2585,6 +2755,7 @@ Returns: Changed status, removed address.
 **RouterOS Endpoint**: `DELETE /rest/ip/address/{id}`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2602,6 +2773,7 @@ Returns: Changed status, removed address.
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2629,6 +2801,7 @@ Returns: Changed status, removed address.
 ##### `ip/update-address-list-entry`
 
 **Description:**
+
 ```
 Add or remove entries from MCP-managed firewall address lists.
 
@@ -2658,10 +2831,12 @@ Tip: Use timeout parameter for temporary entries (e.g., "7d" for 7 days).
 **Tier**: Advanced
 **Phase**: Phase 2
 **RouterOS Endpoints**:
+
 - `PUT /rest/ip/firewall/address-list` (add)
 - `DELETE /rest/ip/firewall/address-list/{id}` (remove)
 
 **Request (Add)**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2675,7 +2850,7 @@ Tip: Use timeout parameter for temporary entries (e.g., "7d" for 7 days).
       "list_name": "mcp-managed-hosts",
       "address": "10.0.1.200",
       "comment": "New server",
-      "timeout": "7d",  // Optional
+      "timeout": "7d", // Optional
       "dry_run": false
     }
   }
@@ -2683,6 +2858,7 @@ Tip: Use timeout parameter for temporary entries (e.g., "7d" for 7 days).
 ```
 
 **Response (Add)**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2714,6 +2890,7 @@ Tip: Use timeout parameter for temporary entries (e.g., "7d" for 7 days).
 ##### `dns/update-servers`
 
 **Description:**
+
 ```
 Update DNS server configuration.
 
@@ -2745,6 +2922,7 @@ Tip: For multi-device changes, use config/plan-dns-ntp-rollout (Professional tie
 **RouterOS Endpoint**: `PATCH /rest/ip/dns`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2762,6 +2940,7 @@ Tip: For multi-device changes, use config/plan-dns-ntp-rollout (Professional tie
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2789,6 +2968,7 @@ Tip: For multi-device changes, use config/plan-dns-ntp-rollout (Professional tie
 ##### `dns/flush-cache`
 
 **Description:**
+
 ```
 Flush (clear) DNS cache.
 
@@ -2815,6 +2995,7 @@ Safety: Low-risk operation. Requires allow_advanced_writes=true.
 **RouterOS Endpoint**: `POST /rest/ip/dns/cache/flush`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2830,6 +3011,7 @@ Safety: Low-risk operation. Requires allow_advanced_writes=true.
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2858,6 +3040,7 @@ Safety: Low-risk operation. Requires allow_advanced_writes=true.
 ##### `ntp/update-servers`
 
 **Description:**
+
 ```
 Update NTP server configuration.
 
@@ -2890,6 +3073,7 @@ Tip: For multi-device changes, use config/plan-dns-ntp-rollout (Professional tie
 **RouterOS Endpoint**: `PATCH /rest/system/ntp/client`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2908,6 +3092,7 @@ Tip: For multi-device changes, use config/plan-dns-ntp-rollout (Professional tie
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2941,6 +3126,7 @@ Tip: For multi-device changes, use config/plan-dns-ntp-rollout (Professional tie
 ##### `config/plan-dns-ntp-rollout`
 
 **Description:**
+
 ```
 Create execution plan for updating DNS/NTP servers across multiple devices.
 
@@ -2970,6 +3156,7 @@ Tip: Always review plan details before applying!
 **Pattern**: Plan step (no RouterOS changes)
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -2988,6 +3175,7 @@ Tip: Always review plan details before applying!
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -3031,6 +3219,7 @@ Tip: Always review plan details before applying!
 ##### `config/apply-dns-ntp-rollout`
 
 **Description:**
+
 ```
 Execute approved DNS/NTP rollout plan.
 
@@ -3063,6 +3252,7 @@ Note: Execution is sequential across devices to minimize blast radius.
 **Pattern**: Apply step (requires approval token in Phase 4)
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -3072,13 +3262,14 @@ Note: Execution is sequential across devices to minimize blast radius.
     "name": "config/apply-dns-ntp-rollout",
     "arguments": {
       "plan_id": "plan-20250115-001",
-      "approval_token": "approval-token-xyz"  // Phase 4: multi-user approval; Phase 1: self-approval allowed
+      "approval_token": "approval-token-xyz" // Phase 4: multi-user approval; Phase 1: self-approval allowed
     }
   }
 }
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -3115,6 +3306,7 @@ Note: Execution is sequential across devices to minimize blast radius.
 ##### `config/plan-address-list-sync`
 
 **Description:**
+
 ```
 Create plan for synchronizing firewall address-list entries across devices.
 
@@ -3143,6 +3335,7 @@ Tip: Useful for managing distributed firewall policies.
 **Pattern**: Plan step
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -3154,8 +3347,8 @@ Tip: Useful for managing distributed firewall policies.
       "device_ids": ["dev-lab-01", "dev-lab-02"],
       "list_name": "mcp-managed-hosts",
       "addresses": [
-        {"address": "10.0.1.100", "comment": "MCP server"},
-        {"address": "10.0.1.200", "comment": "Monitoring"}
+        { "address": "10.0.1.100", "comment": "MCP server" },
+        { "address": "10.0.1.200", "comment": "Monitoring" }
       ],
       "description": "Sync managed hosts list"
     }
@@ -3164,6 +3357,7 @@ Tip: Useful for managing distributed firewall policies.
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -3204,6 +3398,7 @@ Tip: Useful for managing distributed firewall policies.
 ##### `config/apply-address-list-sync`
 
 **Description:**
+
 ```
 Execute approved address-list synchronization plan.
 
@@ -3235,6 +3430,7 @@ Note: Changes may affect active connections if firewall rules reference these li
 **Pattern**: Apply step
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -3251,6 +3447,7 @@ Note: Changes may affect active connections if firewall rules reference these li
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -3293,6 +3490,7 @@ Note: Changes may affect active connections if firewall rules reference these li
 ##### `routing/add-static-route`
 
 **Description:**
+
 ```
 Add a static route (high-risk operation).
 
@@ -3326,6 +3524,7 @@ Warning: Routing changes can cause connectivity loss. Always use dry_run first!
 **RouterOS Endpoint**: `PUT /rest/ip/route`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -3339,13 +3538,14 @@ Warning: Routing changes can cause connectivity loss. Always use dry_run first!
       "gateway": "192.168.1.254",
       "distance": 1,
       "comment": "Route to remote site",
-      "dry_run": true  // Plan mode
+      "dry_run": true // Plan mode
     }
   }
 }
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -3377,6 +3577,7 @@ Warning: Routing changes can cause connectivity loss. Always use dry_run first!
 ##### `routing/remove-static-route`
 
 **Description:**
+
 ```
 Remove a static route (high-risk operation).
 
@@ -3408,6 +3609,7 @@ Warning: Removing routes can cause connectivity loss. Verify alternate paths fir
 **RouterOS Endpoint**: `DELETE /rest/ip/route/{id}`
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -3425,6 +3627,7 @@ Warning: Removing routes can cause connectivity loss. Verify alternate paths fir
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -3458,6 +3661,7 @@ Warning: Removing routes can cause connectivity loss. Verify alternate paths fir
 ##### `device/register-device`
 
 **Description:**
+
 ```
 Register a new RouterOS device in the MCP service.
 
@@ -3492,6 +3696,7 @@ Next steps:
 **MCP Operation**: Internal database operation
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -3503,12 +3708,12 @@ Next steps:
       "name": "router-lab-04",
       "management_address": "192.168.1.4:443",
       "environment": "lab",
-      "tags": {"site": "main", "role": "access"},
+      "tags": { "site": "main", "role": "access" },
       "allow_advanced_writes": true,
       "allow_professional_workflows": false,
       "credentials": {
         "username": "admin",
-        "password": "secret123"  // Will be encrypted
+        "password": "secret123" // Will be encrypted
       }
     }
   }
@@ -3516,6 +3721,7 @@ Next steps:
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -3545,6 +3751,7 @@ Next steps:
 ##### `device/update-device`
 
 **Description:**
+
 ```
 Update device metadata, tags, or capability flags.
 
@@ -3574,6 +3781,7 @@ Tip: Use tags for flexible device grouping (e.g., {"site": "dc1", "role": "edge"
 **MCP Operation**: Internal database operation
 
 **Request**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -3583,7 +3791,7 @@ Tip: Use tags for flexible device grouping (e.g., {"site": "dc1", "role": "edge"
     "name": "device/update-device",
     "arguments": {
       "device_id": "dev-lab-01",
-      "tags": {"site": "main", "role": "edge", "region": "us-west"},
+      "tags": { "site": "main", "role": "edge", "region": "us-west" },
       "allow_advanced_writes": true
     }
   }
@@ -3591,6 +3799,7 @@ Tip: Use tags for flexible device grouping (e.g., {"site": "dc1", "role": "edge"
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -3617,48 +3826,48 @@ Tip: Use tags for flexible device grouping (e.g., {"site": "dc1", "role": "edge"
 
 ## Tool Catalog Summary Table
 
-| Tool Name | Topic | Tier | Phase | RouterOS Endpoint |
-|-----------|-------|------|-------|-------------------|
-| `device/list-devices` | Device | Fundamental | 1 | N/A (MCP-only) |
-| `device/check-connectivity` | Device | Fundamental | 1 | `GET /rest/system/identity` |
-| `device/register-device` | Device | Advanced | 1 | N/A (MCP-only) |
-| `device/update-device` | Device | Advanced | 1 | N/A (MCP-only) |
-| `system/get-overview` | System | Fundamental | 1 | Multiple `/rest/system/*` |
-| `system/get-packages` | System | Fundamental | 1 | `GET /rest/system/package` |
-| `system/get-clock` | System | Fundamental | 1 | `GET /rest/system/clock` |
-| `system/update-identity` | System | Advanced | 2 | `PATCH /rest/system/identity` |
-| `interface/list-interfaces` | Interface | Fundamental | 1 | `GET /rest/interface` |
-| `interface/get-interface` | Interface | Fundamental | 1 | `GET /rest/interface/{id}` |
-| `interface/get-stats` | Interface | Fundamental | 1 | `GET /rest/interface/monitor-traffic` |
-| `interface/update-comment` | Interface | Advanced | 2 | `PATCH /rest/interface/{id}` |
-| `ip/list-addresses` | IP | Fundamental | 1 | `GET /rest/ip/address` |
-| `ip/get-address` | IP | Fundamental | 1 | `GET /rest/ip/address/{id}` |
-| `ip/get-arp-table` | IP | Fundamental | 1 | `GET /rest/ip/arp` |
-| `ip/add-secondary-address` | IP | Advanced | 2 | `PUT /rest/ip/address` |
-| `ip/remove-secondary-address` | IP | Advanced | 2 | `DELETE /rest/ip/address/{id}` |
-| `ip/update-address-list-entry` | IP | Advanced | 2 | Multiple firewall endpoints |
-| `dns/get-status` | DNS | Fundamental | 1 | `GET /rest/ip/dns` |
-| `dns/get-cache` | DNS | Fundamental | 1 | `GET /rest/ip/dns/cache` |
-| `dns/update-servers` | DNS | Advanced | 2 | `PATCH /rest/ip/dns` |
-| `dns/flush-cache` | DNS | Advanced | 2 | `POST /rest/ip/dns/cache/flush` |
-| `ntp/get-status` | NTP | Fundamental | 1 | Multiple NTP endpoints |
-| `ntp/update-servers` | NTP | Advanced | 2 | `PATCH /rest/system/ntp/client` |
-| `routing/get-summary` | Routing | Fundamental | 1 | `GET /rest/ip/route` |
-| `routing/get-route` | Routing | Fundamental | 1 | `GET /rest/ip/route/{id}` |
-| `routing/add-static-route` | Routing | Professional | 4 | `PUT /rest/ip/route` |
-| `routing/remove-static-route` | Routing | Professional | 4 | `DELETE /rest/ip/route/{id}` |
-| `firewall/list-filter-rules` | Firewall | Fundamental | 1 | `GET /rest/ip/firewall/filter` |
-| `firewall/list-nat-rules` | Firewall | Fundamental | 1 | `GET /rest/ip/firewall/nat` |
-| `firewall/list-address-lists` | Firewall | Fundamental | 1 | `GET /rest/ip/firewall/address-list` |
-| `logs/get-recent` | Logs | Fundamental | 1 | `GET /rest/log` |
-| `logs/get-config` | Logs | Fundamental | 1 | `GET /rest/system/logging` |
-| `tool/ping` | Tool | Fundamental | 1 | `POST /rest/tool/ping` |
-| `tool/traceroute` | Tool | Fundamental | 1 | `POST /rest/tool/traceroute` |
-| `tool/bandwidth-test` | Tool | Fundamental | 1 | `POST /rest/tool/bandwidth-test` |
-| `config/plan-dns-ntp-rollout` | Config | Professional | 4 | N/A (plan step) |
-| `config/apply-dns-ntp-rollout` | Config | Professional | 4 | Multiple endpoints |
-| `config/plan-address-list-sync` | Config | Professional | 4 | N/A (plan step) |
-| `config/apply-address-list-sync` | Config | Professional | 4 | Multiple endpoints |
+| Tool Name                        | Topic     | Tier         | Phase | RouterOS Endpoint                     |
+| -------------------------------- | --------- | ------------ | ----- | ------------------------------------- |
+| `device/list-devices`            | Device    | Fundamental  | 1     | N/A (MCP-only)                        |
+| `device/check-connectivity`      | Device    | Fundamental  | 1     | `GET /rest/system/identity`           |
+| `device/register-device`         | Device    | Advanced     | 1     | N/A (MCP-only)                        |
+| `device/update-device`           | Device    | Advanced     | 1     | N/A (MCP-only)                        |
+| `system/get-overview`            | System    | Fundamental  | 1     | Multiple `/rest/system/*`             |
+| `system/get-packages`            | System    | Fundamental  | 1     | `GET /rest/system/package`            |
+| `system/get-clock`               | System    | Fundamental  | 1     | `GET /rest/system/clock`              |
+| `system/update-identity`         | System    | Advanced     | 2     | `PATCH /rest/system/identity`         |
+| `interface/list-interfaces`      | Interface | Fundamental  | 1     | `GET /rest/interface`                 |
+| `interface/get-interface`        | Interface | Fundamental  | 1     | `GET /rest/interface/{id}`            |
+| `interface/get-stats`            | Interface | Fundamental  | 1     | `GET /rest/interface/monitor-traffic` |
+| `interface/update-comment`       | Interface | Advanced     | 2     | `PATCH /rest/interface/{id}`          |
+| `ip/list-addresses`              | IP        | Fundamental  | 1     | `GET /rest/ip/address`                |
+| `ip/get-address`                 | IP        | Fundamental  | 1     | `GET /rest/ip/address/{id}`           |
+| `ip/get-arp-table`               | IP        | Fundamental  | 1     | `GET /rest/ip/arp`                    |
+| `ip/add-secondary-address`       | IP        | Advanced     | 2     | `PUT /rest/ip/address`                |
+| `ip/remove-secondary-address`    | IP        | Advanced     | 2     | `DELETE /rest/ip/address/{id}`        |
+| `ip/update-address-list-entry`   | IP        | Advanced     | 2     | Multiple firewall endpoints           |
+| `dns/get-status`                 | DNS       | Fundamental  | 1     | `GET /rest/ip/dns`                    |
+| `dns/get-cache`                  | DNS       | Fundamental  | 1     | `GET /rest/ip/dns/cache`              |
+| `dns/update-servers`             | DNS       | Advanced     | 2     | `PATCH /rest/ip/dns`                  |
+| `dns/flush-cache`                | DNS       | Advanced     | 2     | `POST /rest/ip/dns/cache/flush`       |
+| `ntp/get-status`                 | NTP       | Fundamental  | 1     | Multiple NTP endpoints                |
+| `ntp/update-servers`             | NTP       | Advanced     | 2     | `PATCH /rest/system/ntp/client`       |
+| `routing/get-summary`            | Routing   | Fundamental  | 1     | `GET /rest/ip/route`                  |
+| `routing/get-route`              | Routing   | Fundamental  | 1     | `GET /rest/ip/route/{id}`             |
+| `routing/add-static-route`       | Routing   | Professional | 4     | `PUT /rest/ip/route`                  |
+| `routing/remove-static-route`    | Routing   | Professional | 4     | `DELETE /rest/ip/route/{id}`          |
+| `firewall/list-filter-rules`     | Firewall  | Fundamental  | 1     | `GET /rest/ip/firewall/filter`        |
+| `firewall/list-nat-rules`        | Firewall  | Fundamental  | 1     | `GET /rest/ip/firewall/nat`           |
+| `firewall/list-address-lists`    | Firewall  | Fundamental  | 1     | `GET /rest/ip/firewall/address-list`  |
+| `logs/get-recent`                | Logs      | Fundamental  | 1     | `GET /rest/log`                       |
+| `logs/get-config`                | Logs      | Fundamental  | 1     | `GET /rest/system/logging`            |
+| `tool/ping`                      | Tool      | Fundamental  | 1     | `POST /rest/tool/ping`                |
+| `tool/traceroute`                | Tool      | Fundamental  | 1     | `POST /rest/tool/traceroute`          |
+| `tool/bandwidth-test`            | Tool      | Fundamental  | 1     | `POST /rest/tool/bandwidth-test`      |
+| `config/plan-dns-ntp-rollout`    | Config    | Professional | 4     | N/A (plan step)                       |
+| `config/apply-dns-ntp-rollout`   | Config    | Professional | 4     | Multiple endpoints                    |
+| `config/plan-address-list-sync`  | Config    | Professional | 4     | N/A (plan step)                       |
+| `config/apply-address-list-sync` | Config    | Professional | 4     | Multiple endpoints                    |
 
 **Total: 46 tools** (23 Phase 1 fundamental [including 6 fallback tools], 9 Phase 2 advanced, 14 Phase 4 professional)
 
@@ -3748,6 +3957,7 @@ SYSTEM_GET_OVERVIEW_METADATA = ToolMetadata(
 ### Metadata by Tool Category
 
 **Read-Only Fundamental Tools:**
+
 - `timeout_seconds`: 10-30s
 - `idempotent`: true
 - `supports_dry_run`: false (no writes)
@@ -3755,6 +3965,7 @@ SYSTEM_GET_OVERVIEW_METADATA = ToolMetadata(
 - `estimated_tokens`: 200-2000
 
 **Single-Device Write Tools (Advanced):**
+
 - `timeout_seconds`: 15-30s
 - `idempotent`: true (read-modify-write pattern)
 - `supports_dry_run`: true
@@ -3762,6 +3973,7 @@ SYSTEM_GET_OVERVIEW_METADATA = ToolMetadata(
 - `estimated_tokens`: 100-500
 
 **Multi-Device Workflows (Professional):**
+
 - `timeout_seconds`: 60-300s
 - `idempotent`: false (plan/apply pattern)
 - `supports_dry_run`: N/A (plan step is dry-run)
@@ -3769,6 +3981,7 @@ SYSTEM_GET_OVERVIEW_METADATA = ToolMetadata(
 - `estimated_tokens`: 1000-10000
 
 **Diagnostic Tools:**
+
 - `timeout_seconds`: 30-120s
 - `idempotent`: false (network-dependent)
 - `supports_dry_run`: false
@@ -3793,8 +4006,8 @@ SYSTEM_GET_OVERVIEW_METADATA = ToolMetadata(
     "name": "logs/get-recent",
     "arguments": {
       "device_id": "dev-lab-01",
-      "limit": 100,      // Max items to return (default: 100, max: 1000)
-      "offset": 0,       // Skip N items (default: 0)
+      "limit": 100, // Max items to return (default: 100, max: 1000)
+      "offset": 0, // Skip N items (default: 0)
       "topics": ["system", "error"]
     }
   }
@@ -3833,17 +4046,17 @@ SYSTEM_GET_OVERVIEW_METADATA = ToolMetadata(
 
 ### Tools Supporting Pagination
 
-| Tool Name | Default Limit | Max Limit | Total Count Source |
-|-----------|---------------|-----------|-------------------|
-| `device/list-devices` | 100 | 1000 | MCP database |
-| `interface/list-interfaces` | 50 | 500 | RouterOS `/rest/interface` |
-| `ip/list-addresses` | 50 | 500 | RouterOS `/rest/ip/address` |
-| `ip/get-arp-table` | 100 | 1000 | RouterOS `/rest/ip/arp` |
-| `firewall/list-filter-rules` | 50 | 500 | RouterOS firewall API |
-| `firewall/list-nat-rules` | 50 | 500 | RouterOS firewall API |
-| `firewall/list-address-lists` | 100 | 1000 | RouterOS firewall API |
-| `logs/get-recent` | 100 | 1000 | RouterOS `/rest/log` |
-| `routing/get-summary` | 100 | 1000 | RouterOS `/rest/ip/route` |
+| Tool Name                     | Default Limit | Max Limit | Total Count Source          |
+| ----------------------------- | ------------- | --------- | --------------------------- |
+| `device/list-devices`         | 100           | 1000      | MCP database                |
+| `interface/list-interfaces`   | 50            | 500       | RouterOS `/rest/interface`  |
+| `ip/list-addresses`           | 50            | 500       | RouterOS `/rest/ip/address` |
+| `ip/get-arp-table`            | 100           | 1000      | RouterOS `/rest/ip/arp`     |
+| `firewall/list-filter-rules`  | 50            | 500       | RouterOS firewall API       |
+| `firewall/list-nat-rules`     | 50            | 500       | RouterOS firewall API       |
+| `firewall/list-address-lists` | 100           | 1000      | RouterOS firewall API       |
+| `logs/get-recent`             | 100           | 1000      | RouterOS `/rest/log`        |
+| `routing/get-summary`         | 100           | 1000      | RouterOS `/rest/ip/route`   |
 
 ---
 
@@ -3854,48 +4067,58 @@ SYSTEM_GET_OVERVIEW_METADATA = ToolMetadata(
 ### By Tool Category
 
 **Device Management:**
+
 - `device/list-devices`: 200-2000 tokens (depends on device count)
 - `device/check-connectivity`: 100-200 tokens
 
 **System Status:**
+
 - `system/get-overview`: 400-600 tokens
 - `system/get-packages`: 300-1500 tokens (12-50 packages)
 - `system/get-clock`: 100-150 tokens
 
 **Network Interfaces:**
+
 - `interface/list-interfaces`: 500-5000 tokens (10-100 interfaces)
 - `interface/get-interface`: 200-300 tokens
 - `interface/get-stats`: 150-250 tokens per interface
 
 **IP Configuration:**
+
 - `ip/list-addresses`: 300-3000 tokens (5-50 addresses)
 - `ip/get-arp-table`: 500-5000 tokens (10-100 entries)
 
 **DNS/NTP:**
+
 - `dns/get-status`: 150-250 tokens
 - `dns/get-cache`: 1000-10000 tokens (10-1000 entries)
 - `ntp/get-status`: 150-250 tokens
 
 **Routing:**
+
 - `routing/get-summary`: 800-8000 tokens (25-250 routes)
 - `routing/get-route`: 150-250 tokens
 
 **Firewall:**
+
 - `firewall/list-filter-rules`: 800-8000 tokens (15-150 rules)
 - `firewall/list-nat-rules`: 300-3000 tokens (3-30 rules)
 - `firewall/list-address-lists`: 500-5000 tokens (10-100 entries)
 
 **Logs:**
+
 - `logs/get-recent`: 5000-200000 tokens (**WARNING**: 100-1000 entries × 50-200 tokens/entry)
   - **Recommendation**: Default limit=100, max=1000
   - **Token budget**: ~5000-20000 tokens for 100 entries
 
 **Diagnostics:**
+
 - `tool/ping`: 200-400 tokens
 - `tool/traceroute`: 400-1200 tokens (8-30 hops)
 - `tool/bandwidth-test`: 200-300 tokens
 
 **Multi-Device Workflows:**
+
 - `config/plan-dns-ntp-rollout`: 1000-10000 tokens (depends on device count)
 - `config/apply-dns-ntp-rollout`: 1000-10000 tokens
 
@@ -3914,11 +4137,13 @@ SYSTEM_GET_OVERVIEW_METADATA = ToolMetadata(
 ### All Tools
 
 **Common Request Fields:**
+
 - `device_id` (string, required for device-specific tools): MCP device identifier
 - `dry_run` (boolean, optional, default false): Plan mode without applying changes
 - `correlation_id` (string, optional): Request correlation ID for tracing
 
 **Common Response Fields in `_meta`:**
+
 - `device_id` (string): Device identifier
 - `changed` (boolean, for write operations): Whether configuration changed
 - `execution_time_ms` (number, optional): Tool execution time
@@ -3929,6 +4154,7 @@ SYSTEM_GET_OVERVIEW_METADATA = ToolMetadata(
 **All tools return JSON-RPC 2.0 error format on failure. See [Doc 19](19-json-rpc-error-codes-and-mcp-protocol-specification.md) for complete error taxonomy.**
 
 **Common Error Codes:**
+
 - `-32602` / `INVALID_DEVICE_ID`: Device not found
 - `-32002` / `FORBIDDEN`: Insufficient permissions (tier/capability)
 - `-32010` / `DEVICE_UNREACHABLE`: Cannot connect to RouterOS
@@ -3952,6 +4178,7 @@ Each tool must embed its safety rules and validation logic:
 ### Precondition Checks
 
 **For all write operations:**
+
 1. Device environment matches service environment (lab/staging/prod)
 2. Device capability flags allow the tool tier:
    - Advanced tier requires `allow_advanced_writes=true`
@@ -3962,29 +4189,35 @@ Each tool must embed its safety rules and validation logic:
 ### Topic-Specific Constraints
 
 **Diagnostics** (`tool/ping`, `tool/traceroute`):
+
 - Hard caps: ping count ≤ 10, traceroute hops ≤ 30
 - Timeout limits: max 60 seconds per operation
 
 **Logs** (`logs/get-recent`):
+
 - Mandatory time window: max 24 hours
 - Line count cap: max 1000 entries
 
 **IP Addresses** (`ip/add-secondary-address`, `ip/remove-secondary-address`):
+
 - Prevent overlapping networks
 - Block management interface modifications
 - Require interface existence check
 
 **DNS/NTP** (`dns/update-servers`, `ntp/update-servers`):
+
 - Validate server reachability before applying
 - Require health check verification post-change
 - Multi-device changes require plan/apply pattern (Phase 4)
 
 **Routing** (`routing/add-static-route`, `routing/remove-static-route`):
+
 - Professional tier only
 - Plan/apply pattern required
 - Prevent default route modifications without explicit approval
 
 **Address Lists** (`ip/update-address-list-entry`):
+
 - Only allow MCP-managed lists (prefix: `mcp-`)
 - Reject modifications to system address lists
 
@@ -3995,11 +4228,13 @@ Each tool must embed its safety rules and validation logic:
 ### Phase 1 (Single-User)
 
 **Authorization Model:**
+
 - OS-level access control (filesystem permissions)
 - Single implicit admin user
 - Device-level capability checks only
 
 **Enforcement:**
+
 1. Check device environment matches service environment
 2. Check device capability flags for tool tier
 3. No user role checks (all operations allowed at OS level)
@@ -4007,18 +4242,21 @@ Each tool must embed its safety rules and validation logic:
 ### Phase 4 (Multi-User)
 
 **Authorization Model:**
+
 - OAuth/OIDC authentication
 - Role-based access control (RBAC)
 - Device scoping per user
 - Approval tokens for professional tier
 
 **Tool Metadata:**
+
 - `tier`: fundamental/advanced/professional
 - `required_role`: `read_only`, `ops_rw`, or `admin`
 - `environment_constraints`: allowed environments
 - `requires_approval`: true for professional writes
 
 **Enforcement:**
+
 1. Verify OAuth token validity
 2. Check user role meets `required_role`
 3. Check device is in user's `device_scope`
@@ -4026,6 +4264,7 @@ Each tool must embed its safety rules and validation logic:
 5. For professional tier: validate approval token
 
 **Example Authorization Check:**
+
 ```python
 def check_authorization(
     user: User,
@@ -4085,6 +4324,7 @@ def check_authorization(
 ```
 
 **Returns tool catalog with metadata:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -4120,6 +4360,7 @@ def check_authorization(
 Resources are URI-addressable content that MCP clients can read. Unlike tools (which execute operations), resources provide direct access to configuration data.
 
 **Benefits:**
+
 - Full MCP clients (Claude Desktop, VS Code) can browse resources
 - Enables context attachment for LLM conversations
 - Supports large config files without tool token limits
@@ -4131,11 +4372,13 @@ Resources are URI-addressable content that MCP clients can read. Unlike tools (w
 **Resource URI Pattern**: `routeros://{device_id}/config/export`
 
 **Example URIs:**
+
 - `routeros://dev-lab-01/config/export` - Full configuration
 - `routeros://dev-lab-01/config/export?compact=true` - Compact format
 - `routeros://dev-lab-01/config/export?topic=firewall` - Firewall config only
 
 **MCP Resource Schema:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -4147,6 +4390,7 @@ Resources are URI-addressable content that MCP clients can read. Unlike tools (w
 ```
 
 **Response:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -4163,6 +4407,7 @@ Resources are URI-addressable content that MCP clients can read. Unlike tools (w
 ```
 
 **Token Considerations:**
+
 - Full config export: 10,000-100,000 tokens
 - Compact export: 5,000-50,000 tokens
 - Topic-filtered export: 1,000-10,000 tokens
@@ -4181,14 +4426,14 @@ Resources are URI-addressable content that MCP clients can read. Unlike tools (w
 
 ### Resource vs Tool Decision Matrix
 
-| Use Case | Use Tool | Use Resource |
-|----------|----------|--------------|
-| Execute operation (ping, change config) | ✅ | ❌ |
-| Get current status (small response) | ✅ | ❌ |
-| Export large config file | ❌ | ✅ |
-| Browse device inventory | Both | ✅ (better UX) |
-| Attach context to LLM conversation | ❌ | ✅ |
-| Stream real-time data | ✅ | ❌ |
+| Use Case                                | Use Tool | Use Resource   |
+| --------------------------------------- | -------- | -------------- |
+| Execute operation (ping, change config) | ✅       | ❌             |
+| Get current status (small response)     | ✅       | ❌             |
+| Export large config file                | ❌       | ✅             |
+| Browse device inventory                 | Both     | ✅ (better UX) |
+| Attach context to LLM conversation      | ❌       | ✅             |
+| Stream real-time data                   | ✅       | ❌             |
 
 **Implementation Priority**: Phase 2 (after Phase 1 tools are stable)
 
@@ -4208,6 +4453,7 @@ Resources are URI-addressable content that MCP clients can read. Unlike tools (w
 ### Streaming Protocol (JSON-RPC 2.0 Notifications)
 
 **Initial Request:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -4219,13 +4465,14 @@ Resources are URI-addressable content that MCP clients can read. Unlike tools (w
       "device_id": "dev-lab-01",
       "address": "8.8.8.8",
       "count": 10,
-      "stream_progress": true  // Enable streaming
+      "stream_progress": true // Enable streaming
     }
   }
 }
 ```
 
 **Progress Notifications (no id - these are notifications):**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -4242,12 +4489,13 @@ Resources are URI-addressable content that MCP clients can read. Unlike tools (w
 ```
 
 **Final Response:**
+
 ```json
 {
   "jsonrpc": "2.0",
   "id": "req-022",
   "result": {
-    "content": [{"type": "text", "text": "Ping completed: 10/10 packets"}],
+    "content": [{ "type": "text", "text": "Ping completed: 10/10 packets" }],
     "_meta": {
       "packets_sent": 10,
       "packets_received": 10,

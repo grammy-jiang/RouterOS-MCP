@@ -11,91 +11,90 @@ Specify how the service interacts with RouterOS v7 via REST API as the primary c
 This section provides a comprehensive summary of all RouterOS v7 REST API endpoints used by the MCP service, organized by topic.
 
 **Related Documents:**
+
 - [Doc 04: MCP Tools Interface](04-mcp-tools-interface-and-json-schema-specification.md) - Tool-to-endpoint mapping
 - [Doc 06: System Information & Metrics Collection](06-system-information-and-metrics-collection-module-design.md) - Metrics collection patterns
 
 ### Complete Endpoint Catalog
 
-| Method | Endpoint | Topic | Purpose | MCP Tier | Phase |
-|--------|----------|-------|---------|----------|-------|
-| **System** |
-| GET | `/rest/system/resource` | System | CPU, memory, uptime, version | Fundamental | 1 |
-| GET | `/rest/system/identity` | System | Device name/identity | Fundamental | 1 |
-| PUT/PATCH | `/rest/system/identity` | System | Change device name | Advanced | 2 |
-| GET | `/rest/system/routerboard` | System | Hardware model, serial | Fundamental | 1 |
-| GET | `/rest/system/package` | System | Installed packages | Fundamental | 1 |
-| GET | `/rest/system/clock` | System | Current time and timezone | Fundamental | 1 |
-| **Interface** |
-| GET | `/rest/interface` | Interface | List all interfaces | Fundamental | 1 |
-| GET | `/rest/interface/{id}` | Interface | Get specific interface | Fundamental | 1 |
-| PATCH | `/rest/interface/{id}` | Interface | Update interface (comment, disable) | Advanced | 2 |
-| GET | `/rest/interface/monitor-traffic` | Interface | Real-time traffic stats | Fundamental | 1 |
+| Method         | Endpoint                              | Topic     | Purpose                             | MCP Tier     | Phase |
+| -------------- | ------------------------------------- | --------- | ----------------------------------- | ------------ | ----- |
+| **System**     |
+| GET            | `/rest/system/resource`               | System    | CPU, memory, uptime, version        | Fundamental  | 1     |
+| GET            | `/rest/system/identity`               | System    | Device name/identity                | Fundamental  | 1     |
+| PUT/PATCH      | `/rest/system/identity`               | System    | Change device name                  | Advanced     | 2     |
+| GET            | `/rest/system/routerboard`            | System    | Hardware model, serial              | Fundamental  | 1     |
+| GET            | `/rest/system/package`                | System    | Installed packages                  | Fundamental  | 1     |
+| GET            | `/rest/system/clock`                  | System    | Current time and timezone           | Fundamental  | 1     |
+| **Interface**  |
+| GET            | `/rest/interface`                     | Interface | List all interfaces                 | Fundamental  | 1     |
+| GET            | `/rest/interface/{id}`                | Interface | Get specific interface              | Fundamental  | 1     |
+| PATCH          | `/rest/interface/{id}`                | Interface | Update interface (comment, disable) | Advanced     | 2     |
+| GET            | `/rest/interface/monitor-traffic`     | Interface | Real-time traffic stats             | Fundamental  | 1     |
 | **IP Address** |
-| GET | `/rest/ip/address` | IP | List all IP addresses | Fundamental | 1 |
-| GET | `/rest/ip/address/{id}` | IP | Get specific address | Fundamental | 1 |
-| PUT | `/rest/ip/address` | IP | Add new IP address | Advanced | 3 |
-| DELETE | `/rest/ip/address/{id}` | IP | Remove IP address | Professional | 3 |
-| GET | `/rest/ip/arp` | IP | ARP table | Fundamental | 1 |
-| **DNS** |
-| GET | `/rest/ip/dns` | DNS | DNS server configuration | Fundamental | 1 |
-| PUT/PATCH | `/rest/ip/dns` | DNS | Update DNS servers | Advanced | 2 |
-| GET | `/rest/ip/dns/cache` | DNS | View DNS cache | Fundamental | 1 |
-| POST | `/rest/ip/dns/cache/flush` | DNS | Clear DNS cache | Advanced | 2 |
-| **NTP** |
-| GET | `/rest/system/ntp/client` | NTP | NTP configuration | Fundamental | 1 |
-| PUT/PATCH | `/rest/system/ntp/client` | NTP | Update NTP servers | Advanced | 2 |
-| GET | `/rest/system/ntp/client/monitor` | NTP | NTP sync status | Fundamental | 1 |
-| **Routing** |
-| GET | `/rest/ip/route` | Routing | Routing table | Fundamental | 1 |
-| GET | `/rest/ip/route/{id}` | Routing | Get specific route | Fundamental | 1 |
-| PUT | `/rest/ip/route` | Routing | Add static route | Professional | 4 |
-| DELETE | `/rest/ip/route/{id}` | Routing | Delete route | Professional | 4 |
-| **Firewall** |
-| GET | `/rest/ip/firewall/filter` | Firewall | Firewall filter rules | Fundamental | 1 |
-| GET | `/rest/ip/firewall/nat` | Firewall | NAT rules | Fundamental | 1 |
-| GET | `/rest/ip/firewall/address-list` | Firewall | Address lists | Fundamental | 1 |
-| PUT | `/rest/ip/firewall/address-list` | Firewall | Add address-list entry | Advanced | 2 |
-| DELETE | `/rest/ip/firewall/address-list/{id}` | Firewall | Remove address-list entry | Advanced | 2 |
-| **Logging** |
-| GET | `/rest/log` | Logging | System logs (bounded) | Fundamental | 1 |
-| GET | `/rest/system/logging` | Logging | Logging configuration | Fundamental | 1 |
-| **Diagnostics** |
-| POST | `/rest/tool/ping` | Tool | ICMP ping (bounded) | Fundamental | 1 |
-| POST | `/rest/tool/traceroute` | Tool | Network traceroute | Fundamental | 1 |
-| POST | `/rest/tool/bandwidth-test` | Tool | Speed test | Fundamental | 1 |
+| GET            | `/rest/ip/address`                    | IP        | List all IP addresses               | Fundamental  | 1     |
+| GET            | `/rest/ip/address/{id}`               | IP        | Get specific address                | Fundamental  | 1     |
+| PUT            | `/rest/ip/address`                    | IP        | Add new IP address                  | Advanced     | 3     |
+| DELETE         | `/rest/ip/address/{id}`               | IP        | Remove IP address                   | Professional | 3     |
+| GET            | `/rest/ip/arp`                        | IP        | ARP table                           | Fundamental  | 1     |
+| **DNS**        |
+| GET            | `/rest/ip/dns`                        | DNS       | DNS server configuration            | Fundamental  | 1     |
+| PUT/PATCH      | `/rest/ip/dns`                        | DNS       | Update DNS servers                  | Advanced     | 2     |
+| GET            | `/rest/ip/dns/cache`                  | DNS       | View DNS cache                      | Fundamental  | 1     |
+| POST           | `/rest/ip/dns/cache/flush`            | DNS       | Clear DNS cache                     | Advanced     | 2     |
+| **NTP**        |
+| GET            | `/rest/system/ntp/client`             | NTP       | NTP configuration                   | Fundamental  | 1     |
+| PUT/PATCH      | `/rest/system/ntp/client`             | NTP       | Update NTP servers                  | Advanced     | 2     |
+| GET            | `/rest/system/ntp/client/monitor`     | NTP       | NTP sync status                     | Fundamental  | 1     |
+| **Routing**    |
+| GET            | `/rest/ip/route`                      | Routing   | Routing table                       | Fundamental  | 1     |
+| GET            | `/rest/ip/route/{id}`                 | Routing   | Get specific route                  | Fundamental  | 1     |
+| PUT            | `/rest/ip/route`                      | Routing   | Add static route                    | Professional | 4     |
+| DELETE         | `/rest/ip/route/{id}`                 | Routing   | Delete route                        | Professional | 4     |
+| **Firewall**   |
+| GET            | `/rest/ip/firewall/filter`            | Firewall  | Firewall filter rules               | Fundamental  | 1     |
+| GET            | `/rest/ip/firewall/nat`               | Firewall  | NAT rules                           | Fundamental  | 1     |
+| GET            | `/rest/ip/firewall/address-list`      | Firewall  | Address lists                       | Fundamental  | 1     |
+| PUT            | `/rest/ip/firewall/address-list`      | Firewall  | Add address-list entry              | Advanced     | 2     |
+| DELETE         | `/rest/ip/firewall/address-list/{id}` | Firewall  | Remove address-list entry           | Advanced     | 2     |
+| **Logging**    |
+| GET            | `/rest/log`                           | Logging   | System logs (bounded)               | Fundamental  | 1     |
+| GET            | `/rest/system/logging`                | Logging   | Logging configuration               | Fundamental  | 1     |
 
-**Total: 41 endpoints** (25 read-only fundamental, 10 advanced writes, 6 professional/high-risk)
+**Total: 38 endpoints (Phase 1 scope)** (22 read-only fundamental, 10 advanced writes, 6 professional/high-risk). Diagnostics endpoints (ping/traceroute/bandwidth-test) are **deferred to Phase 2** and excluded from Phase 1 scope.
 
 ### Endpoint Categories
 
-**Fundamental Tier (Read-Only):** 25 endpoints
+**Fundamental Tier (Read-Only):** 22 endpoints
+
 - Safe for broad access
 - No device configuration changes
-- Diagnostic operations are bounded (max ping count, max traceroute hops)
 
 **Advanced Tier (Single-Device Writes):** 10 endpoints
+
 - Low-risk configuration changes
 - Single-device scope
 - Includes DNS/NTP updates, interface comments, address-list management
 
 **Professional Tier (High-Risk):** 6 endpoints
+
 - High-risk operations requiring plan/apply workflow
 - Routing changes, IP address deletion
 - Requires human approval in production
 
 ### Topic Distribution
 
-| Topic | Endpoints | Read-Only | Write Operations |
-|-------|-----------|-----------|------------------|
-| System | 6 | 5 | 1 |
-| Interface | 4 | 3 | 1 |
-| IP Address | 5 | 3 | 2 |
-| DNS | 4 | 2 | 2 |
-| NTP | 3 | 2 | 1 |
-| Routing | 4 | 2 | 2 |
-| Firewall | 5 | 3 | 2 |
-| Logging | 2 | 2 | 0 |
-| Diagnostics | 3 | 3 | 0 |
+| Topic       | Endpoints | Read-Only | Write Operations |
+| ----------- | --------- | --------- | ---------------- |
+| System      | 6         | 5         | 1                |
+| Interface   | 4         | 3         | 1                |
+| IP Address  | 5         | 3         | 2                |
+| DNS         | 4         | 2         | 2                |
+| NTP         | 3         | 2         | 1                |
+| Routing     | 4         | 2         | 2                |
+| Firewall    | 5         | 3         | 2                |
+| Logging     | 2         | 2         | 0                |
+| Diagnostics | Deferred  | Deferred  | Deferred         |
 
 **Note:** MCP device management operations (device registration, updates) have no RouterOS endpoint - they are MCP-internal operations stored in the PostgreSQL database.
 
@@ -104,20 +103,94 @@ This section provides a comprehensive summary of all RouterOS v7 REST API endpoi
 ## RouterOS REST client design (HTTP library, retries, timeouts, auth)
 
 - **HTTP client responsibilities**:
-  - Handle HTTP(S) connections to RouterOS `/rest/...` endpoints.  
-  - Enforce timeouts, retries, backoff, and per-device concurrency limits.  
+
+  - Handle HTTP(S) connections to RouterOS `/rest/...` endpoints.
+  - Enforce timeouts, retries, backoff, and per-device concurrency limits.
   - Map low-level HTTP/network errors into domain-level error types for MCP tools.
 
 - **Authentication**:
-  - Use basic auth or RouterOS API tokens per device, based on configured credentials.  
+  - Use basic auth or RouterOS API tokens per device, based on configured credentials.
   - Credentials are retrieved from the secrets store, decrypted in-memory, and never logged.
+    - Supported today: username/password (HTTP Basic) and API token presented as the password. No OAuth/OIDC to RouterOS.
+      - Not supported by RouterOS REST: bearer tokens, OAuth/OIDC, client TLS cert auth, Kerberos/NTLM.
+      - Phase 1 (current): MCP uses HTTP Basic with username/password or API token-as-password for REST; SSH fallback uses username/password only.
+      - Phase 2: No change to REST auth (still Basic/token). SSH fallback will add optional SSH key authentication (see below).
 
-- **Timeouts & retries**:
-  - Conservative timeouts for each REST call, configurable per deployment.  
-  - Retries with exponential backoff for transient network or 5xx errors.  
-  - No retries on clear 4xx errors (auth failure, forbidden, validation errors).
+**Future (Phase 2+)**: Add SSH key-based authentication support for the SSH fallback path. This will require:
+
+- Extending the credential model to store SSH private key material (and optional passphrase) separately from passwords.
+- Updating `RouterOSSSHClient` to attempt key auth before password auth when a key is present.
+- Ensuring key material remains encrypted at rest, decrypted only in-memory, and never logged.
+- Guardrails: keep the existing whitelisted-command enforcement and audit logging unchanged.
+
+---
+
+## Mandatory SSH Fallback Policy
+
+**CRITICAL REQUIREMENT: ALL read-only REST API endpoints MUST implement SSH fallback.**
+
+This policy ensures service resilience when REST API is unreachable or slow (timeouts > 10s).
+
+### Fallback Activation Rules
+
+1. **When to trigger SSH fallback:**
+
+   - REST API call times out after 10 seconds
+   - REST API returns 5xx server errors (connection refused, socket timeout, etc.)
+   - REST API is explicitly disabled in configuration
+
+2. **When NOT to trigger SSH fallback:**
+
+   - REST API returns 4xx client errors (invalid auth, permission denied, malformed request)
+   - Write operations (PUT, PATCH, DELETE) - these require REST API transactional safety
+   - Commands requiring structured JSON response that SSH CLI cannot provide
+
+3. **Read-only endpoints requiring SSH fallback:**
+   - System info: `/rest/system/resource`, `/rest/system/identity`, `/rest/system/clock`, `/rest/system/package`
+   - Network: `/rest/interface`, `/rest/interface/monitor-traffic`
+   - IP/ARP: `/rest/ip/address`, `/rest/ip/arp`
+   - DNS/NTP: `/rest/ip/dns`, `/rest/system/ntp/client`
+   - Routing: `/rest/ip/route`
+   - Firewall: `/rest/ip/firewall/filter`, `/rest/ip/firewall/nat`, `/rest/ip/firewall/address-list`
+   - Logs/Diagnostics: `/rest/log`, `/rest/system/logging`
+
+### Implementation Requirements
+
+- **All domain services** (`routeros_mcp/domain/services/*.py`) implementing read-only endpoints MUST:
+
+  1. Try REST API first (primary path)
+  2. On timeout or 5xx: catch exception and attempt SSH fallback
+  3. Log fallback activation with context (device, endpoint, reason)
+  4. Parse SSH CLI output into the same response structure as REST
+  5. Return unified response (client should not know which transport was used)
+
+- **Fallback path must:**
+
+  - Use whitelisted SSH commands only (defined in `ssh_client.py`)
+  - Handle device-specific output variations (different RouterOS versions)
+  - Provide equivalent data to REST response (exact field names, types)
+  - **Parse ALL fields from RouterOS output** - no information should be lost between RouterOS and MCP server (multi-line values, continuation lines, optional fields must all be captured)
+  - Include `transport: "ssh"` and `fallback_used: True` in response metadata
+
+- **Never fallback for:**
+  - Write operations (all mutations MUST use REST)
+  - Commands with security implications (must enforce API auth/authz)
+  - Operations requiring atomic multi-step transactions
+
+### Expected Coverage
+
+- **Phase 1 endpoints** (fundamental, read-only): 90%+ with SSH fallback
+- **Advanced writes**: No SSH fallback (REST only, requires proper auth)
+- **Professional/high-risk**: No SSH fallback (plan/apply workflow, REST only)
+
+---
+
+- Conservative timeouts for each REST call, configurable per deployment.
+- Retries with exponential backoff for transient network or 5xx errors.
+- No retries on clear 4xx errors (auth failure, forbidden, validation errors).
 
 - **Per-device concurrency and rate limiting**:
+
   - Centralized per-device concurrency control: at most N in-flight REST calls per device (N default 2–3).
   - Per-device rate limiting to avoid overwhelming small routers, especially for health checks and metrics.
 
@@ -238,14 +311,14 @@ class RouterOSRestClient:
 
 **Endpoints:**
 
-| Operation | Method | Path | Purpose | MCP Tool Tier |
-|-----------|--------|------|---------|---------------|
-| Get system resources | GET | `/rest/system/resource` | CPU, memory, uptime, version | Fundamental |
-| Get system identity | GET | `/rest/system/identity` | Device name/identity | Fundamental |
-| Set system identity | PUT/PATCH | `/rest/system/identity` | Change device name | Advanced |
-| Get routerboard info | GET | `/rest/system/routerboard` | Hardware model, serial number | Fundamental |
-| Get system package | GET | `/rest/system/package` | Installed packages and versions | Fundamental |
-| Get system clock | GET | `/rest/system/clock` | Current time and timezone | Fundamental |
+| Operation            | Method    | Path                       | Purpose                         | MCP Tool Tier |
+| -------------------- | --------- | -------------------------- | ------------------------------- | ------------- |
+| Get system resources | GET       | `/rest/system/resource`    | CPU, memory, uptime, version    | Fundamental   |
+| Get system identity  | GET       | `/rest/system/identity`    | Device name/identity            | Fundamental   |
+| Set system identity  | PUT/PATCH | `/rest/system/identity`    | Change device name              | Advanced      |
+| Get routerboard info | GET       | `/rest/system/routerboard` | Hardware model, serial number   | Fundamental   |
+| Get system package   | GET       | `/rest/system/package`     | Installed packages and versions | Fundamental   |
+| Get system clock     | GET       | `/rest/system/clock`       | Current time and timezone       | Fundamental   |
 
 **Field Mappings:**
 
@@ -279,12 +352,12 @@ class RouterOSRestClient:
 
 **Endpoints:**
 
-| Operation | Method | Path | Purpose | MCP Tool Tier |
-|-----------|--------|------|---------|---------------|
-| List all interfaces | GET | `/rest/interface` | Get all interfaces | Fundamental |
-| Get interface by ID | GET | `/rest/interface/{id}` | Get specific interface | Fundamental |
-| Update interface | PATCH | `/rest/interface/{id}` | Modify interface (comment, disable) | Advanced |
-| Get interface stats | GET | `/rest/interface/monitor-traffic` | Real-time traffic stats | Fundamental |
+| Operation           | Method | Path                              | Purpose                             | MCP Tool Tier |
+| ------------------- | ------ | --------------------------------- | ----------------------------------- | ------------- |
+| List all interfaces | GET    | `/rest/interface`                 | Get all interfaces                  | Fundamental   |
+| Get interface by ID | GET    | `/rest/interface/{id}`            | Get specific interface              | Fundamental   |
+| Update interface    | PATCH  | `/rest/interface/{id}`            | Modify interface (comment, disable) | Advanced      |
+| Get interface stats | GET    | `/rest/interface/monitor-traffic` | Real-time traffic stats             | Fundamental   |
 
 **Field Mappings:**
 
@@ -317,13 +390,13 @@ class RouterOSRestClient:
 
 **Endpoints:**
 
-| Operation | Method | Path | Purpose | MCP Tool Tier |
-|-----------|--------|------|---------|---------------|
-| List IP addresses | GET | `/rest/ip/address` | Get all IP addresses | Fundamental |
-| Get address by ID | GET | `/rest/ip/address/{id}` | Get specific address | Fundamental |
-| Add IP address | PUT | `/rest/ip/address` | Add new IP address | Advanced |
-| Remove IP address | DELETE | `/rest/ip/address/{id}` | Remove IP address | Professional |
-| Get ARP entries | GET | `/rest/ip/arp` | ARP table | Fundamental |
+| Operation         | Method | Path                    | Purpose              | MCP Tool Tier |
+| ----------------- | ------ | ----------------------- | -------------------- | ------------- |
+| List IP addresses | GET    | `/rest/ip/address`      | Get all IP addresses | Fundamental   |
+| Get address by ID | GET    | `/rest/ip/address/{id}` | Get specific address | Fundamental   |
+| Add IP address    | PUT    | `/rest/ip/address`      | Add new IP address   | Advanced      |
+| Remove IP address | DELETE | `/rest/ip/address/{id}` | Remove IP address    | Professional  |
+| Get ARP entries   | GET    | `/rest/ip/arp`          | ARP table            | Fundamental   |
 
 **Field Mappings:**
 
@@ -353,12 +426,12 @@ class RouterOSRestClient:
 
 **Endpoints:**
 
-| Operation | Method | Path | Purpose | MCP Tool Tier |
-|-----------|--------|------|---------|---------------|
-| Get DNS settings | GET | `/rest/ip/dns` | DNS server configuration | Fundamental |
-| Set DNS servers | PUT/PATCH | `/rest/ip/dns` | Update DNS servers | Advanced |
-| Get DNS cache | GET | `/rest/ip/dns/cache` | View DNS cache | Fundamental |
-| Flush DNS cache | POST | `/rest/ip/dns/cache/flush` | Clear DNS cache | Advanced |
+| Operation        | Method    | Path                       | Purpose                  | MCP Tool Tier |
+| ---------------- | --------- | -------------------------- | ------------------------ | ------------- |
+| Get DNS settings | GET       | `/rest/ip/dns`             | DNS server configuration | Fundamental   |
+| Set DNS servers  | PUT/PATCH | `/rest/ip/dns`             | Update DNS servers       | Advanced      |
+| Get DNS cache    | GET       | `/rest/ip/dns/cache`       | View DNS cache           | Fundamental   |
+| Flush DNS cache  | POST      | `/rest/ip/dns/cache/flush` | Clear DNS cache          | Advanced      |
 
 **Field Mappings:**
 
@@ -384,11 +457,11 @@ class RouterOSRestClient:
 
 **Endpoints:**
 
-| Operation | Method | Path | Purpose | MCP Tool Tier |
-|-----------|--------|------|---------|---------------|
-| Get NTP client config | GET | `/rest/system/ntp/client` | NTP configuration | Fundamental |
-| Set NTP servers | PUT/PATCH | `/rest/system/ntp/client` | Update NTP servers | Advanced |
-| Get NTP client status | GET | `/rest/system/ntp/client/monitor` | NTP sync status | Fundamental |
+| Operation             | Method    | Path                              | Purpose            | MCP Tool Tier |
+| --------------------- | --------- | --------------------------------- | ------------------ | ------------- |
+| Get NTP client config | GET       | `/rest/system/ntp/client`         | NTP configuration  | Fundamental   |
+| Set NTP servers       | PUT/PATCH | `/rest/system/ntp/client`         | Update NTP servers | Advanced      |
+| Get NTP client status | GET       | `/rest/system/ntp/client/monitor` | NTP sync status    | Fundamental   |
 
 **Field Mappings:**
 
@@ -421,12 +494,12 @@ class RouterOSRestClient:
 
 **Endpoints:**
 
-| Operation | Method | Path | Purpose | MCP Tool Tier |
-|-----------|--------|------|---------|---------------|
-| List routes | GET | `/rest/ip/route` | Routing table | Fundamental |
-| Get route by ID | GET | `/rest/ip/route/{id}` | Specific route | Fundamental |
-| Add static route | PUT | `/rest/ip/route` | Add route | Professional |
-| Remove route | DELETE | `/rest/ip/route/{id}` | Delete route | Professional |
+| Operation        | Method | Path                  | Purpose        | MCP Tool Tier |
+| ---------------- | ------ | --------------------- | -------------- | ------------- |
+| List routes      | GET    | `/rest/ip/route`      | Routing table  | Fundamental   |
+| Get route by ID  | GET    | `/rest/ip/route/{id}` | Specific route | Fundamental   |
+| Add static route | PUT    | `/rest/ip/route`      | Add route      | Professional  |
+| Remove route     | DELETE | `/rest/ip/route/{id}` | Delete route   | Professional  |
 
 **Field Mappings:**
 
@@ -451,13 +524,13 @@ class RouterOSRestClient:
 
 **Endpoints:**
 
-| Operation | Method | Path | Purpose | MCP Tool Tier |
-|-----------|--------|------|---------|---------------|
-| List filter rules | GET | `/rest/ip/firewall/filter` | Firewall filter rules | Fundamental |
-| List NAT rules | GET | `/rest/ip/firewall/nat` | NAT rules | Fundamental |
-| List address lists | GET | `/rest/ip/firewall/address-list` | Address lists | Fundamental |
-| Add address-list entry | PUT | `/rest/ip/firewall/address-list` | Add to address list | Advanced |
-| Remove address-list entry | DELETE | `/rest/ip/firewall/address-list/{id}` | Remove from list | Advanced |
+| Operation                 | Method | Path                                  | Purpose               | MCP Tool Tier |
+| ------------------------- | ------ | ------------------------------------- | --------------------- | ------------- |
+| List filter rules         | GET    | `/rest/ip/firewall/filter`            | Firewall filter rules | Fundamental   |
+| List NAT rules            | GET    | `/rest/ip/firewall/nat`               | NAT rules             | Fundamental   |
+| List address lists        | GET    | `/rest/ip/firewall/address-list`      | Address lists         | Fundamental   |
+| Add address-list entry    | PUT    | `/rest/ip/firewall/address-list`      | Add to address list   | Advanced      |
+| Remove address-list entry | DELETE | `/rest/ip/firewall/address-list/{id}` | Remove from list      | Advanced      |
 
 **Field Mappings:**
 
@@ -492,10 +565,10 @@ class RouterOSRestClient:
 
 **Endpoints:**
 
-| Operation | Method | Path | Purpose | MCP Tool Tier |
-|-----------|--------|------|---------|---------------|
-| Get log entries | GET | `/rest/log` | System logs | Fundamental (bounded) |
-| Get log topics | GET | `/rest/system/logging` | Logging configuration | Fundamental |
+| Operation       | Method | Path                   | Purpose               | MCP Tool Tier         |
+| --------------- | ------ | ---------------------- | --------------------- | --------------------- |
+| Get log entries | GET    | `/rest/log`            | System logs           | Fundamental (bounded) |
+| Get log topics  | GET    | `/rest/system/logging` | Logging configuration | Fundamental           |
 
 **Field Mappings:**
 
@@ -522,15 +595,17 @@ class RouterOSRestClient:
 
 ---
 
-### Tool (Diagnostics) Topic
+### Tool (Diagnostics) Topic _(Deferred to Phase 2)_
+
+Diagnostics tools (ping/traceroute/bandwidth-test) are deferred to Phase 2 and are not part of the Phase 1 implementation. The mappings below are retained for future planning only.
 
 **Endpoints:**
 
-| Operation | Method | Path | Purpose | MCP Tool Tier |
-|-----------|--------|------|---------|---------------|
-| Ping | POST | `/rest/tool/ping` | ICMP ping | Fundamental |
-| Traceroute | POST | `/rest/tool/traceroute` | Network traceroute | Fundamental |
-| Bandwidth test | POST | `/rest/tool/bandwidth-test` | Speed test | Fundamental |
+| Operation      | Method | Path                        | Purpose            | MCP Tool Tier      |
+| -------------- | ------ | --------------------------- | ------------------ | ------------------ |
+| Ping           | POST   | `/rest/tool/ping`           | ICMP ping          | Phase 2 (deferred) |
+| Traceroute     | POST   | `/rest/tool/traceroute`     | Network traceroute | Phase 2 (deferred) |
+| Bandwidth test | POST   | `/rest/tool/bandwidth-test` | Speed test         | Phase 2 (deferred) |
 
 **Field Mappings:**
 
@@ -573,6 +648,7 @@ class RouterOSRestClient:
 3. **Hide internal fields**: Fields starting with `.` (except `.id`) are internal and not exposed
 4. **Enrich with metadata**: Add device context, timestamps, environment tags
 5. **Validate ranges**: Enforce MCP-specific bounds (max log entries, max ping count)
+6. **Complete data fidelity**: **No information loss** - all fields returned by RouterOS must be captured and made available to MCP clients. Parsers must handle all output formats (multi-line values, continuation lines, field variations across RouterOS versions) to ensure complete data coverage.
 
 **Implementation Pattern:**
 
@@ -607,11 +683,13 @@ Each domain service (system, interface, ip, dns, etc.) uses these mappers so tha
 The integration must respect RouterOS device constraints:
 
 - **CPU & memory limits**:
-  - Avoid heavy polling; prefer **metrics collection jobs** with reasonable intervals and jitter.  
+
+  - Avoid heavy polling; prefer **metrics collection jobs** with reasonable intervals and jitter.
   - Diagnostics (ping/traceroute) and logs retrieval must be bounded in time and volume.
 
 - **API and connection limits**:
-  - Some devices may have lower capabilities; per-device concurrency limits ensure we do not saturate API handlers.  
+
+  - Some devices may have lower capabilities; per-device concurrency limits ensure we do not saturate API handlers.
   - The integration should be prepared for RouterOS to close idle or long-running connections; keep connections short-lived or properly pooled.
 
 - **Timeout behavior**:
@@ -619,7 +697,7 @@ The integration must respect RouterOS device constraints:
 
 These constraints influence:
 
-- The maximum frequency and volume of health checks and metrics pulls.  
+- The maximum frequency and volume of health checks and metrics pulls.
 - The design of multi-device workflows (e.g., staggering changes across devices).
 
 ---
@@ -629,18 +707,20 @@ These constraints influence:
 While exact details depend on RouterOS version, the integration should anticipate:
 
 - **Pagination**:
-  - Some endpoints may paginate results or limit the number of returned items.  
+
+  - Some endpoints may paginate results or limit the number of returned items.
   - The client must handle pagination or query parameters if applicable (e.g., offsets, `?numbers=` filters).
 
 - **Error responses**:
-  - RouterOS may return error details in response bodies; client should parse and surface them as structured error objects.  
+
+  - RouterOS may return error details in response bodies; client should parse and surface them as structured error objects.
   - Distinguish between:
-    - Authentication/authorization issues.  
-    - Validation errors (bad parameters).  
+    - Authentication/authorization issues.
+    - Validation errors (bad parameters).
     - Operational errors (e.g., resource busy, unknown item).
 
 - **Status codes**:
-  - Validate that 2xx / 4xx / 5xx codes are handled consistently; do not rely solely on code—also parse body.  
+  - Validate that 2xx / 4xx / 5xx codes are handled consistently; do not rely solely on code—also parse body.
   - Certain API inconsistencies (e.g., non-2xx with useful body) should be normalized internally.
 
 The design should explicitly record any RouterOS `/rest` quirks discovered during testing and encode them in the client layer, not in higher-level services.
@@ -655,18 +735,18 @@ The integration layer must translate RouterOS-specific errors into standardized 
 
 ### HTTP Status Code Mapping
 
-| RouterOS Status | HTTP Code | MCP Error Code | Error Type | Retry? |
-|----------------|-----------|----------------|------------|--------|
-| Success | 200-299 | N/A | N/A | N/A |
-| Authentication failure | 401 | -32001 | AuthenticationError | No |
-| Insufficient permissions | 403 | -32002 | AuthorizationError | No |
-| Endpoint not found | 404 | -32003 | NotFoundError | No |
-| Invalid parameters | 400 | -32602 | InvalidParams | No |
-| Resource conflict | 409 | -32004 | ConflictError | No |
-| Rate limited | 429 | -32005 | RateLimitError | Yes (with backoff) |
-| Server error | 500-599 | -32000 | InternalError | Yes (3 attempts) |
-| Timeout | N/A | -32006 | TimeoutError | Yes (3 attempts) |
-| Network error | N/A | -32007 | NetworkError | Yes (3 attempts) |
+| RouterOS Status          | HTTP Code | MCP Error Code | Error Type          | Retry?             |
+| ------------------------ | --------- | -------------- | ------------------- | ------------------ |
+| Success                  | 200-299   | N/A            | N/A                 | N/A                |
+| Authentication failure   | 401       | -32001         | AuthenticationError | No                 |
+| Insufficient permissions | 403       | -32002         | AuthorizationError  | No                 |
+| Endpoint not found       | 404       | -32003         | NotFoundError       | No                 |
+| Invalid parameters       | 400       | -32602         | InvalidParams       | No                 |
+| Resource conflict        | 409       | -32004         | ConflictError       | No                 |
+| Rate limited             | 429       | -32005         | RateLimitError      | Yes (with backoff) |
+| Server error             | 500-599   | -32000         | InternalError       | Yes (3 attempts)   |
+| Timeout                  | N/A       | -32006         | TimeoutError        | Yes (3 attempts)   |
+| Network error            | N/A       | -32007         | NetworkError        | Yes (3 attempts)   |
 
 ### RouterOS Error Response Format
 
@@ -1038,8 +1118,35 @@ async def execute_with_retry(
 - **Export operations**: `/export` command for full config backups (Note: Large configs may generate 10,000-100,000 tokens)
 - **Specific diagnostics**: Commands not exposed via `/rest/tool`
 - **Feature gaps**: RouterOS features without REST API parity (rare in v7.10+)
+- **One-off monitoring commands**: Commands that require a `once` argument to return single snapshot instead of streaming data
+  - Example: `/interface/monitor-traffic` is normally a continuous command, but `/interface/monitor-traffic {interface} once` returns a single snapshot of traffic statistics and exits immediately
 
 **SSH should never be used as a general "escape hatch" for arbitrary commands.**
+
+**Resource/identity health probes (fallback path)**
+
+- SSH fallback uses standard `/system/resource/print` and `/system/identity/print` commands.
+
+### Parameterized Commands
+
+**Some SSH commands require parameters to function correctly:**
+
+- **Continuous vs. One-Off Output**: RouterOS CLI commands may support a `once` argument to convert from streaming/continuous output to a single snapshot
+  - `/interface/monitor-traffic` alone continuously streams real-time stats
+  - `/interface/monitor-traffic {interface} once` returns a single snapshot and exits
+  - **Implementation**: For one-off operations, always append the `once` argument to the command to ensure execution completes and returns in a bounded time
+- **Command Validation**: The SSH client supports prefix-matching for parameterized commands
+  - Whitelist: `/interface/monitor-traffic` (base command)
+  - Allowed: `/interface/monitor-traffic ether1 once` (with parameters)
+  - Validation: Command is allowed if it exactly matches whitelist OR starts with a whitelisted base command followed by space
+
+**CRITICAL POLICY: DO NOT USE `as-value` ARGUMENT**
+
+- The `as-value` argument (e.g., `/system/resource/print as-value`) is **NOT A VALID RouterOS argument** - it is unreliable and not officially supported across RouterOS builds.
+- Many devices return **empty output** or **ignore the format directive** entirely when `as-value` is specified.
+- **MCP POLICY**: Use ONLY standard `print` format consistently. Never use `as-value` in any RouterOS command.
+- Plain output (`key: value`) is parsed with unit-aware coercion (e.g., `MiB`, `GiB`, `%`) so CPU, memory, uptime, architecture, board-name, and version fields remain meaningful over SSH fallback.
+- All parsers must handle the standard colon-separated format: `key: value`
 
 ### Phase 1: Code-Based Command Templates
 
@@ -1273,12 +1380,14 @@ async def execute_ssh_command(
 **For Phase 1 (single-user), SSH command templates are code-based:**
 
 ✅ **Advantages:**
+
 - **Security**: Templates reviewed in code review process
 - **Version control**: All changes tracked in git
 - **No runtime modification**: Prevents accidental template corruption
 - **Type safety**: Pydantic validation at load time
 
 **Implemented in Later Phases:**
+
 - Web GUI for adding/modifying templates (Phase 4)
 - Runtime template modification (Phase 2-3)
 - User-defined custom commands (Phase 3)
@@ -1303,6 +1412,7 @@ ssh_templates:
 ```
 
 **Phase 4 may add web GUI for admin users:**
+
 - CRUD operations on SSH templates
 - Template testing in lab environment
 - Approval workflow for new templates
@@ -1388,6 +1498,7 @@ def audit_ssh_command(
 ## Summary: SSH Integration (Phase 1)
 
 ✅ **What Phase 1 Has:**
+
 - Pre-defined SSH command templates in code
 - Parameter validation and injection prevention
 - Environment and tier-based restrictions
@@ -1395,6 +1506,7 @@ def audit_ssh_command(
 - Support for config export and backups
 
 **Deferred to Later Phases:**
+
 - Web GUI for template management (Phase 4)
 - Runtime template modification (Phase 2-3)
 - User-defined custom commands (Phase 3)
@@ -1407,17 +1519,19 @@ def audit_ssh_command(
 ## Idempotency, change detection, and read-modify-write patterns
 
 - **Idempotent tools**:
-  - Tools must be designed so that repeatedly applying the same desired state yields the same result (no unintended side effects).  
+
+  - Tools must be designed so that repeatedly applying the same desired state yields the same result (no unintended side effects).
   - For example, setting a system identity to the same value should return `changed=false`.
 
 - **Read-modify-write**:
+
   - Before changing configuration, the integration:
-    - Reads the current state from RouterOS.  
-    - Computes the desired changes relative to the current state.  
+    - Reads the current state from RouterOS.
+    - Computes the desired changes relative to the current state.
     - Applies the minimal set of changes required.
 
 - **Change detection**:
-  - Tools must explicitly report whether a change was applied (`changed=true/false`).  
+  - Tools must explicitly report whether a change was applied (`changed=true/false`).
   - Out-of-band changes on RouterOS are handled by always re-reading and not assuming previous writes succeeded.
 
 This pattern is critical for safe multi-device orchestration and drift handling.
@@ -1427,15 +1541,17 @@ This pattern is critical for safe multi-device orchestration and drift handling.
 ## Handling version differences and feature detection per device
 
 - **Minimum supported version**:
+
   - The MCP service assumes RouterOS v7 with a configured minimum minor version (e.g. ≥ 7.xx LTS).
 
 - **Feature detection**:
-  - At registration or on-demand, the service queries device capabilities (version, installed packages, available endpoints).  
+
+  - At registration or on-demand, the service queries device capabilities (version, installed packages, available endpoints).
   - Certain tools or features may be disabled for devices that do not meet requirements.
 
 - **Degraded behavior**:
   - If a feature is missing:
-    - Tools may degrade to read-only mode (e.g., read DNS config but not modify).  
+    - Tools may degrade to read-only mode (e.g., read DNS config but not modify).
     - Or return a clear “unsupported” error.
 
 ---
@@ -1443,15 +1559,17 @@ This pattern is critical for safe multi-device orchestration and drift handling.
 ## Performance considerations (batching, pagination, rate limiting per device)
 
 - **Batching**:
-  - Where possible, combine related reads into fewer REST calls (e.g., fetch multiple interfaces in one request).  
+
+  - Where possible, combine related reads into fewer REST calls (e.g., fetch multiple interfaces in one request).
   - Avoid over-batching for large fleets; per-device and global limits still apply.
 
 - **Pagination**:
+
   - Large result sets (e.g., logs, large routing tables) should be paginated by the MCP tools and integration layer, not dumped wholesale.
 
 - **Rate limiting**:
   - Per-device:
-    - Capped QPS and concurrency, with backoff on repeated failures.  
+    - Capped QPS and concurrency, with backoff on repeated failures.
   - Global:
     - Limits to protect the MCP service and upstream dependencies from overload.
 
@@ -1462,19 +1580,21 @@ These considerations are especially important for metrics collection and multi-d
 ## Testing against lab devices and simulation / “dry-run” patterns
 
 - **Lab devices**:
-  - A small, representative set of RouterOS devices in `lab` environment must be available for:  
-    - Integration testing.  
-    - Validating new tools and features.  
+
+  - A small, representative set of RouterOS devices in `lab` environment must be available for:
+    - Integration testing.
+    - Validating new tools and features.
     - Exercising high-risk operations under controlled conditions.
 
 - **Simulation / mocks**:
-  - For CI and unit tests, use simulated RouterOS responses or mocks that mirror REST/SSH behavior.  
+
+  - For CI and unit tests, use simulated RouterOS responses or mocks that mirror REST/SSH behavior.
   - Simulated scenarios should include:
-    - Success paths.  
-    - Common error cases.  
+    - Success paths.
+    - Common error cases.
     - Timeouts and rate-limiting behaviors.
 
 - **Dry-run mode**:
   - Where feasible, tools should support “dry-run” or “plan” operations:
-    - Compute and report intended RouterOS changes without applying them.  
+    - Compute and report intended RouterOS changes without applying them.
     - This dovetails with the plan/apply pattern in MCP tools.

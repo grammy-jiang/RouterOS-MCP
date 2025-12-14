@@ -51,7 +51,7 @@ The Model Context Protocol enables standardized communication between:
 
 **Configuration Pattern:**
 
-MCP host configuration (e.g., Claude Desktop `claude_desktop_config.json`):
+MCP host configuration (e.g., Claude Desktop `claude_desktop_config.json` or VS Code MCP settings):
 
 ```json
 {
@@ -62,7 +62,7 @@ MCP host configuration (e.g., Claude Desktop `claude_desktop_config.json`):
         "run",
         "python",
         "-m",
-        "routeros_mcp.mcp_server",
+        "routeros_mcp.main",
         "--config",
         "/absolute/path/to/config.yaml"
       ],
@@ -1149,7 +1149,7 @@ Use Inspector to verify:
 ### Unified Server Entrypoint
 
 ```python
-# routeros_mcp/mcp_server.py
+# Legacy illustrative example (original design sketch)
 
 import sys
 import logging

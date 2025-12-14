@@ -8,9 +8,10 @@ Describe the recommended development environment, external dependencies, and com
 
 ## Language and runtime
 
-- Python 3.11+  
+- Python 3.11+
 - Recommended local setup with `uv`:
-  - Install `uv` (see official docs).  
+
+  - Install `uv` (see official docs).
   - Create and activate a virtual environment:
 
     ```bash
@@ -53,24 +54,28 @@ Describe the recommended development environment, external dependencies, and com
 ### Core runtime
 
 - **`fastapi`** (≥0.109.0) – Modern, fast web framework with automatic API docs
+
   - Industry standard for Python async web APIs
   - Excellent type hint support and validation via Pydantic
   - Built-in OpenAPI/Swagger documentation
   - Extremely popular (74k+ GitHub stars, very active)
 
 - **`uvicorn[standard]`** (≥0.27.0) – Lightning-fast ASGI server
+
   - Reference implementation for ASGI servers
   - Recommended by FastAPI documentation
   - Includes uvloop and httptools for performance
   - Alternative: `hypercorn` for HTTP/2 support if needed
 
 - **`pydantic`** (≥2.5.0) – Data validation using Python type hints
+
   - V2 offers significant performance improvements over V1
   - Used by FastAPI, FastMCP, and many other major projects
   - Industry standard for Python data validation
   - Excellent JSON schema generation
 
 - **`httpx`** (≥0.26.0) – Modern async/sync HTTP client
+
   - Successor to `requests` with async support
   - Excellent connection pooling and timeout handling
   - Well-maintained by Encode (same team as FastAPI)
@@ -85,6 +90,7 @@ Describe the recommended development environment, external dependencies, and com
 ### Persistence
 
 - **`sqlalchemy[asyncio]`** (≥2.0.25) – SQL toolkit and ORM
+
   - Industry standard Python ORM
   - V2 offers modern async support
   - Excellent documentation and community
@@ -92,6 +98,7 @@ Describe the recommended development environment, external dependencies, and com
   - Very actively maintained (SQLAlchemy is the reference ORM)
 
 - **`asyncpg`** (≥0.29.0) – Fast PostgreSQL async driver
+
   - Fastest PostgreSQL driver for Python
   - Native support for PostgreSQL types and features
   - Preferred over psycopg for async workloads
@@ -107,6 +114,7 @@ Describe the recommended development environment, external dependencies, and com
 ### Observability
 
 - **`structlog`** (≥24.1.0) – Structured logging for humans
+
   - Industry standard for structured logging in Python
   - Excellent integration with standard library logging
   - Powerful processors for log enrichment
@@ -114,6 +122,7 @@ Describe the recommended development environment, external dependencies, and com
   - Fallback: Standard library `logging` with `python-json-logger` if structlog unavailable
 
 - **`prometheus-client`** (≥0.20.0) – Prometheus metrics client
+
   - Official Python client for Prometheus
   - Reference implementation maintained by Prometheus team
   - Excellent integration with FastAPI
@@ -141,17 +150,20 @@ Describe the recommended development environment, external dependencies, and com
 ### Configuration and secrets
 
 - **`pydantic-settings`** (≥2.1.0) – Settings management using Pydantic
+
   - Official settings extension for Pydantic v2
   - Automatic environment variable loading
   - Excellent validation and type safety
   - Replaces deprecated `BaseSettings` in pydantic core
 
 - **`python-dotenv`** (≥1.0.0) – Load environment variables from .env files
+
   - Standard tool for development environment configuration
   - Well-maintained, simple, and reliable
   - Good integration with pydantic-settings
 
 - **`pyyaml`** (≥6.0.1) – YAML parser and emitter
+
   - Industry standard for YAML parsing
   - Used for YAML configuration file support
   - Required by config.py for load_settings_from_file()
@@ -166,6 +178,7 @@ Describe the recommended development environment, external dependencies, and com
 ### Security and cryptography
 
 - **`cryptography`** (≥41.0.0) – Cryptographic recipes and primitives
+
   - Industry standard Python cryptography library
   - PyCA (Python Cryptographic Authority) maintained
   - Used by most other security libraries
@@ -181,32 +194,38 @@ Describe the recommended development environment, external dependencies, and com
 ### Testing and developer tooling
 
 - **`pytest`** (≥8.0.0) – Testing framework
+
   - Industry standard Python testing framework
   - Extremely popular and well-maintained
   - Rich plugin ecosystem
 
 - **`pytest-asyncio`** (≥0.23.0) – Async test support for pytest
+
   - Official pytest plugin for async tests
   - Essential for testing async/await code
   - Well-maintained
 
 - **`pytest-cov`** (≥4.1.0) – Coverage plugin for pytest
+
   - Official pytest coverage plugin
   - Uses `coverage.py` underneath
   - Industry standard for Python coverage
 
 - **`coverage[toml]`** (≥7.4.0) – Code coverage measurement
+
   - Reference implementation for Python coverage
   - Excellent reporting and configuration
   - Supports pyproject.toml configuration
 
 - **`mypy`** (≥1.8.0) – Static type checker
+
   - Reference implementation for Python type checking
   - Maintained by Python core developers
   - Industry standard for Python typing
   - Excellent IDE integration
 
 - **`ruff`** (≥0.2.0) – Extremely fast Python linter
+
   - Modern replacement for flake8, isort, and many other tools
   - 10-100x faster than alternatives
   - Actively developed by Astral (same team as uv)
@@ -214,6 +233,7 @@ Describe the recommended development environment, external dependencies, and com
   - Note: Can also format (replacing black), but black still preferred for now
 
 - **`black`** (≥24.1.0) – Uncompromising code formatter
+
   - Industry standard Python formatter
   - Used by most major Python projects
   - Eliminates formatting debates
@@ -228,6 +248,7 @@ Describe the recommended development environment, external dependencies, and com
 ### Development tools
 
 - **`uv`** (≥0.1.0) – Ultra-fast Python package installer and resolver
+
   - Modern replacement for pip with 10-100x speedup
   - Drop-in pip replacement
   - Maintained by Astral (same team as ruff)
@@ -242,6 +263,7 @@ Describe the recommended development environment, external dependencies, and com
 ### Optional: Enhanced development experience
 
 - **`rich`** (≥13.7.0) – Rich text and formatting in terminal
+
   - Beautiful terminal output
   - Excellent for CLI tools and logging enhancement
   - Can integrate with structlog for colored output
@@ -261,9 +283,9 @@ The implementation should follow the module layout described in `docs/11-impleme
 
 In addition, a `pyproject.toml` or `setup.cfg` should:
 
-- Declare the package `routeros_mcp`.  
+- Declare the package `routeros_mcp`.
 - Group dependencies into:
-  - `main` (runtime).  
+  - `main` (runtime).
   - `dev` (testing, linting, formatting).
 
 ---
@@ -272,7 +294,7 @@ In addition, a `pyproject.toml` or `setup.cfg` should:
 
 These commands assume:
 
-- A virtual environment is created and activated (preferably using `uv venv`).  
+- A virtual environment is created and activated (preferably using `uv venv`).
 - Dependencies are installed with `uv pip install -e .[dev]` once a proper `pyproject.toml`/`setup.cfg` exists.
 
 ### Environment setup (with `uv`)
@@ -296,26 +318,28 @@ This starts the HTTP API for admin and health/metrics endpoints.
 **Run the MCP server (stdio transport for Claude Desktop):**
 
 ```bash
-uv run python -m routeros_mcp.mcp.server
+uv run python -m routeros_mcp.main -- --config config/lab.yaml
 ```
 
-This starts the MCP server in stdio mode, listening on stdin/stdout for JSON-RPC messages. This is the default mode for integration with Claude Desktop or other MCP clients that launch the server as a subprocess.
+This starts the MCP server in stdio mode (configured in `config/lab.yaml`), listening on stdin/stdout for JSON-RPC messages. This is the default mode for integration with Claude Desktop or other MCP clients that launch the server as a subprocess.
 
 **Run the MCP server (HTTP/SSE transport for multi-client):**
 
-```bash
-uv run python -m routeros_mcp.mcp.server --transport http --port 8080
-```
-
-This starts the MCP server in HTTP/SSE mode, accepting connections on `http://localhost:8080/mcp`. Multiple MCP clients can connect simultaneously.
-
-**Run both HTTP API and MCP server:**
+To run in HTTP mode, ensure `mcp_transport: http` is set in your configuration file.
 
 ```bash
-uv run python -m routeros_mcp.main
+uv run python -m routeros_mcp.main -- --config config/prod.yaml
 ```
 
-This starts both the FastAPI HTTP admin API and the MCP server with the configured transport mode (default: stdio).
+This starts the MCP server in HTTP/SSE mode (once implemented), accepting connections.
+
+**Run the application (Main Entry Point):**
+
+```bash
+uv run python -m routeros_mcp.main -- --config config/lab.yaml
+```
+
+This starts the application based on the configuration provided. The transport mode (stdio or http) is determined by the `mcp_transport` setting in the config file.
 
 **Environment variables for development:**
 
@@ -380,7 +404,7 @@ uv run mypy routeros_mcp
 npm install -g @modelcontextprotocol/inspector
 
 # Launch MCP Inspector with stdio transport
-mcp-inspector "uv run python -m routeros_mcp.mcp.server"
+mcp-inspector "uv run python -m routeros_mcp.main -- --config config/lab.yaml"
 
 # This opens a browser UI at http://localhost:5173
 # allowing you to:
@@ -425,7 +449,10 @@ uv run python -m routeros_mcp.mcp.generate_catalog --output dist/mcp-tools.json
         "run",
         "python",
         "-m",
-        "routeros_mcp.mcp.server"
+        "routeros_mcp.main",
+        "--",
+        "--config",
+        "config/lab.yaml"
       ],
       "env": {
         "MCP_ENV": "lab",
@@ -446,7 +473,7 @@ uv run python -m routeros_mcp.mcp.generate_catalog --output dist/mcp-tools.json
 # Enable verbose JSON-RPC logging
 export MCP_LOG_LEVEL=DEBUG
 export MCP_LOG_JSONRPC=true
-uv run python -m routeros_mcp.mcp.server
+uv run python -m routeros_mcp.main -- --config config/lab.yaml
 
 # This logs all JSON-RPC requests and responses to stderr
 ```
@@ -462,7 +489,7 @@ from routeros_mcp.mcp.client import MCPClient
 async def test_tool():
     client = MCPClient(
         transport="stdio",
-        command=["uv", "run", "python", "-m", "routeros_mcp.mcp.server"]
+        command=["uv", "run", "python", "-m", "routeros_mcp.main", "--", "--config", "config/lab.yaml"]
     )
 
     # Initialize
@@ -528,8 +555,8 @@ uv run python -m routeros_mcp.mcp.benchmark \
 **Test concurrent MCP connections (HTTP transport):**
 
 ```bash
-# Start HTTP server
-uv run python -m routeros_mcp.mcp.server --transport http --port 8080 &
+# Start HTTP server (requires mcp_transport: http in config)
+uv run python -m routeros_mcp.main -- --config config/prod.yaml &
 
 # Run concurrent client test
 uv run pytest tests/integration/test_mcp_concurrency.py -v
@@ -554,7 +581,7 @@ uv run pytest tests/unit/mcp_tools/test_newfeature.py -v
 uv run pytest tests/e2e/test_mcp_protocol.py::test_newfeature_tool -v
 
 # 6. Test with MCP Inspector
-mcp-inspector "uv run python -m routeros_mcp.mcp.server"
+mcp-inspector "uv run python -m routeros_mcp.main -- --config config/lab.yaml"
 ```
 
 **MCP debugging checklist:**
@@ -562,22 +589,26 @@ mcp-inspector "uv run python -m routeros_mcp.mcp.server"
 When MCP tool execution fails:
 
 1. **Check JSON-RPC message format:**
+
    ```bash
    export MCP_LOG_JSONRPC=true
    # Review request/response in logs
    ```
 
 2. **Validate tool schema:**
+
    ```bash
    uv run python -m routeros_mcp.mcp.validate_tools
    ```
 
 3. **Test tool in isolation:**
+
    ```bash
    uv run pytest tests/unit/mcp_tools/test_<toolname>.py -v
    ```
 
 4. **Check authorization:**
+
    ```bash
    # Verify user has required role and device access
    uv run python -m routeros_mcp.security.check_access \
@@ -589,7 +620,7 @@ When MCP tool execution fails:
 5. **Test with minimal client:**
    ```bash
    # Use MCP Inspector or minimal Python client
-   mcp-inspector "uv run python -m routeros_mcp.mcp.server"
+   mcp-inspector "uv run python -m routeros_mcp.main -- --config config/lab.yaml"
    ```
 
 ### Local health checks

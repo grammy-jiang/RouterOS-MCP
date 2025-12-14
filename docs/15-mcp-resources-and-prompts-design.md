@@ -4,6 +4,78 @@
 
 Define the MCP resource patterns for exposing RouterOS device data and configuration, and prompt templates for guiding users through common workflows. Resources provide read-only contextual data, while prompts offer reusable instruction templates that help users discover and execute complex operations safely.
 
+## Phase 1 (current implementation) snapshot
+
+The running service (Phase 1) exposes the following **implemented resources and prompts**. All other resource sketches below are forward-looking and not yet wired up.
+
+- **Concrete resource (visible via `resources/list`):**
+  - `fleet://health-summary`
+- **Templated resources (visible via `resources/listTemplates`; call `resources/list` with an expanded URI):**
+
+  - `device://{device_id}/overview`
+  - `device://{device_id}/health`
+  - `device://{device_id}/config`
+  - `device://{device_id}/logs`
+  - `fleet://devices/{environment}`
+  - `plan://{plan_id}/summary`
+  - `plan://{plan_id}/details`
+  - `plan://{plan_id}/execution-log`
+  - `audit://events/recent/{limit}`
+  - `audit://events/by-user/{user_sub}`
+  - `audit://events/by-device/{device_id}`
+  - `audit://events/by-tool/{tool_name}`
+
+  > Note: MCP hosts must call **`resources/listTemplates`** to enumerate these URI patterns; `resources/list` only returns concrete resources, so it will only show `fleet://health-summary`.
+
+- **Prompts (all implemented):**
+  - `address-list-sync`
+  - `comprehensive-device-review`
+  - `device-onboarding`
+  - `dns-ntp-rollout`
+  - `fleet-health-review`
+  - `security-audit`
+  - `troubleshoot-device`
+  - `troubleshoot-dns-ntp`
+
+## SSH commands used by Phase 1 resources/tools (reference)
+
+When REST responses are unavailable or incomplete, the service uses RouterOS CLI over SSH as a fallback. These commands may be invoked by tools that surface the associated resources. Each command is read-only unless noted.
+
+- **System / packages / identity / resource usage**
+
+  - `/system/package/print` – enumerate packages when REST omits available-but-not-installed entries.
+  - `/system/clock/print` – clock and timezone when REST clock endpoint fails.
+  - `/system/resource/print` – CPU, memory, uptime; also used for lightweight health probes.
+  - `/system/identity/print` – verify identity (for set-identity dry-runs/verification).
+  - `/export compact` – generate configuration snapshots for `device://{device_id}/config`.
+
+- **Interfaces & IP addressing**
+
+  - `/interface/print` – interface inventory and metadata when REST is unavailable.
+  - `/ip/address/print` – IP address list fallback.
+  - `/ip/arp/print` – ARP table fallback.
+
+- **Routing**
+
+  - `/ip/route/print` – route table for summaries and per-route details when REST fails.
+
+- **DNS / NTP**
+
+  - `/ip/dns/print` – DNS servers and cache settings fallback.
+  - `/ip/dns/cache/print` – DNS cache entries fallback.
+  - `/system/ntp/client/print` – NTP client status fallback.
+
+- **Firewall & logs**
+  - `/ip/firewall/filter/print` – filter rules fallback.
+  - `/ip/firewall/nat/print` – NAT rules fallback.
+  - `/ip/firewall/address-list/print` – address-list entries fallback.
+  - `/log/print` – recent log entries fallback.
+  - `/system/logging/print` – logging actions/config fallback.
+
+These commands are executed through the guarded SSH client with the same authz tier checks as their REST counterparts. Any future additions should be appended to this list to keep design docs and implementation aligned.
+
+> Scope note: Sections below describe the broader design space (future phases). The Phase 1 snapshot above is the authoritative list of what is currently exposed.
+
 ---
 
 ## MCP Resources Overview
@@ -365,9 +437,9 @@ These tools mirror the functionality of Phase-2 resources and include `resource_
 
 ### Device Resources - Phase-1 Fallback Tools
 
-| Resource URI | Fallback Tool | Documentation |
-|--------------|---------------|---------------|
-| `device://{id}/health` | `device/get-health-data` | [Doc 04](04-mcp-tools-interface-and-json-schema-specification.md#deviceget-health-data) |
+| Resource URI           | Fallback Tool                | Documentation                                                                               |
+| ---------------------- | ---------------------------- | ------------------------------------------------------------------------------------------- |
+| `device://{id}/health` | `device/get-health-data`     | [Doc 04](04-mcp-tools-interface-and-json-schema-specification.md#deviceget-health-data)     |
 | `device://{id}/config` | `device/get-config-snapshot` | [Doc 04](04-mcp-tools-interface-and-json-schema-specification.md#deviceget-config-snapshot) |
 
 **Example: Device Health**
@@ -383,8 +455,8 @@ health_data = await mcp.call_tool("device/get-health-data", {"device_id": "dev-l
 
 ### Fleet Resources - Phase-1 Fallback Tools
 
-| Resource URI | Fallback Tool | Documentation |
-|--------------|---------------|---------------|
+| Resource URI            | Fallback Tool       | Documentation                                                                      |
+| ----------------------- | ------------------- | ---------------------------------------------------------------------------------- |
 | `fleet://{env}/summary` | `fleet/get-summary` | [Doc 04](04-mcp-tools-interface-and-json-schema-specification.md#fleetget-summary) |
 
 **Example: Fleet Summary**
@@ -399,15 +471,15 @@ fleet_data = await mcp.call_tool("fleet/get-summary", {"environment": "lab"})
 
 ### Plan & Audit Resources - Phase-1 Fallback Tools
 
-| Resource URI | Fallback Tool | Documentation |
-|--------------|---------------|---------------|
-| `plan://{id}` | `plan/get-details` | [Doc 04](04-mcp-tools-interface-and-json-schema-specification.md#planget-details) |
+| Resource URI           | Fallback Tool      | Documentation                                                                     |
+| ---------------------- | ------------------ | --------------------------------------------------------------------------------- |
+| `plan://{id}`          | `plan/get-details` | [Doc 04](04-mcp-tools-interface-and-json-schema-specification.md#planget-details) |
 | `audit://{id}?filters` | `audit/get-events` | [Doc 04](04-mcp-tools-interface-and-json-schema-specification.md#auditget-events) |
 
 ### Snapshot Resources - Phase-1 Fallback Tools
 
-| Resource URI | Fallback Tool | Documentation |
-|--------------|---------------|---------------|
+| Resource URI      | Fallback Tool          | Documentation                                                                         |
+| ----------------- | ---------------------- | ------------------------------------------------------------------------------------- |
 | `snapshot://{id}` | `snapshot/get-content` | [Doc 04](04-mcp-tools-interface-and-json-schema-specification.md#snapshotget-content) |
 
 ### Migration Path
@@ -483,18 +555,18 @@ async def device_config_resource(device_id: str) -> Resource:
 
 All resources SHOULD include these metadata fields:
 
-| Field | Type | Required | Purpose |
-|-------|------|----------|---------|
-| `uri` | string | ✅ Yes | Unique resource identifier |
-| `name` | string | ✅ Yes | Human-readable title |
-| `description` | string | ✅ Yes | What the resource contains and when to use it |
-| `mime_type` | string | ✅ Yes | Content type (text/plain, application/json, etc.) |
-| `metadata.size_bytes` | integer | ✅ Yes | Exact content size |
-| `metadata.size_hint_kb` | float | ⚠️ Recommended | Size in KB for quick assessment |
-| `metadata.estimated_tokens` | integer | ⚠️ Recommended | Approximate token count for context planning |
-| `metadata.safe_for_context` | boolean | ⚠️ Recommended | Whether safe to load into typical context windows |
-| `metadata.snapshot_timestamp` | string | ⚠️ Recommended | When data was captured (ISO 8601) |
-| `metadata.content_sections` | array | Optional | Logical sections/topics in content |
+| Field                         | Type    | Required       | Purpose                                           |
+| ----------------------------- | ------- | -------------- | ------------------------------------------------- |
+| `uri`                         | string  | ✅ Yes         | Unique resource identifier                        |
+| `name`                        | string  | ✅ Yes         | Human-readable title                              |
+| `description`                 | string  | ✅ Yes         | What the resource contains and when to use it     |
+| `mime_type`                   | string  | ✅ Yes         | Content type (text/plain, application/json, etc.) |
+| `metadata.size_bytes`         | integer | ✅ Yes         | Exact content size                                |
+| `metadata.size_hint_kb`       | float   | ⚠️ Recommended | Size in KB for quick assessment                   |
+| `metadata.estimated_tokens`   | integer | ⚠️ Recommended | Approximate token count for context planning      |
+| `metadata.safe_for_context`   | boolean | ⚠️ Recommended | Whether safe to load into typical context windows |
+| `metadata.snapshot_timestamp` | string  | ⚠️ Recommended | When data was captured (ISO 8601)                 |
+| `metadata.content_sections`   | array   | Optional       | Logical sections/topics in content                |
 
 ### Token Estimation
 
@@ -744,7 +816,7 @@ async def check_resource_access(user: User, device_id: str, resource_type: str):
 
 ### Workflow Prompt Pattern
 
-```python
+````python
 from fastmcp import FastMCP
 from typing import Literal
 
@@ -822,16 +894,18 @@ Rolling out DNS/NTP changes to **{device_count} devices** in {environment} envir
 {{
   "environment": "{environment}"
 }}
-```
+````
 
 **Action:** Review device list, verify all intended devices are included.
 
 ---
 
 ### 2. Create Rollout Plan
+
 **Tool:** `config.plan_dns_ntp_rollout`
 
 **Parameters:**
+
 ```json
 {{
   "device_ids": ["dev-001", "dev-002", ...],
@@ -848,9 +922,11 @@ Rolling out DNS/NTP changes to **{device_count} devices** in {environment} envir
 ---
 
 ### 3. Review Plan Details
+
 **Resource:** `plan://{{plan_id}}/details`
 
 **Review checklist:**
+
 - [ ] All intended devices included
 - [ ] Current DNS/NTP values are correct
 - [ ] New values are correct
@@ -863,6 +939,7 @@ Rolling out DNS/NTP changes to **{device_count} devices** in {environment} envir
 ---
 
 ### 4. Obtain Approval {'(Required for Production)' if environment == 'prod' else '(Optional for Lab/Staging)'}
+
 {'**For production only:**' if environment == 'prod' else '**For audit trail:**'}
 
 - Navigate to admin UI approval page
@@ -875,9 +952,11 @@ Rolling out DNS/NTP changes to **{device_count} devices** in {environment} envir
 ---
 
 ### 5. Apply Changes
+
 **Tool:** `config.apply_dns_ntp_rollout`
 
 **Parameters:**
+
 ```json
 {{
   "plan_id": "<plan_id from step 2>",
@@ -894,13 +973,16 @@ Rolling out DNS/NTP changes to **{device_count} devices** in {environment} envir
 ---
 
 ### 6. Verify Success
+
 **Post-apply checklist:**
+
 - [ ] All devices show changed=true (or false if no actual change)
 - [ ] Health checks remain green
 - [ ] Sample DNS/NTP queries work correctly
 - [ ] Audit log shows successful completion
 
 **Tools for verification:**
+
 - `device.check_connectivity` - Verify device reachability
 - `dns.get_status` - Check DNS configuration
 - `ntp.get_status` - Verify NTP sync
@@ -909,6 +991,7 @@ Rolling out DNS/NTP changes to **{device_count} devices** in {environment} envir
 ---
 
 ## Rollback Procedure
+
 If issues occur after apply:
 
 1. **Assess Impact:** Check health summary and failed device count
@@ -920,6 +1003,7 @@ If issues occur after apply:
 ---
 
 ## Safety Notes
+
 - Always test in **lab** environment first
 - Use **staging** for final validation before production
 - Production changes require **admin approval**
@@ -931,25 +1015,31 @@ If issues occur after apply:
 ## Troubleshooting Common Issues
 
 **Issue:** Precondition check fails
+
 - **Solution:** Review device capability flags, verify devices allow advanced writes
 
 **Issue:** DNS resolution fails post-change
+
 - **Solution:** Verify DNS servers are reachable, check firewall rules
 
 **Issue:** NTP sync fails
+
 - **Solution:** Ensure NTP port 123/UDP is allowed, verify server reachability
 
 **Issue:** Device becomes unreachable during apply
+
 - **Solution:** Apply will pause; investigate network issue, resume or rollback
 
 ---
 
 ## Additional Resources
+
 - `troubleshoot-device` prompt for device-specific diagnostics
 - `fleet://health-summary` resource for overall health
 - `audit://events/recent` for operation logs
-"""
-```
+  """
+
+````
 
 ### Troubleshooting Prompt Pattern
 
@@ -1034,13 +1124,14 @@ Use `system.get_overview` for current system state.
 
 ```json
 {{ "device_id": "{device_id}" }}
-```
+````
 
 **Expected:** Should respond within 2-5 seconds with identity information.
 
 ---
 
 ### 2. System Overview
+
 **Tool:** `system.get_overview`
 
 ```json
@@ -1048,6 +1139,7 @@ Use `system.get_overview` for current system state.
 ```
 
 **Review:**
+
 - CPU usage (high = potential overload)
 - Memory usage (high = potential issue)
 - Uptime (recent reboot?)
@@ -1056,6 +1148,7 @@ Use `system.get_overview` for current system state.
 ---
 
 ### 3. Interface Status
+
 **Tool:** `interface.list_interfaces`
 
 ```json
@@ -1063,6 +1156,7 @@ Use `system.get_overview` for current system state.
 ```
 
 **Check:**
+
 - Management interface is UP
 - Expected interfaces are present
 - No unexpected DOWN interfaces
@@ -1070,9 +1164,11 @@ Use `system.get_overview` for current system state.
 ---
 
 ### 4. Recent Logs
+
 **Resource:** `device://{device_id}/logs/recent`
 
 **Look for:**
+
 - Error messages
 - Connection failures
 - Configuration changes
@@ -1080,7 +1176,9 @@ Use `system.get_overview` for current system state.
 ---
 
 ### 5. DNS/NTP Status
+
 **Tools:**
+
 - `dns.get_status` - Verify DNS resolution
 - `ntp.get_status` - Check time sync
 
@@ -1091,15 +1189,18 @@ Use `system.get_overview` for current system state.
 ## Common Issues and Solutions
 
 ### Device Unreachable
+
 **Symptoms:** Cannot contact device via REST API
 
 **Diagnostic steps:**
+
 1. Verify network connectivity (ping management IP)
 2. Check firewall rules (allow REST API port)
 3. Verify RouterOS REST API service is running
 4. Check MCP stored credentials are correct
 
 **Resolution:**
+
 - Fix network connectivity
 - Update management address if changed
 - Rotate credentials if auth failed
@@ -1107,14 +1208,17 @@ Use `system.get_overview` for current system state.
 ---
 
 ### High CPU Usage
+
 **Symptoms:** CPU > 80% sustained
 
 **Diagnostic steps:**
+
 1. Check `system.get_overview` for CPU details
 2. Review processes via RouterOS CLI (if permitted)
 3. Check for traffic spikes in interface stats
 
 **Resolution:**
+
 - Reduce polling frequency
 - Investigate traffic anomalies
 - Consider hardware upgrade
@@ -1122,14 +1226,17 @@ Use `system.get_overview` for current system state.
 ---
 
 ### Configuration Drift
+
 **Symptoms:** Device config differs from expected
 
 **Diagnostic steps:**
+
 1. Fetch current config: `device://{device_id}/config`
 2. Compare with baseline or last known good
 3. Review audit logs for manual changes
 
 **Resolution:**
+
 - Document expected changes
 - Revert unwanted changes
 - Update baseline if intentional
@@ -1137,14 +1244,17 @@ Use `system.get_overview` for current system state.
 ---
 
 ### DNS Resolution Failing
+
 **Symptoms:** DNS queries not working
 
 **Diagnostic steps:**
+
 1. Check DNS server configuration
 2. Verify DNS servers are reachable
 3. Test DNS resolution with `tool.ping` to known hostname
 
 **Resolution:**
+
 - Update DNS servers
 - Check firewall rules for port 53
 - Verify upstream DNS is operational
@@ -1152,15 +1262,18 @@ Use `system.get_overview` for current system state.
 ---
 
 ## Next Steps
+
 - Document findings in ticket/issue
 - If issue persists, escalate with diagnostic results
 - Consider creating health alert rule for this device
 
 ## Related Prompts
+
 - `dns-ntp-rollout` - If DNS/NTP changes needed
 - `device-onboarding` - If device needs re-registration
-"""
-```
+  """
+
+````
 
 ### Onboarding Prompt Pattern
 
@@ -1298,13 +1411,14 @@ def _generate_onboarding_steps(environment: str, automated: bool) -> str:
    ```routeros
    /system script add name=mcp-bootstrap source=[/file get mcp-bootstrap.rsc contents]
    /system script run mcp-bootstrap
-   ```
+````
 
-   The script will:
-   - Create MCP service account with appropriate permissions
-   - Enable REST API if not already enabled
-   - Generate registration token
-   - Call MCP registration API
+The script will:
+
+- Create MCP service account with appropriate permissions
+- Enable REST API if not already enabled
+- Generate registration token
+- Call MCP registration API
 
 2. **Verify Auto-Registration**
 
@@ -1319,35 +1433,39 @@ def _generate_onboarding_steps(environment: str, automated: bool) -> str:
 
    **Tool:** `device.update_metadata`
    Set environment-appropriate flags.
-"""
-    else:
-        return f"""
-1. **Create RouterOS Service Account**
+   """
+   else:
+   return f"""
+
+5. **Create RouterOS Service Account**
 
    On the RouterOS device, create a dedicated service account:
+
    ```routeros
    /user group add name=mcp-readonly policy=read,api,rest-api,sensitive
    /user add name=mcp-readonly group=mcp-readonly password="<secure-password>"
    ```
 
    For devices allowing writes (lab/staging):
+
    ```routeros
    /user group add name=mcp-ops policy=read,write,api,rest-api,policy,sensitive
    /user add name=mcp-ops group=mcp-ops password="<secure-password>"
    ```
 
-2. **Enable REST API (if not already enabled)**
+6. **Enable REST API (if not already enabled)**
 
    ```routeros
    /ip service enable api-ssl
    /ip service set api-ssl port=443
    ```
 
-3. **Register Device in MCP**
+7. **Register Device in MCP**
 
    **API Endpoint:** `POST /admin/devices/register` (secured admin API)
 
    **Request:**
+
    ```json
    {{
      "name": "lab-router-01",
@@ -1366,6 +1484,7 @@ def _generate_onboarding_steps(environment: str, automated: bool) -> str:
    ```
 
    **Response:**
+
    ```json
    {{
      "device_id": "dev-001",
@@ -1374,14 +1493,15 @@ def _generate_onboarding_steps(environment: str, automated: bool) -> str:
    }}
    ```
 
-4. **Verify Registration**
+8. **Verify Registration**
 
    **Tool:** `device.list_devices`
 
    Or use resource:
    **Resource:** `fleet://devices/{environment}`
-"""
-```
+   """
+
+````
 
 ### Parameter Completion Pattern
 
@@ -1461,33 +1581,40 @@ Re-run this prompt with both `device_id` and `address_list_name` to see full wor
   "comment": "Application server - added YYYY-MM-DD",
   "timeout": "1d"
 }}
-```
+````
 
 **Options:**
+
 - `address`: IP address or subnet (CIDR notation)
 - `comment`: Description (recommended)
 - `timeout`: Auto-expiry (optional, e.g., "1d", "1h", "00:30:00")
 
 ### 2. Verify Entry
+
 **Tool:** `ip.list_address_list_entries`
 
 **Check:** Entry appears in list with correct details
 
 ### 3. Test (if applicable)
+
 If address list is used in firewall rules, verify:
+
 - Traffic is allowed/denied as expected
 - Logs show rule hits (if logging enabled)
 
 ## Safety Notes
+
 - Only MCP-managed address lists can be modified
 - Changes take effect immediately
 - For production, consider using plan/apply workflow
 - Always add descriptive comments for audit trail
 
 ## Remove Entry Later
+
 **Tool:** `ip.remove_address_list_entry`
 
 **Parameters:**
+
 ```json
 {{
   "device_id": "{device_id}",
@@ -1495,8 +1622,10 @@ If address list is used in firewall rules, verify:
   "address": "10.0.1.5"
 }}
 ```
+
 """
-```
+
+````
 
 ---
 
@@ -1607,7 +1736,7 @@ After review, verify:
 - Schedule maintenance if needed
 - Update device tags/metadata if appropriate
 """
-```
+````
 
 ---
 

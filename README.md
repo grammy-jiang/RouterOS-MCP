@@ -23,6 +23,13 @@ All design decisions for the 1.x line are captured in the [`docs/`](docs/) direc
 - ✅ **Comprehensive Observability** – Structured logging, metrics, tracing
 - ✅ **Test-Driven Development** – 85%+ coverage for non-core modules, 95%+ (aiming for 100%) for core modules, with tests exercising all return and exception paths
 
+## Current Phase 1 surface area (matches running implementation)
+
+- **Tools (34 registered):** platform helpers (echo, service health), device registry, system, interface, IP, DNS/NTP, routing, firewall/logs, firewall write, and professional DNS/NTP rollout workflow. Diagnostics (`ping`, `traceroute`) exist in code but are **not registered** yet. See [docs/04](docs/04-mcp-tools-interface-and-json-schema-specification.md#phase-1-current-implementation-tool-snapshot) for the authoritative list.
+- **Resources (13 templates + 1 concrete):** the concrete resource `fleet://health-summary` shows up in `resources/list`; the remaining templated URIs (device/fleet/plan/audit) appear via `resources/listTemplates` (e.g., `device://{device_id}/overview`, `plan://{plan_id}/details`). Details in [docs/15](docs/15-mcp-resources-and-prompts-design.md#phase-1-current-implementation-snapshot).
+- **Prompts (8):** address-list-sync, comprehensive-device-review, device-onboarding, dns-ntp-rollout, fleet-health-review, security-audit, troubleshoot-device, troubleshoot-dns-ntp.
+- **SSH fallbacks:** Read-only CLI commands (e.g., `/ip/route/print`, `/interface/print`, `/system/package/print`) are used when REST data is incomplete. Command coverage and descriptions live in [docs/15](docs/15-mcp-resources-and-prompts-design.md#ssh-commands-used-by-phase-1-resourcestools-reference).
+
 ## Architecture Highlights
 
 ### MCP Integration
@@ -48,14 +55,17 @@ Built on the official **FastMCP SDK** for Python:
 ### Tool Taxonomy
 
 **Fundamental Tier** (read-only):
+
 - System overview, interfaces, IP addresses, DNS/NTP status
 - Routing summaries, logs (bounded), diagnostics (ping/traceroute)
 
 **Advanced Tier** (single-device, low-risk writes):
+
 - System identity, interface comments, DNS/NTP (lab/staging)
 - Secondary IPs, MCP-owned address lists
 
 **Professional Tier** (multi-device, high-risk):
+
 - Multi-device DNS/NTP rollouts with plan/apply
 - Fleet-level health and drift reporting
 - Requires human approval tokens and immutable plans
@@ -87,35 +97,35 @@ All design decisions are captured in the `docs/` directory, organized into logic
 
 Foundation and high-level design:
 
-| Doc | Title | Description |
-|-----|-------|-------------|
-| [00](docs/00-requirements-and-scope-specification.md) | Requirements & Scope | Problem statement, use cases, success criteria |
-| [01](docs/01-overall-system-architecture-and-deployment-topology.md) | Architecture & Deployment | High-level architecture, Cloudflare Tunnel integration |
-| [02](docs/02-security-oauth-integration-and-access-control.md) | Security & Access Control | Threat model, OAuth/OIDC, RBAC, device scopes |
-| [03](docs/03-routeros-integration-and-platform-constraints-rest-and-ssh.md) | RouterOS Integration | 41 REST API endpoints, SSH whitelisting, idempotency |
-| [04](docs/04-mcp-tools-interface-and-json-schema-specification.md) | MCP Tools Interface | 46 tools (40 core + 6 fallback), JSON-RPC schemas, intent-based descriptions |
-| [05](docs/05-domain-model-persistence-and-task-job-model.md) | Domain Model & Persistence | Business logic, workflows, retention policies |
-| [06](docs/06-system-information-and-metrics-collection-module-design.md) | Metrics Collection | Endpoint mappings, health thresholds, collection intervals |
-| [07](docs/07-device-control-and-high-risk-operations-safeguards.md) | High-Risk Operations | Risk catalog, safeguards, governance |
-| [08](docs/08-observability-logging-metrics-and-diagnostics.md) | Observability | Structured logging, metrics, tracing |
-| [09](docs/09-operations-deployment-self-update-and-runbook.md) | Operations & Deployment | Runbooks, deployment modes, operational procedures |
+| Doc                                                                         | Title                      | Description                                                                  |
+| --------------------------------------------------------------------------- | -------------------------- | ---------------------------------------------------------------------------- |
+| [00](docs/00-requirements-and-scope-specification.md)                       | Requirements & Scope       | Problem statement, use cases, success criteria                               |
+| [01](docs/01-overall-system-architecture-and-deployment-topology.md)        | Architecture & Deployment  | High-level architecture, Cloudflare Tunnel integration                       |
+| [02](docs/02-security-oauth-integration-and-access-control.md)              | Security & Access Control  | Threat model, OAuth/OIDC, RBAC, device scopes                                |
+| [03](docs/03-routeros-integration-and-platform-constraints-rest-and-ssh.md) | RouterOS Integration       | 41 REST API endpoints, SSH whitelisting, idempotency                         |
+| [04](docs/04-mcp-tools-interface-and-json-schema-specification.md)          | MCP Tools Interface        | 46 tools (40 core + 6 fallback), JSON-RPC schemas, intent-based descriptions |
+| [05](docs/05-domain-model-persistence-and-task-job-model.md)                | Domain Model & Persistence | Business logic, workflows, retention policies                                |
+| [06](docs/06-system-information-and-metrics-collection-module-design.md)    | Metrics Collection         | Endpoint mappings, health thresholds, collection intervals                   |
+| [07](docs/07-device-control-and-high-risk-operations-safeguards.md)         | High-Risk Operations       | Risk catalog, safeguards, governance                                         |
+| [08](docs/08-observability-logging-metrics-and-diagnostics.md)              | Observability              | Structured logging, metrics, tracing                                         |
+| [09](docs/09-operations-deployment-self-update-and-runbook.md)              | Operations & Deployment    | Runbooks, deployment modes, operational procedures                           |
 
 ### 🔧 Implementation Specifications (10-19)
 
 Detailed implementation guidelines:
 
-| Doc | Title | Description |
-|-----|-------|-------------|
-| [10](docs/10-testing-validation-and-sandbox-strategy-and-safety-nets.md) | Testing & Validation | TDD methodology, test layers, coverage targets (≥85% non-core, ≥95% core, aiming for 100%) |
-| [11](docs/11-implementation-architecture-and-module-layout.md) | Implementation Architecture | Runtime stack, module layout, key classes |
-| [12](docs/12-development-environment-dependencies-and-commands.md) | Dev Environment & Dependencies | Python 3.11+, dependencies, common commands |
-| [13](docs/13-python-coding-standards-and-conventions.md) | Python Coding Standards | Type hints, async, testing conventions, style guide |
-| [14](docs/14-mcp-protocol-integration-and-transport-design.md) | **MCP Protocol Integration** | FastMCP SDK, stdio/HTTP transports, best practices |
-| [15](docs/15-mcp-resources-and-prompts-design.md) | **MCP Resources & Prompts** | Resource URIs, prompt templates, workflows |
-| [16](docs/16-detailed-module-specifications.md) | **Detailed Module Specifications** | Class/method signatures, implementation patterns |
-| [17](docs/17-configuration-specification.md) | **Configuration Specification** | Settings class, CLI args, env vars, config files |
-| [18](docs/18-database-schema-and-orm-specification.md) | **Database Schema & ORM** | SQLAlchemy models, migrations, session management |
-| [19](docs/19-json-rpc-error-codes-and-mcp-protocol-specification.md) | **JSON-RPC Error Codes** | Complete error taxonomy, protocol compliance |
+| Doc                                                                      | Title                              | Description                                                                                |
+| ------------------------------------------------------------------------ | ---------------------------------- | ------------------------------------------------------------------------------------------ |
+| [10](docs/10-testing-validation-and-sandbox-strategy-and-safety-nets.md) | Testing & Validation               | TDD methodology, test layers, coverage targets (≥85% non-core, ≥95% core, aiming for 100%) |
+| [11](docs/11-implementation-architecture-and-module-layout.md)           | Implementation Architecture        | Runtime stack, module layout, key classes                                                  |
+| [12](docs/12-development-environment-dependencies-and-commands.md)       | Dev Environment & Dependencies     | Python 3.11+, dependencies, common commands                                                |
+| [13](docs/13-python-coding-standards-and-conventions.md)                 | Python Coding Standards            | Type hints, async, testing conventions, style guide                                        |
+| [14](docs/14-mcp-protocol-integration-and-transport-design.md)           | **MCP Protocol Integration**       | FastMCP SDK, stdio/HTTP transports, best practices                                         |
+| [15](docs/15-mcp-resources-and-prompts-design.md)                        | **MCP Resources & Prompts**        | Resource URIs, prompt templates, workflows                                                 |
+| [16](docs/16-detailed-module-specifications.md)                          | **Detailed Module Specifications** | Class/method signatures, implementation patterns                                           |
+| [17](docs/17-configuration-specification.md)                             | **Configuration Specification**    | Settings class, CLI args, env vars, config files                                           |
+| [18](docs/18-database-schema-and-orm-specification.md)                   | **Database Schema & ORM**          | SQLAlchemy models, migrations, session management                                          |
+| [19](docs/19-json-rpc-error-codes-and-mcp-protocol-specification.md)     | **JSON-RPC Error Codes**           | Complete error taxonomy, protocol compliance                                               |
 
 ### 📊 Key Design Enhancements
 
@@ -368,11 +378,19 @@ See [docs/01](docs/01-overall-system-architecture-and-deployment-topology.md) fo
 
 3. **Run Server**:
 
+For stdio MCP (local tools in editors/hosts):
+
 ```bash
-uv run python -m routeros_mcp.mcp_server --config config/prod.yaml
+uv run python -m routeros_mcp.main -- --config config/prod.yaml
 ```
 
-Server listens on configured port (default 8080) with SSE endpoint at `/mcp/sse`.
+For HTTP/SSE MCP (remote/production deployment, once HTTP transport is enabled):
+
+```bash
+uv run python -m routeros_mcp.main -- --config config/prod.yaml
+```
+
+Using `mcp_transport: http` in the config will start the HTTP/SSE transport instead of stdio.
 
 ### Container Deployment
 
@@ -384,7 +402,7 @@ COPY . .
 
 RUN pip install uv && uv pip install -e .
 
-CMD ["python", "-m", "routeros_mcp.mcp_server", "--config", "config/prod.yaml"]
+CMD ["python", "-m", "routeros_mcp.main", "--config", "config/prod.yaml"]
 ```
 
 ## Getting Started (For Implementers)
@@ -394,11 +412,13 @@ If you are implementing this service:
 ### 1. Review Design Documentation
 
 **Core Design Documents:**
+
 - Start with [docs/00](docs/00-requirements-and-scope-specification.md) (requirements & scope)
 - Then [docs/01](docs/01-overall-system-architecture-and-deployment-topology.md) (architecture & deployment)
 - Review [docs/14](docs/14-mcp-protocol-integration-and-transport-design.md) (MCP protocol & transport)
 
 **Security, Tools & Endpoints:**
+
 - Read [docs/02](docs/02-security-oauth-integration-and-access-control.md) (OAuth, RBAC, threat model)
 - Review [docs/03](docs/03-routeros-integration-and-platform-constraints-rest-and-ssh.md) (41 REST endpoints)
 - Study [docs/04](docs/04-mcp-tools-interface-and-json-schema-specification.md) (46 tools with intent-based descriptions)
@@ -409,11 +429,13 @@ If you are implementing this service:
 **📋 See [GITHUB-COPILOT-TASKS.md](GITHUB-COPILOT-TASKS.md) for structured implementation tasks.**
 
 This file contains **13 tasks (Phase 0-2)** organized into 6-hour blocks for GitHub Copilot Agent:
+
 - **Phase 0 (4 tasks, ~24h):** Project setup, database, security, MCP server skeleton
 - **Phase 1 (6 tasks, ~36h):** Read-only tools, health checks, admin API (23 fundamental tools)
 - **Phase 2 (3 tasks, ~18h):** Advanced write tools with safety guardrails (9 advanced tools)
 
 Each task includes:
+
 - Clear title, description, and acceptance criteria
 - **Custom prompt tailored for GitHub Copilot Agent**
 - References to relevant design documents
@@ -504,6 +526,7 @@ This design follows official MCP best practices from Anthropic:
 **Status**: ✅ **Design Complete** - This is a comprehensive, production-ready design specification with 20 numbered documents covering all aspects of the RouterOS MCP service. Implementation is organized in phases (0-5) as described in the roadmap above. The design incorporates official MCP best practices from Anthropic and follows industry standards for Python development.
 
 **Key Metrics**:
+
 - **46 MCP tools** (23 fundamental, 9 advanced, 14 professional)
 - **41 RouterOS REST endpoints** (25 read-only, 10 advanced writes, 6 high-risk)
 - **6 Phase-1 fallback tools** for tools-only client compatibility (ChatGPT, Mistral)

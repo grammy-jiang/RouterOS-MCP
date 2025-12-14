@@ -8,14 +8,14 @@ Define the Python coding standards and conventions for this repository so that a
 
 ## Language, style, and general principles
 
-- Python 3.11+ only.  
+- Python 3.11+ only.
 - Code should prioritize:
-  - Clarity and correctness over cleverness.  
-  - Explicit separation of concerns (API, domain, infrastructure).  
+  - Clarity and correctness over cleverness.
+  - Explicit separation of concerns (API, domain, infrastructure).
   - Security and safety, especially around RouterOS operations.
 - Follow PEP 8 naming and layout conventions:
-  - `snake_case` for functions, methods, and variables.  
-  - `CamelCase` for classes.  
+  - `snake_case` for functions, methods, and variables.
+  - `CamelCase` for classes.
   - `UPPER_SNAKE_CASE` for constants.
 
 ---
@@ -241,7 +241,99 @@ class MCPServer:
   - Log failures with context (device, endpoint, error).
   - Avoid catching broad `Exception` unless you re-raise or convert to a structured error.
 
-### MCP-specific error handling
+---
+
+## RouterOS Data Parsing and Information Fidelity
+
+**CRITICAL PRINCIPLE: Complete Data Fidelity - No Information Loss**
+
+All RouterOS parsers (REST and SSH) MUST capture and return ALL fields provided by RouterOS, ensuring no information is lost between the RouterOS device and the MCP server.
+
+### Parsing Requirements
+
+1. **Parse ALL fields**: Every field returned by RouterOS (REST API or SSH CLI output) must be captured and included in the response dictionary
+2. **Handle multi-line values**: RouterOS v7 SSH output often uses continuation lines (indented, no colon) for multi-line field values - parsers must accumulate these correctly
+3. **Support field variations**: Different RouterOS versions may include/exclude optional fields - parsers must handle missing fields gracefully without losing data when fields are present
+
+4. **Parse value formats**: Handle RouterOS-specific formats:
+
+   - Size suffixes: `4096KiB`, `2048KB` → extract numeric value
+   - Duration formats: `1w`, `5s`, `2d` → preserve as-is or convert to consistent unit
+   - Boolean values: `yes`/`no`, `true`/`false` → Python `bool`
+   - Empty values: Empty strings, whitespace-only → `None` or empty list as appropriate
+
+5. **Test with actual device output**: Test cases must use real RouterOS output examples, not simplified mocks, to ensure parsers handle actual format quirks
+
+### Implementation Pattern
+
+```python
+async def _get_dns_status_via_ssh(self, device_id: str) -> dict[str, Any]:
+    """Fetch DNS status via SSH.
+
+    MUST return ALL fields from RouterOS output - no information loss.
+    """
+    ssh_client = await self.device_service.get_ssh_client(device_id)
+
+    try:
+        output = await ssh_client.execute("/ip/dns/print")
+
+        # Initialize result with all possible fields
+        result: dict[str, Any] = {
+            "dns_servers": [],
+            "dynamic_servers": [],
+            # ... all other fields with sensible defaults
+        }
+
+        current_key: str | None = None
+
+        for line in output.strip().split("\n"):
+            # Handle continuation lines (multi-line values)
+            if line[0].isspace() and ":" not in line and current_key:
+                value = line.strip()
+                if current_key == "servers" and value:
+                    result["dns_servers"].append(value)
+                continue
+
+            # Parse key: value lines
+            if ":" in line:
+                key, value = line.split(":", 1)
+                key = key.strip().lower()
+                value = value.strip()
+                current_key = key
+
+                # Parse ALL keys returned by RouterOS
+                if key == "servers":
+                    # Handle both comma-separated and multi-line formats
+                    result["dns_servers"] = [s.strip() for s in value.split(",") if s.strip()]
+                elif key == "cache-size":
+                    # Parse with suffix handling
+                    result["cache_size_kb"] = int(value.replace("KiB", "").strip())
+                # ... continue for ALL fields
+
+        return result
+```
+
+### Testing Requirements
+
+- **Use actual RouterOS output**: Test mocks must use real device output
+- **Test all field variations**: Include tests for missing optional fields
+- **Test multi-line values**: Verify continuation line handling
+- **Test value format parsing**: Verify suffix/format conversions
+- **Assert all fields**: Test assertions must verify ALL expected fields are present and correct
+
+### Validation
+
+Before deployment, verify:
+
+- [ ] All RouterOS fields captured in parser
+- [ ] Multi-line value handling tested
+- [ ] Optional fields handled without breaking when absent
+- [ ] Value formats correctly converted
+- [ ] Test cases use real RouterOS output
+
+---
+
+## MCP-specific error handling
 
 - **JSON-RPC 2.0 error codes**: Map Python exceptions to standard JSON-RPC error codes:
 
@@ -542,10 +634,10 @@ async def execute_tool_with_metrics(
 ## Configuration and settings
 
 - Use the Pydantic `Settings` class (`routeros_mcp/config.py`) for configuration:
-  - Do not read environment variables directly outside of `Settings`.  
+  - Do not read environment variables directly outside of `Settings`.
   - Avoid hard-coding environment-specific values.
 - Configuration must be:
-  - Loaded once at startup.  
+  - Loaded once at startup.
   - Injected into components that need it (e.g., REST client timeouts, DB URLs).
 
 ---
@@ -632,6 +724,7 @@ from routeros_mcp.domain.interfaces import InterfaceService
   - Place tests in a top-level `tests/` directory mirroring the package structure.
   - Name test files `test_*.py` and test methods/functions `test_*`.
 - Test structure:
+
   - Both `unittest.TestCase` classes and plain pytest functions are supported.
   - For new tests in this repository, especially for MCP tools and async flows, prefer
     `unittest.TestCase` plus an inner async helper, for example:
@@ -657,14 +750,15 @@ from routeros_mcp.domain.interfaces import InterfaceService
     ```
 
 - Write unit tests for:
-  - Domain logic (plan generation, validation, authorization decisions).  
+  - Domain logic (plan generation, validation, authorization decisions).
   - RouterOS integration mapping (using mocks to avoid live devices).
 - Use integration and device-lab tests for:
+
   - End-to-end flows involving actual RouterOS devices in the `lab` environment.
 
 - Strive for a test-driven development style:
-  - When adding or changing behavior, add or update tests first or in parallel with implementation changes.  
-  - Tests should cover all normal return values and all exceptions that can be raised from the body of a function or method (every return and exception branch exercised by at least one test).  
+  - When adding or changing behavior, add or update tests first or in parallel with implementation changes.
+  - Tests should cover all normal return values and all exceptions that can be raised from the body of a function or method (every return and exception branch exercised by at least one test).
   - Common end-to-end usage patterns (e.g., typical MCP tool calling sequences) should be represented in integration tests.
 
 ---
@@ -673,21 +767,21 @@ from routeros_mcp.domain.interfaces import InterfaceService
 
 - Use `tox` to standardize local and CI runs:
   - Recommended envs (to be defined in `tox.ini` / `pyproject.toml`):
-    - `py` (tests).  
-    - `lint` (ruff).  
-    - `type` (mypy).  
+    - `py` (tests).
+    - `lint` (ruff).
+    - `type` (mypy).
     - `cov` (pytest with coverage).
 - Coverage:
-  - Use `pytest-cov` (or `pytest --cov`) to enforce coverage thresholds in local runs and CI.  
-  - Maintain an overall test coverage of at least **85%** across the codebase; non-core modules should not drop below this baseline.  
-  - Critical/core modules (e.g., domain logic, security, RouterOS integration, plan/apply orchestration) are expected to reach **95%+** coverage on reachable code paths, with 100% as the ideal target; changes that reduce coverage below 95% in these areas should be treated as regressions.  
-  - For core modules, tests must explicitly exercise every return path and all exceptions that can be raised in the function bodies, not just the "happy paths."  
+  - Use `pytest-cov` (or `pytest --cov`) to enforce coverage thresholds in local runs and CI.
+  - Maintain an overall test coverage of at least **85%** across the codebase; non-core modules should not drop below this baseline.
+  - Critical/core modules (e.g., domain logic, security, RouterOS integration, plan/apply orchestration) are expected to reach **95%+** coverage on reachable code paths, with 100% as the ideal target; changes that reduce coverage below 95% in these areas should be treated as regressions.
+  - For core modules, tests must explicitly exercise every return path and all exceptions that can be raised in the function bodies, not just the "happy paths."
   - Focus coverage improvements on domain, security, and RouterOS integration code when prioritizing gaps.
 - Linting and formatting:
-  - `ruff` is the primary linter; fix or justify any new lint warnings.  
-  - Use `black` as the formatter (or ruff’s formatter if explicitly configured).  
+  - `ruff` is the primary linter; fix or justify any new lint warnings.
+  - Use `black` as the formatter (or ruff’s formatter if explicitly configured).
   - Use `isort` (configured with the `black` profile) to keep imports ordered and grouped
-    consistently; in this project, `ruff`’s `I` rules enforce the same behavior.  
+    consistently; in this project, `ruff`’s `I` rules enforce the same behavior.
   - Run these tools locally (or via `tox`) before committing.
 
 ---
@@ -695,13 +789,13 @@ from routeros_mcp.domain.interfaces import InterfaceService
 ## Dependency management and imports
 
 - Keep dependencies minimal and justified:
-  - Prefer standard library modules where reasonable.  
+  - Prefer standard library modules where reasonable.
   - Add new third-party dependencies only when they provide clear value.
 - Import style:
-  - Absolute imports within the package (e.g., `from routeros_mcp.domain.devices import DeviceService`).  
+  - Absolute imports within the package (e.g., `from routeros_mcp.domain.devices import DeviceService`).
   - Group imports: stdlib, third-party, then local, separated by blank lines.
 - Avoid:
-  - Wildcard imports (`from module import *`).  
+  - Wildcard imports (`from module import *`).
   - Heavy logic in `__init__.py` files.
 
 ---
@@ -709,15 +803,52 @@ from routeros_mcp.domain.interfaces import InterfaceService
 ## Security-focused practices
 
 - Treat all external input as untrusted:
-  - Validate parameters in API and MCP layers using Pydantic models.  
+  - Validate parameters in API and MCP layers using Pydantic models.
   - Enforce authorization checks before calling domain services or RouterOS clients.
 - Never:
-  - Log secrets, passwords, tokens, or full configs.  
+  - Log secrets, passwords, tokens, or full configs.
   - Build RouterOS CLI commands from raw user input; always use templated command IDs and validated parameters.
 - Ensure all write operations:
-  - Respect environment tags and device capability flags.  
-  - Report `changed` vs `unchanged` accurately.  
+  - Respect environment tags and device capability flags.
+  - Report `changed` vs `unchanged` accurately.
   - Integrate with the plan/apply + approval model where required.
+
+---
+
+## RouterOS command format policy
+
+**CRITICAL: Never use `as-value` argument in RouterOS commands**
+
+- The `as-value` argument (e.g., `/system/resource/print as-value`) is **NOT A VALID RouterOS argument**.
+- It is unreliable and not officially supported across RouterOS builds.
+- Many RouterOS devices return **empty output** or **ignore the format directive** entirely when `as-value` is specified.
+
+**MANDATORY POLICY**:
+
+- Use ONLY standard `print` format for all RouterOS commands.
+- All parsers must handle the standard colon-separated format: `key: value`
+- Never add `as-value` to any RouterOS command in production code.
+- Code reviews must reject any PR that introduces `as-value` usage.
+
+**Correct command format**:
+
+```python
+# ✅ CORRECT - Use standard print format
+output = await ssh_client.execute("/system/resource/print")
+output = await ssh_client.execute("/system/clock/print")
+output = await ssh_client.execute("/system/package/print")
+
+# ❌ WRONG - Never use as-value
+output = await ssh_client.execute("/system/resource/print as-value")  # DO NOT USE
+```
+
+**Parser requirements**:
+
+- All parsers must handle colon-separated format: `key: value`
+- Unit-aware parsing for values with units (e.g., `MiB`, `GiB`, `%`)
+- Table parsers for multi-row outputs (package listings, interfaces, etc.)
+
+See `docs/03-routeros-integration-and-platform-constraints-rest-and-ssh.md` for details on RouterOS integration patterns.
 
 ---
 
