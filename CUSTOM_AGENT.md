@@ -16,8 +16,6 @@ This guide follows GitHub Copilot custom agent best practices:
 4. **Complete tech stack** - All frameworks, libraries, and versions specified
 5. **Fast validation commands** - Targeted test commands, not just full suite
 
-## Overview
-
 ## Quick Reference: Essential Commands
 
 > **⚡ Start here for fast validation**
