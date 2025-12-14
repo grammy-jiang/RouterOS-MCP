@@ -23,30 +23,42 @@
 Default loop: Write failing test → Implement minimum change → Refactor → Re-run checks
 
 ```python
-# Step 1: Write the failing test FIRST
+# Define the Pydantic model (data structure)
+class Interface(BaseModel):
+    """RouterOS network interface."""
+    id: str = Field(alias='.id')
+    name: str
+    type: str
+    running: bool  # Pydantic converts string 'true'/'false' to bool
+    
+    class Config:
+        populate_by_name = True
+
+# Step 1: Write the failing test FIRST (Red phase)
 async def test_get_interfaces_returns_interface_list(mock_api, mock_context):
     """Test that get_interfaces returns all router interfaces."""
-    # Arrange: Set up mock to return sample data
+    # Arrange: Set up mock to return RouterOS API response format
     mock_api.get_resource.return_value.get.return_value = [
-        {'.id': '*1', 'name': 'ether1', 'type': 'ether', 'running': 'true'},
+        {'.id': '*1', 'name': 'ether1', 'type': 'ether', 'running': 'true'},  # RouterOS returns string
     ]
     
     # Act: Call the function under test
     result = await get_interfaces(mock_context)
     
-    # Assert: Verify expectations
+    # Assert: Verify expectations (Pydantic converts 'true' string to True boolean)
     assert len(result) == 1
     assert result[0].name == 'ether1'
-    assert result[0].running is True
+    assert result[0].running is True  # Now a proper boolean
 
-# Step 2: Then implement the minimum code to pass
+# Step 2: Then implement the minimum code to pass (Green phase)
 @mcp.tool()
 async def get_interfaces(ctx: Context) -> list[Interface]:
     """Get all network interfaces from the router."""
     api = await get_connection(ctx)
     raw = api.get_resource('/interface').get()
-    return [Interface.model_validate(i) for i in raw]
+    return [Interface.model_validate(i) for i in raw]  # Pydantic handles conversion
 ```
+
 
 **2. Safety-First for Network Automation**
 
@@ -160,7 +172,7 @@ pytest tests/unit && ruff check --fix routeros_mcp && black routeros_mcp
 
 - **TDD: Write tests FIRST**: Write failing test → implement minimum code → refactor → repeat (see [Agent Workflow Step 2](#step-2-making-changes-strict-tdd-workflow) for details)
 - **Run tests before committing**: `pytest tests/unit -q` minimum, full suite preferred
-- **Use type hints**: All function signatures must have complete type annotations (no `Any` without justification)
+- **Use type hints**: All function signatures must have complete type annotations (avoid `Any` except when interfacing with untyped third-party libraries or dynamic RouterOS API responses)
 - **Follow async/await**: All I/O operations (DB, RouterOS REST, HTTP) must be async
 - **Write docstrings**: All public functions require docstrings with Args and Returns sections
 - **Update tests**: Add tests for new code, update tests for modified code
