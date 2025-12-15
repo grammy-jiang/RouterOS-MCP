@@ -140,6 +140,7 @@ class HTTPSSETransport:
                 "port": self.settings.mcp_http_port,
                 "base_path": self.settings.mcp_http_base_path,
                 "environment": self.settings.environment,
+                "oidc_enabled": self.settings.oidc_enabled,
             },
         )
 
@@ -147,6 +148,43 @@ class HTTPSSETransport:
         middleware = [
             Middleware(CorrelationIDMiddleware),
         ]
+
+        # Add auth middleware if OIDC is enabled
+        if self.settings.oidc_enabled:
+            from routeros_mcp.mcp.transport.auth_middleware import AuthMiddleware
+            from routeros_mcp.security.oidc import OIDCValidator
+
+            # Create OIDC validator
+            validator = OIDCValidator(
+                provider_url=self.settings.oidc_provider_url,
+                client_id=self.settings.oidc_client_id,
+                audience=self.settings.oidc_audience,
+                skip_verification=self.settings.oidc_skip_verification,
+            )
+
+            # Add auth middleware to stack
+            middleware.append(
+                Middleware(
+                    AuthMiddleware,
+                    validator=validator,
+                    # Exempt health endpoints with and without base path, and with/without trailing slash
+                    exempt_paths=[
+                        "/health",
+                        "/health/",
+                        f"{self.settings.mcp_http_base_path.rstrip('/')}/health",
+                        f"{self.settings.mcp_http_base_path.rstrip('/')}/health/",
+                    ],
+                )
+            )
+
+            logger.info(
+                "OIDC authentication middleware enabled",
+                extra={
+                    "provider_url": self.settings.oidc_provider_url,
+                    "client_id": self.settings.oidc_client_id,
+                    "skip_verification": self.settings.oidc_skip_verification,
+                },
+            )
 
         # Run FastMCP with SSE transport
         # FastMCP's run_http_async handles the actual HTTP/SSE server
