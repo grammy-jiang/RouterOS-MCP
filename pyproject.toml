@@ -193,7 +193,7 @@ select = [
     "E",      # pycodestyle errors
     "W",      # pycodestyle warnings
     "F",      # pyflakes
-    "I",      # isort
+    # "I",    # isort - DISABLED: using standalone isort to avoid conflicts
     "B",      # flake8-bugbear
     "C4",     # flake8-comprehensions
     "UP",     # pyupgrade
@@ -211,8 +211,7 @@ ignore = [
 "__init__.py" = ["F401"]  # Allow unused imports in __init__.py
 "tests/**/*.py" = ["ARG", "S101"]  # Allow unused args and asserts in tests
 
-[tool.ruff.lint.isort]
-known-first-party = ["routeros_mcp"]
+# Note: [tool.ruff.lint.isort] section removed since we use standalone isort
 
 [tool.isort]
 profile = "black"
