@@ -315,6 +315,16 @@ require appropriate device capabilities and permissions.
             else:  # pragma: no cover - defensive branch
                 raise AttributeError("MCP instance missing run/run_stdio_async")
 
+        elif self.settings.mcp_transport == "http":
+            # HTTP/SSE transport mode
+            from routeros_mcp.mcp.transport.http_sse import HTTPSSETransport
+
+            logger.info("MCP server running in HTTP/SSE mode")
+
+            # Create and run HTTP/SSE transport
+            transport = HTTPSSETransport(self.settings, self.mcp)
+            await transport.run()
+
         else:
             raise NotImplementedError(
                 f"Transport mode '{self.settings.mcp_transport}' not yet implemented"
