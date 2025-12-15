@@ -13,6 +13,7 @@ Define how the RouterOS MCP service implements the Model Context Protocol (MCP) 
 This service targets **MCP Specification 2024-11-05** (current stable version).
 
 **Version Negotiation:**
+
 - Server declares support for `2024-11-05` in initialization response
 - Client proposes version in initialization request
 - Server must respond with same version if supported, or error if unsupported
@@ -29,11 +30,13 @@ The Model Context Protocol enables standardized communication between:
 ### MCP Architecture Layers
 
 **Data Layer**: JSON-RPC 2.0 messages for:
+
 - Lifecycle management (initialize, ping, notifications)
 - Capability negotiation (protocol version, supported features)
 - Core primitives (tools, resources, prompts)
 
 **Transport Layer**: Communication channels:
+
 - **Stdio**: For local process integration (development, single-user)
 - **HTTP/SSE**: For remote access with OAuth 2.1 (production, multi-user)
 
@@ -44,6 +47,7 @@ The Model Context Protocol enables standardized communication between:
 ### Stdio Transport
 
 **Use Cases:**
+
 - Local development and testing
 - Single-user desktop integration with Claude Desktop
 - Direct process control and debugging
@@ -104,6 +108,7 @@ logging.basicConfig(
 ### HTTP/SSE Transport
 
 **Use Cases:**
+
 - Production multi-user deployments
 - Remote access via Cloudflare Tunnel
 - Centralized server architecture
@@ -157,15 +162,15 @@ MCP host configuration:
 
 ### Transport Decision Matrix
 
-| Factor | Stdio | HTTP/SSE |
-|--------|-------|----------|
-| **Deployment** | Local process | Remote server |
-| **Users** | Single user | Multi-user |
-| **Auth** | Environment/config | OAuth 2.1 |
-| **Security** | OS-level permissions | Network + OAuth |
-| **Scalability** | Not applicable | Horizontal scaling |
-| **Development** | Fast iteration | Production-ready |
-| **Debugging** | Direct logs | Distributed tracing |
+| Factor          | Stdio                | HTTP/SSE            |
+| --------------- | -------------------- | ------------------- |
+| **Deployment**  | Local process        | Remote server       |
+| **Users**       | Single user          | Multi-user          |
+| **Auth**        | Environment/config   | OAuth 2.1           |
+| **Security**    | OS-level permissions | Network + OAuth     |
+| **Scalability** | Not applicable       | Horizontal scaling  |
+| **Development** | Fast iteration       | Production-ready    |
+| **Debugging**   | Direct logs          | Distributed tracing |
 
 **Recommendation for RouterOS MCP:**
 
@@ -966,14 +971,14 @@ To find devices:
 
 MCP follows JSON-RPC 2.0 error code conventions:
 
-| Code Range | Meaning | Usage |
-|------------|---------|-------|
-| -32700 | Parse error | Invalid JSON |
-| -32600 | Invalid request | Malformed JSON-RPC |
-| -32601 | Method not found | Unknown tool/method |
-| -32602 | Invalid params | Parameter validation failure |
-| -32603 | Internal error | Server-side error |
-| -32000 to -32099 | Server error | Application-specific errors |
+| Code Range       | Meaning          | Usage                        |
+| ---------------- | ---------------- | ---------------------------- |
+| -32700           | Parse error      | Invalid JSON                 |
+| -32600           | Invalid request  | Malformed JSON-RPC           |
+| -32601           | Method not found | Unknown tool/method          |
+| -32602           | Invalid params   | Parameter validation failure |
+| -32603           | Internal error   | Server-side error            |
+| -32000 to -32099 | Server error     | Application-specific errors  |
 
 ### Application-Specific Error Codes
 
@@ -1085,6 +1090,7 @@ npx @modelcontextprotocol/inspector uv run python -m routeros_mcp.mcp_server \
 **2. Verify Initialization**
 
 Inspector displays:
+
 - Protocol version negotiation
 - Server capabilities (tools, resources, prompts)
 - Connection status
@@ -1092,6 +1098,7 @@ Inspector displays:
 **3. Explore Tools**
 
 In the **Tools** tab:
+
 - View all registered tools
 - Inspect tool schemas
 - See parameter requirements
@@ -1107,6 +1114,7 @@ In the **Tools** tab:
 **5. Test Resources**
 
 In the **Resources** tab:
+
 - List all resources
 - View resource URIs
 - Subscribe to resources
@@ -1115,6 +1123,7 @@ In the **Resources** tab:
 **6. Test Prompts**
 
 In the **Prompts** tab:
+
 - View available prompts
 - Provide prompt arguments
 - View generated prompt output
@@ -1122,6 +1131,7 @@ In the **Prompts** tab:
 **7. Monitor Logs**
 
 In the **Notifications** pane:
+
 - Server logs (via stderr)
 - MCP notifications
 - Error messages
@@ -1216,7 +1226,7 @@ if __name__ == "__main__":
 # config/lab.yaml
 
 # MCP transport configuration
-mcp_transport: stdio  # or "http"
+mcp_transport: stdio # or "http"
 mcp_description: "RouterOS MCP Service - Lab Environment"
 
 # HTTP transport settings (if mcp_transport=http)
@@ -1225,7 +1235,7 @@ mcp_http_port: 8080
 mcp_http_base_path: "/mcp"
 
 # Logging
-log_level: DEBUG  # DEBUG for development, INFO for production
+log_level: DEBUG # DEBUG for development, INFO for production
 
 # Environment
 environment: lab
@@ -1234,7 +1244,7 @@ environment: lab
 database_url: "postgresql://user:pass@localhost/routeros_mcp_lab"
 
 # OIDC (for HTTP transport with OAuth)
-oidc_enabled: false  # true for HTTP transport in production
+oidc_enabled: false # true for HTTP transport in production
 oidc_issuer: "https://idp.example.com"
 oidc_client_id: "routeros-mcp-client"
 oidc_client_secret: "${OIDC_CLIENT_SECRET}"
@@ -1972,7 +1982,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install dependencies
         run: |
@@ -2017,6 +2027,7 @@ Example: 1.2.3
 **Current Version:** `1.0.0`
 
 **Version History:**
+
 - `1.0.0` (2025-01-15): Initial Phase 1 release (46 tools: 23 fundamental, 8 advanced, 9 professional, 6 fallback)
 - `1.1.0` (planned): Phase 2 (add resources + prompts, subscriptions)
 - `1.2.0` (planned): Phase 4 (HTTP transport with OAuth 2.1)
@@ -2261,6 +2272,7 @@ Include deprecation information in tool schema:
 Following MCP best practices, maintain backward compatibility:
 
 1. **Optional Parameters Only**: New parameters MUST have defaults
+
    ```python
    # ✅ GOOD: Optional parameter with default
    async def tool(device_id: str, new_param: bool = False):
@@ -2272,6 +2284,7 @@ Following MCP best practices, maintain backward compatibility:
    ```
 
 2. **Additive Changes**: Add new response fields, don't remove existing
+
    ```python
    # ✅ GOOD: Add new field
    return {
@@ -2337,33 +2350,40 @@ async def handle_initialize(request: InitializeRequest) -> InitializeResponse:
 
 ### Capability Evolution
 
-**Phase 1 (Current - v1.0.0):**
+**Phase 1 (Completed - v1.0.0):**
+
 ```python
 capabilities = {
-    "tools": {"supported": True},
-    "resources": {"supported": False},
-    "prompts": {"supported": False}
+    "tools": {"supported": True},           # 39 tools implemented
+    "resources": {"supported": True},       # 12+ resource URIs implemented
+    "prompts": {"supported": True}          # 8 prompts implemented
 }
+transport = "stdio"  # Fully functional STDIO transport only
 ```
 
-**Phase 2 (Planned - v1.1.0):**
+**Phase 2 (Current - v1.1.0 target):**
+
 ```python
 capabilities = {
-    "tools": {"supported": True},
-    "resources": {"supported": True, "subscribe": True},
-    "prompts": {"supported": True}
+    "tools": {"supported": True},                      # + wireless/DHCP/bridge read tools
+    "resources": {"supported": True, "subscribe": True},  # + resource subscriptions via SSE
+    "prompts": {"supported": True}                     # + wireless/DHCP troubleshooting prompts
 }
+transport = "stdio" | "http"  # Both transports fully functional
+# HTTP/SSE transport with OAuth/OIDC authentication
 ```
 
-**Phase 4 (Planned - v1.2.0):**
+**Phase 3+ (Future - v1.2.0+):**
+
 ```python
 capabilities = {
-    "tools": {"supported": True},
+    "tools": {"supported": True},                      # + diagnostics (ping/traceroute)
     "resources": {"supported": True, "subscribe": True},
     "prompts": {"supported": True},
     "custom": {
-        "http_transport": True,
-        "oauth_required": True
+        "diagnostics_tools": True,
+        "ssh_key_auth": True,
+        "advanced_firewall_writes": True
     }
 }
 ```
@@ -2371,12 +2391,14 @@ capabilities = {
 ### Deprecation Policy
 
 **Timeline:**
+
 - **Announcement**: Deprecation announced in release notes
 - **Warning Period**: Tool marked deprecated, warnings logged
 - **Migration Window**: 6 months minimum
 - **Removal**: Tool removed in next major version
 
 **Process:**
+
 1. Mark tool as deprecated with `@mcp.tool(deprecated=True)`
 2. Add deprecation notice to description
 3. Log warning on each deprecated tool call
@@ -2414,31 +2436,71 @@ async def interface_list(device_id: str) -> list[dict]:
 
 ## Summary and Implementation Checklist
 
-### MCP Compliance Checklist
+### Phase 1 Status (COMPLETED)
 
-- [ ] FastMCP SDK integrated
-- [ ] Stdio transport implemented with stderr logging
-- [ ] HTTP/SSE transport implemented with OAuth
-- [ ] JSON-RPC 2.0 error handling compliant
-- [ ] Tools registered with complete schemas
-- [ ] Resources defined with URI patterns
-- [ ] Prompts created for common workflows
-- [ ] MCP Inspector testing integrated
-- [ ] Authorization middleware for all tools
-- [ ] Configuration-driven transport selection
+- [x] FastMCP SDK integrated
+- [x] Stdio transport fully implemented with stderr logging
+- [x] JSON-RPC 2.0 error handling compliant
+- [x] 39 tools registered with complete schemas
+- [x] 12+ resources defined with URI patterns
+- [x] 8 prompts created for common workflows
+- [x] Authorization middleware for all tools
+- [x] Configuration-driven transport selection
+
+### Phase 2 Requirements (HTTP/SSE Transport Completion)
+
+**Transport Implementation:**
+
+- [ ] Add `sse-starlette` to `pyproject.toml` dependencies
+- [ ] Implement `_process_mcp_request()` in `http.py` to integrate with FastMCP
+- [ ] Wire HTTP mode in `mcp/server.py` (remove `NotImplementedError`)
+- [ ] Add OAuth/OIDC middleware for authentication
+- [ ] Implement resource subscription via SSE
+- [ ] HTTP/SSE E2E testing with real MCP clients
+
+**New Read-Only Tools:**
+
+- [ ] `wireless/get-interfaces` - List wireless interfaces
+- [ ] `wireless/get-clients` - Connected wireless clients
+- [ ] `dhcp/get-server-status` - DHCP server configuration
+- [ ] `dhcp/get-leases` - Active DHCP leases
+- [ ] `bridge/list-bridges` - Bridge configuration
+- [ ] `bridge/list-ports` - Bridge ports and VLANs
+
+**Resource Optimization:**
+
+- [ ] Resource cache implementation with TTL
+- [ ] Cache invalidation on device state changes
+- [ ] Resource subscription support via SSE
+- [ ] Performance benchmarking
+
+**Documentation:**
+
+- [ ] HTTP/SSE deployment guide
+- [ ] Resource subscription tutorial
+- [ ] OAuth/OIDC setup guide
+- [ ] Wireless/DHCP/bridge troubleshooting prompts
+
+### Phase 3+ (Deferred)
+
+- Diagnostics tools (ping/traceroute/bandwidth-test)
+- SSH key authentication
+- Client compatibility modes
+- Advanced firewall write operations
+- Routing table modifications
 
 ### Key Takeaways
 
 1. **Use FastMCP SDK**: Don't reimplement MCP protocol
-2. **Stdio Safety**: Never write to stdout in stdio mode
-3. **Tool Schemas**: Generated from type hints and docstrings
-4. **Authorization**: Middleware on every tool
-5. **Error Handling**: JSON-RPC 2.0 compliant error codes
-6. **Resources**: Provide device data as resources
-7. **Prompts**: Guide users through complex workflows
+2. **Stdio Safety**: Never write to stdout in stdio mode (COMPLETED in Phase 1)
+3. **Tool Schemas**: Generated from type hints and docstrings (COMPLETED in Phase 1)
+4. **Authorization**: Middleware on every tool (COMPLETED in Phase 1)
+5. **Error Handling**: JSON-RPC 2.0 compliant error codes (COMPLETED in Phase 1)
+6. **Resources**: Provide device data as resources (COMPLETED in Phase 1)
+7. **Prompts**: Guide users through complex workflows (COMPLETED in Phase 1)
 8. **Testing**: Use MCP Inspector for interactive testing
-9. **Transport**: Support both stdio (dev) and HTTP/SSE (prod)
-10. **Configuration**: Environment-driven transport selection
+9. **Transport**: STDIO complete, HTTP/SSE in Phase 2
+10. **Configuration**: Environment-driven transport selection (COMPLETED in Phase 1)
 
 ---
 

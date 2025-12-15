@@ -50,11 +50,21 @@ This service leverages the three core MCP primitives to provide safe, ergonomic 
 
 **Phased rollout strategy:**
 
-- Phase 1: Tools + STDIO transport + OS-level security (universal MCP client support)
-- Phase 2: Resources + Prompts (enhanced experience for capable clients)
-- Phase 4: HTTP transport + OAuth (remote/enterprise deployments)
+- Phase 1 (COMPLETED): Tools + Resources + Prompts + STDIO transport + OS-level security
+  - Full local MCP client support (Claude Desktop, VS Code)
+  - 39 tools, 12+ resource URIs, 8 prompts
+  - STDIO transport fully functional
+- Phase 2 (CURRENT): HTTP/SSE transport completion + read-only feature expansion
+  - Complete HTTP/SSE transport implementation (currently scaffold only)
+  - OAuth/OIDC integration for remote access
+  - Additional read-only tools (wireless, DHCP, bridge visibility)
+  - Resource caching and performance optimization
+- Phase 3+: Advanced write operations and diagnostics
+  - Network diagnostics (ping/traceroute/bandwidth-test)
+  - SSH key authentication
+  - Advanced firewall and routing write operations
 
-This approach ensures ~60% of MCP clients (tools-only) can use the service in Phase 1, while providing enhanced workflows for capable clients in Phase 2.
+This approach ensures local deployments work fully in Phase 1, while Phase 2 enables remote/enterprise deployments and expands read-only visibility.
 
 ---
 
@@ -117,7 +127,7 @@ When an operator uses the `dns_ntp_rollout` prompt to update DNS servers fleet-w
 When an engineer uses the `troubleshoot_dns_ntp` prompt for a device with DNS problems:
 
 1. **Phase 1 - Current State**: Prompt guides AI to call `dns/get-status` + `ntp/get-status` → identifies no DNS servers configured
-2. **Phase 2 - Connectivity**: (Deferred) AI would call `tool/ping` with `address=1.1.1.1` → verifies upstream connectivity works
+2. **Phase 2 - Connectivity**: (Deferred to Phase 3) AI would call `tool/ping` with `address=1.1.1.1` → verifies upstream connectivity works
 3. **Phase 3 - Firewall**: AI calls `firewall/list-filter-rules` → finds no blocking rules
 4. **Phase 4 - Logs**: AI calls `logs/get-recent` with `topics=["system", "error"]` → finds "DNS server list empty" warning
 5. **Phase 5 - Resolution**: AI recommends `dns/update-servers` with Cloudflare DNS → operator approves, DNS configured
@@ -165,8 +175,18 @@ _04 – MCP Tools Interface & JSON Schemas_
 | Phase 1 | Advanced     | ~10 tools  | `dns/update-servers`, `ntp/update-servers`, `dns/flush-cache`, `system/set-identity`, `interface/update-comment`, `device/get-config-snapshot`, `snapshot/get-content`                                                                                | All MCP clients (100%)                |
 | Phase 1 | Professional | ~8 tools   | `config/plan-dns-ntp-rollout`, `config/apply-dns-ntp-rollout`, `config/rollback-plan`, `plan/get-details`, `addresslist/plan-sync`, `addresslist/apply-sync`                                                                                          | All MCP clients (100%)                |
 | Phase 1 | Fallbacks    | ~6 tools   | Resource fallback tools for universal compatibility (`device/get-health-data`, `device/get-config-snapshot`, `fleet/get-summary`, `plan/get-details`, `audit/get-events`, `snapshot/get-content`)                                                     | All MCP clients (100%)                |
-| Phase 2 | Resources    | ~12 URIs   | `device://{id}/health`, `device://{id}/config`, `fleet://{env}/summary`, `plan://{id}`, `audit://events`                                                                                                                                              | ~40% of MCP clients (Claude, VS Code) |
-| Phase 2 | Prompts      | ~8 prompts | `dns_ntp_rollout`, `troubleshoot_dns_ntp`, `troubleshoot_device`, `fleet_health_review`, `device_onboarding`, `address_list_sync`, `comprehensive_device_review`, `security_audit`                                                                    | ~40% of MCP clients (Claude, VS Code) |
+| Phase 1 | Resources    | 12 URIs    | `device://{id}/health`, `device://{id}/config`, `fleet://{env}/summary`, `plan://{id}`, `audit://events` (COMPLETED)                                                                                                                                  | All MCP clients with resource support |
+| Phase 1 | Prompts      | 8 prompts  | `dns_ntp_rollout`, `troubleshoot_dns_ntp`, `troubleshoot_device`, `fleet_health_review`, `device_onboarding`, `address_list_sync`, `comprehensive_device_review`, `security_audit` (COMPLETED)                                                        | All MCP clients with prompt support   |
+| Phase 2 | Transport    | HTTP/SSE   | Complete HTTP/SSE transport implementation with OAuth/OIDC (scaffold exists, not functional)                                                                                                                                                          | Remote/enterprise deployments         |
+| Phase 2 | Read Tools   | +6 tools   | `wireless/get-interfaces`, `wireless/get-clients`, `dhcp/get-server-status`, `dhcp/get-leases`, `bridge/list-bridges`, `bridge/list-ports`                                                                                                            | All MCP clients                       |
+
+**Phase 2 feature set (planned/mandatory):**
+
+- Complete HTTP/SSE transport with OAuth/OIDC authentication and resource subscriptions (SSE)
+- Add 6 read-only visibility tools (wireless, DHCP, bridge)
+- Extend resources with wireless, DHCP, bridge URIs and caching with TTL + invalidation
+- Keep diagnostics (ping/traceroute/bandwidth-test) deferred to Phase 3
+- Keep SSH key auth and client compatibility modes deferred to Phase 3
 
 **Total Phase 1 tool count: ~39 tools** (14 fundamental + 10 advanced + 8 professional + 6 fallbacks + 1 admin onboarding tool; ping/traceroute deferred to Phase 2)
 

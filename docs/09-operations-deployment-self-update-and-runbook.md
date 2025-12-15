@@ -9,11 +9,13 @@ Document how the service is operated over time: deployment workflows, configurat
 ## Configuration model (env vars, config files, secrets, per-environment overrides)
 
 - **Configuration sources**:
+
   - Environment variables (primary).
   - Optional configuration files (YAML/TOML/JSON) for structured settings.
   - Secret sources (environment, secret manager) for sensitive values.
 
 - **Key configuration areas**:
+
   - Database connection (URLs, pools).
   - OIDC provider settings (issuer, client ID, client secret, redirect URIs).
   - Cloudflare Tunnel origin port and hostname.
@@ -22,30 +24,37 @@ Document how the service is operated over time: deployment workflows, configurat
   - Environment tag for the MCP deployment itself (e.g., `MCP_ENV=lab|staging|prod`).
 
 - **MCP-specific configuration** (new):
+
   - **MCP server metadata**:
+
     - `MCP_SERVER_NAME` (e.g., "routeros-mcp")
     - `MCP_SERVER_VERSION` (semantic version, e.g., "1.2.3")
     - `MCP_SERVER_DESCRIPTION` (brief description for MCP clients)
 
   - **MCP transport configuration**:
-    - `MCP_TRANSPORT_MODE` (stdio, http, both)
-    - `MCP_HTTP_PORT` (default: 8080) for HTTP/SSE transport
-    - `MCP_HTTP_BASE_PATH` (default: "/mcp") for reverse proxy integration
-    - `MCP_STDIO_BUFFER_SIZE` (default: 65536) for stdio transport
+
+    - `MCP_TRANSPORT` (stdio, http) - Phase 1: stdio only; Phase 2: both supported
+    - `MCP_HTTP_PORT` (default: 8080) for HTTP/SSE transport (Phase 2)
+    - `MCP_HTTP_BASE_PATH` (default: "/mcp") for reverse proxy integration (Phase 2)
+    - `MCP_HTTP_HOST` (default: "127.0.0.1") for HTTP server binding (Phase 2)
+    - Note: HTTP/SSE transport scaffold exists but not functional in Phase 1
 
   - **MCP protocol features**:
+
     - `MCP_ENABLE_TOOLS` (default: true)
     - `MCP_ENABLE_RESOURCES` (default: false, Phase 2)
     - `MCP_ENABLE_PROMPTS` (default: false, Phase 2)
     - `MCP_ENABLE_SAMPLING` (default: false, future)
 
   - **MCP tool configuration**:
+
     - `MCP_TOOL_TIERS` (comma-separated, e.g., "free,basic,professional")
     - `MCP_DEFAULT_TOOL_TIER` (default: "free")
     - `MCP_TOKEN_BUDGET_WARNING_THRESHOLD` (default: 5000)
     - `MCP_TOKEN_BUDGET_ERROR_THRESHOLD` (default: 50000)
 
   - **MCP resource configuration** (Phase 2):
+
     - `MCP_RESOURCE_CACHE_ENABLED` (default: false)
     - `MCP_RESOURCE_CACHE_TTL_SECONDS` (default: 300)
     - `MCP_RESOURCE_CACHE_MAX_ENTRIES` (default: 1000)
@@ -145,12 +154,14 @@ async def validate_startup_configuration():
 The MCP server supports multiple transport modes that affect deployment architecture:
 
 1. **Stdio transport** (default for MCP protocol):
+
    - MCP client launches the server as a subprocess
    - Communication via stdin/stdout using JSON-RPC over stdio
    - **Pros**: Simple, no network configuration, secure (local process isolation)
    - **Cons**: One client per server instance, no horizontal scaling, process lifecycle tied to client
 
 2. **HTTP/SSE transport** (alternative):
+
    - MCP server runs as a persistent HTTP service
    - Communication via HTTP with Server-Sent Events for server-to-client messages
    - **Pros**: Multiple clients, horizontal scaling, independent lifecycle, load balancing
@@ -163,12 +174,12 @@ The MCP server supports multiple transport modes that affect deployment architec
 
 **Transport mode selection guidance:**
 
-| Environment | Transport Mode | Rationale |
-|-------------|---------------|-----------|
-| Local development | stdio | Simplest setup, matches MCP client expectations |
-| Lab | stdio or http | Test both modes, validate HTTP reverse proxy config |
-| Staging | both | Validate both transports work, test client compatibility |
-| Production | http (or both) | Multi-client support, horizontal scaling, load balancing |
+| Environment       | Transport Mode | Rationale                                                |
+| ----------------- | -------------- | -------------------------------------------------------- |
+| Local development | stdio          | Simplest setup, matches MCP client expectations          |
+| Lab               | stdio or http  | Test both modes, validate HTTP reverse proxy config      |
+| Staging           | both           | Validate both transports work, test client compatibility |
+| Production        | http (or both) | Multi-client support, horizontal scaling, load balancing |
 
 ### Systemd-based Deployment
 
@@ -268,7 +279,7 @@ WantedBy=sockets.target
 
 ```yaml
 # docker-compose.yml
-version: '3.8'
+version: "3.8"
 
 services:
   routeros-mcp:
@@ -356,62 +367,62 @@ spec:
         version: "1.2.3"
     spec:
       containers:
-      - name: mcp-server
-        image: routeros-mcp:1.2.3
-        ports:
-        - containerPort: 8080
-          name: http
-          protocol: TCP
-        env:
-        - name: MCP_TRANSPORT_MODE
-          value: "http"
-        - name: MCP_HTTP_PORT
-          value: "8080"
-        - name: MCP_ENV
-          value: "production"
-        - name: DATABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: routeros-mcp-secrets
-              key: database-url
-        - name: OIDC_CLIENT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: routeros-mcp-secrets
-              key: oidc-client-secret
-        envFrom:
-        - configMapRef:
-            name: routeros-mcp-config
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          timeoutSeconds: 5
-          failureThreshold: 3
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 10
-          periodSeconds: 5
-          timeoutSeconds: 3
-          failureThreshold: 2
-        resources:
-          requests:
-            memory: "512Mi"
-            cpu: "500m"
-          limits:
-            memory: "2Gi"
-            cpu: "2000m"
-        volumeMounts:
-        - name: data
-          mountPath: /var/lib/routeros-mcp
+        - name: mcp-server
+          image: routeros-mcp:1.2.3
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+          env:
+            - name: MCP_TRANSPORT_MODE
+              value: "http"
+            - name: MCP_HTTP_PORT
+              value: "8080"
+            - name: MCP_ENV
+              value: "production"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: routeros-mcp-secrets
+                  key: database-url
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: routeros-mcp-secrets
+                  key: oidc-client-secret
+          envFrom:
+            - configMapRef:
+                name: routeros-mcp-config
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/routeros-mcp
       volumes:
-      - name: data
-        persistentVolumeClaim:
-          claimName: routeros-mcp-data
+        - name: data
+          persistentVolumeClaim:
+            claimName: routeros-mcp-data
 ---
 apiVersion: v1
 kind: Service
@@ -423,11 +434,11 @@ spec:
   selector:
     app: routeros-mcp
   ports:
-  - port: 8080
-    targetPort: 8080
-    protocol: TCP
-    name: http
-  sessionAffinity: ClientIP  # For MCP client session consistency
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  sessionAffinity: ClientIP # For MCP client session consistency
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -449,17 +460,20 @@ data:
 In both modes:
 
 - **Health and readiness endpoints**: Used for orchestration (k8s probes or systemd watchdogs)
+
   - Health endpoint: `/health` (returns 200 OK or 503 Service Unavailable)
   - Readiness endpoint: Same as health, checks database connectivity and at least one RouterOS device reachable
   - Metrics endpoint: `/metrics` (Prometheus format)
 
 - **Horizontal scaling** (HTTP/SSE transport only):
+
   - Multiple instances behind load balancer
   - Session affinity recommended (ClientIP or cookie-based) for MCP client session consistency
   - Database connection pooling with appropriate pool size per instance
   - Shared cache layer (Redis) for resource caching in Phase 2
 
 - **Graceful shutdown**:
+
   - On SIGTERM, server stops accepting new MCP requests
   - In-flight tool calls are allowed to complete (with timeout, e.g., 30 seconds)
   - Database connections drained
@@ -644,6 +658,7 @@ async def test_tool_execution():
 ```
 
 - **Deploy stage**:
+
   - Staged rollout:
     - Lab → staging → production.
     - For production, introduce changes to a subset of instances first (canary deployment).
@@ -676,16 +691,18 @@ async def test_tool_execution():
 ## Database/schema and data migrations strategy
 
 - **Schema migrations**:
-  - Managed via a migration tool (e.g., Alembic, Flyway, Liquibase).  
+
+  - Managed via a migration tool (e.g., Alembic, Flyway, Liquibase).
   - Migrations are versioned and applied in order as part of deployment.
 
 - **Backward compatibility**:
+
   - Whenever possible, migrations are:
-    - **Additive** (adding columns/tables) before removing old fields.  
+    - **Additive** (adding columns/tables) before removing old fields.
     - Carefully designed so that old application versions can still function during rollout.
 
 - **Rollback of migrations**:
-  - For high-risk schema changes, define reversible migrations or a data backup strategy.  
+  - For high-risk schema changes, define reversible migrations or a data backup strategy.
   - For non-trivial migrations, deploy in two phases (add new schema, deploy code; only later remove old schema).
 
 ---
@@ -693,31 +710,34 @@ async def test_tool_execution():
 ## Device lifecycle operations (register, update metadata, rotate credentials, decommission)
 
 - **Register**:
-  - Phase 0: define the Device and Credential model and enable secure storage (no user-facing input yet).  
+
+  - Phase 0: define the Device and Credential model and enable secure storage (no user-facing input yet).
   - Phase 1: operator uses a secured **admin HTTP API** to:
-    - Provide device management address, environment, tags.  
-    - Provide RouterOS credentials (or reference to a secret).  
-    - Confirm connectivity and basic health (using Phase 0–1 tools).  
+    - Provide device management address, environment, tags.
+    - Provide RouterOS credentials (or reference to a secret).
+    - Confirm connectivity and basic health (using Phase 0–1 tools).
   - Phase 2: add convenience tooling on top of the admin API:
-    - A CLI wrapper for registration flows.  
-    - A simple browser-based admin console for device onboarding and credential rotation.  
+    - A CLI wrapper for registration flows.
+    - A simple browser-based admin console for device onboarding and credential rotation.
   - Phase 3: optionally add automated onboarding:
     - A RouterOS-side bootstrap script or similar mechanism that creates MCP service accounts and reports credentials to the MCP registration API in a controlled way.
 
 - **Update metadata**:
-  - Change name, tags, environment, capability flags as needed.  
+
+  - Change name, tags, environment, capability flags as needed.
   - Such changes may require explicit approval or admin-only rights.
 
 - **Rotate credentials**:
-  - Operator triggers rotation for a device:  
-    - MCP creates new secret on RouterOS (via appropriate method).  
-    - Updates stored credentials.  
-    - Validates that operations work with new credentials.  
+
+  - Operator triggers rotation for a device:
+    - MCP creates new secret on RouterOS (via appropriate method).
+    - Updates stored credentials.
+    - Validates that operations work with new credentials.
     - Disables old credential.
 
 - **Decommission**:
-  - MCP marks device as inactive.  
-  - Optionally triggers cleanup on RouterOS (e.g., removing service accounts), if policy allows.  
+  - MCP marks device as inactive.
+  - Optionally triggers cleanup on RouterOS (e.g., removing service accounts), if policy allows.
   - Retains audit events and selected snapshots for historical reference.
 
 ---
@@ -725,23 +745,26 @@ async def test_tool_execution():
 ## Self-update and versioning strategy for MCP tools and service
 
 - **Service versioning**:
-  - Semantic versioning (e.g., `1.2.3`).  
+
+  - Semantic versioning (e.g., `1.2.3`).
   - Clearly indicate breaking changes in major versions.
 
 - **Tool versioning**:
-  - Tools may embed version identifiers (e.g., `system.get_overview.v1`).  
+
+  - Tools may embed version identifiers (e.g., `system.get_overview.v1`).
   - New incompatible behavior introduces new tool versions; old ones are deprecated and eventually removed.
 
 - **Self-update**:
+
   - Where supported, the service may:
-    - Check for new versions (e.g., via a release endpoint).  
-    - Notify operators via logs or UI; it should not silently self-upgrade in production.  
+    - Check for new versions (e.g., via a release endpoint).
+    - Notify operators via logs or UI; it should not silently self-upgrade in production.
   - Actual upgrade is preferred via external CI/CD, not fully self-managed.
 
 - **Rollout strategy**:
   - New versions:
-    - First deployed and tested in lab.  
-    - Then in staging.  
+    - First deployed and tested in lab.
+    - Then in staging.
     - Lastly in production, possibly with canary instances.
 
 ---
@@ -749,20 +772,22 @@ async def test_tool_execution():
 ## Rollback procedures (service binaries, configuration, database, and RouterOS-facing behavior)
 
 - **Service & config rollback**:
-  - Maintain previous app versions and configuration snapshots.  
+
+  - Maintain previous app versions and configuration snapshots.
   - If a new version causes issues:
-    - Roll back container image or binary.  
+    - Roll back container image or binary.
     - Restore previous configuration (from version control or config store).
 
 - **Database rollback**:
-  - For additive migrations, rollback often not needed if old version can work with new schema.  
+
+  - For additive migrations, rollback often not needed if old version can work with new schema.
   - For destructive changes:
-    - Take DB backups before migration.  
+    - Take DB backups before migration.
     - Roll back to a backup only in severe cases, accepting some downtime if necessary.
 
 - **RouterOS-facing behavior**:
   - Rollbacks must ensure:
-    - No half-applied plans are left in limbo.  
+    - No half-applied plans are left in limbo.
     - High-risk tools can be disabled quickly (e.g., via config flag) if misbehavior is discovered.
 
 ---
@@ -770,18 +795,20 @@ async def test_tool_execution():
 ## Backup/restore procedures and disaster recovery
 
 - **Backups**:
-  - Database backups on a regular schedule (e.g., daily full, incremental as supported).  
-  - Snapshot of configuration (app config, secrets references, not secrets themselves).  
+
+  - Database backups on a regular schedule (e.g., daily full, incremental as supported).
+  - Snapshot of configuration (app config, secrets references, not secrets themselves).
   - Optional snapshots of critical RouterOS configs (if policy allows).
 
 - **Restore**:
+
   - Document steps to:
-    - Restore DB to a new instance.  
-    - Redeploy MCP pointing at the restored DB.  
+    - Restore DB to a new instance.
+    - Redeploy MCP pointing at the restored DB.
     - Re-establish connections to RouterOS devices and IdP.
 
 - **Disaster recovery**:
-  - Define RPO (Recovery Point Objective) and RTO (Recovery Time Objective) for each environment.  
+  - Define RPO (Recovery Point Objective) and RTO (Recovery Time Objective) for each environment.
   - Ensure backup and restore processes are periodically tested.
 
 ---
@@ -793,6 +820,7 @@ Example incident types and high-level runbook bullets:
 ### MCP Protocol-Level Incidents
 
 - **MCP protocol errors (malformed JSON-RPC)**:
+
   - **Symptoms**: `mcp_requests_total{method="*",status="protocol_error"}` increasing
   - **Diagnosis**:
     - Check logs for JSON-RPC parsing errors: `grep "protocol_error" /var/log/routeros-mcp/mcp.log`
@@ -807,6 +835,7 @@ Example incident types and high-level runbook bullets:
     - Document supported MCP protocol versions in API docs
 
 - **MCP tool execution failures**:
+
   - **Symptoms**: `mcp_tool_requests_total{tool_name="*",status="error"}` spiking
   - **Diagnosis**:
     - Identify failing tool: `promql: topk(5, increase(mcp_tool_requests_total{status="error"}[5m]))`
@@ -822,6 +851,7 @@ Example incident types and high-level runbook bullets:
     - Monitor tool error rates and set up alerts for anomalies
 
 - **Token budget violations**:
+
   - **Symptoms**: `mcp_tool_token_budget_warnings_total` or `mcp_tool_token_budget_errors_total` increasing
   - **Diagnosis**:
     - Identify tools returning large responses: `promql: topk(5, mcp_tool_estimated_tokens{tool_name="*"})`
@@ -854,6 +884,7 @@ Example incident types and high-level runbook bullets:
 ### RouterOS Integration Incidents
 
 - **RouterOS REST/SSH unavailable**:
+
   - **Symptoms**: `routeros_device_reachable{device_id="*"}` dropping, tool execution failures
   - **Diagnosis**:
     - Check network connectivity between MCP and device: `ping <device_ip>`
@@ -887,6 +918,7 @@ Example incident types and high-level runbook bullets:
 ### Authentication and Authorization Incidents
 
 - **Auth failures (IdP or token issues)**:
+
   - **Symptoms**: `auth_failures_total` spiking, users unable to connect
   - **Diagnosis**:
     - Check IdP health dashboards and status page
@@ -920,6 +952,7 @@ Example incident types and high-level runbook bullets:
 ### Tool and Workflow Incidents
 
 - **Misbehaving tools (unexpected changes or error spikes)**:
+
   - **Symptoms**: Unexpected configuration changes on devices, audit log anomalies, tool error spikes
   - **Diagnosis**:
     - Identify tool(s) and user(s) from logs and audit events: `grep "audit_event" /var/log/routeros-mcp/audit.log`
@@ -956,6 +989,7 @@ Example incident types and high-level runbook bullets:
 ### Performance and Scaling Incidents
 
 - **Performance degradation**:
+
   - **Symptoms**: Tool execution latency increasing, timeouts, slow responses
   - **Diagnosis**:
     - Inspect metrics: CPU/memory on MCP instances, DB load, RouterOS API latency
@@ -1010,6 +1044,7 @@ Each runbook should be expanded in the ops documentation with step-by-step comma
 This document provides comprehensive operational guidance for deploying and maintaining the RouterOS MCP service with MCP protocol-specific considerations:
 
 **Core Operations Capabilities:**
+
 - **MCP-aware configuration**: Server metadata, transport modes, protocol features, tool tiers, token budgets
 - **Startup validation**: Automated checks for database, tool schemas, transport binding, device connectivity
 - **Multiple transport modes**: Stdio (simple), HTTP/SSE (scalable), or both (flexible)
@@ -1019,6 +1054,7 @@ This document provides comprehensive operational guidance for deploying and main
 - **Comprehensive runbooks**: MCP protocol errors, tool failures, token violations, performance issues
 
 **MCP Integration Highlights:**
+
 - **Transport flexibility**: Support for both stdio (1:1 client-server) and HTTP/SSE (multi-client) transports
 - **Tool lifecycle management**: Schema validation, versioning, deprecation, feature flags for disabling problematic tools
 - **Protocol testing**: Automated tests for MCP initialization, tool listing, tool execution, client compatibility
@@ -1026,6 +1062,7 @@ This document provides comprehensive operational guidance for deploying and main
 - **Incident response**: Specific runbooks for MCP protocol errors, token budget violations, resource cache issues
 
 **Operational Benefits:**
+
 - **Fast deployment**: Validated configurations, automated testing, staged rollouts reduce deployment risk
 - **Easy troubleshooting**: Correlation IDs, structured logs, MCP-specific metrics enable rapid incident diagnosis
 - **Scalable architecture**: HTTP/SSE transport with load balancing supports horizontal scaling
@@ -1033,6 +1070,7 @@ This document provides comprehensive operational guidance for deploying and main
 - **Proactive monitoring**: Health checks, readiness probes, metrics, alerts catch issues before users affected
 
 **Cross-references:**
+
 - See [Doc 04 (MCP Tools Interface)](04-mcp-tools-interface-and-json-schema-specification.md) for tool JSON schema specifications
 - See [Doc 08 (Observability)](08-observability-logging-metrics-and-diagnostics.md) for correlation IDs, metrics, and monitoring
 - See [Doc 05 (Domain Model)](05-domain-model-persistence-and-task-job-model.md) for database schema and migrations

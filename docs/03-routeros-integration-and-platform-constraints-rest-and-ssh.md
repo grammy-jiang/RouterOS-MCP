@@ -61,7 +61,7 @@ This section provides a comprehensive summary of all RouterOS v7 REST API endpoi
 | GET            | `/rest/log`                           | Logging   | System logs (bounded)               | Fundamental  | 1     |
 | GET            | `/rest/system/logging`                | Logging   | Logging configuration               | Fundamental  | 1     |
 
-**Total: 38 endpoints (Phase 1 scope)** (22 read-only fundamental, 10 advanced writes, 6 professional/high-risk). Diagnostics endpoints (ping/traceroute/bandwidth-test) are **deferred to Phase 2** and excluded from Phase 1 scope.
+**Total: 38 endpoints (Phase 1 scope)** (22 read-only fundamental, 10 advanced writes, 6 professional/high-risk). Diagnostics endpoints (ping/traceroute/bandwidth-test) are **deferred to Phase 3** and excluded from Phase 1-2 scope.
 
 ### Endpoint Categories
 
@@ -595,17 +595,17 @@ class RouterOSRestClient:
 
 ---
 
-### Tool (Diagnostics) Topic _(Deferred to Phase 2)_
+### Tool (Diagnostics) Topic _(Deferred to Phase 3)_
 
-Diagnostics tools (ping/traceroute/bandwidth-test) are deferred to Phase 2 and are not part of the Phase 1 implementation. The mappings below are retained for future planning only.
+Diagnostics tools (ping/traceroute/bandwidth-test) are deferred to Phase 3 and are not part of Phase 1-2 implementation. The mappings below are retained for future planning only.
 
 **Endpoints:**
 
 | Operation      | Method | Path                        | Purpose            | MCP Tool Tier      |
 | -------------- | ------ | --------------------------- | ------------------ | ------------------ |
-| Ping           | POST   | `/rest/tool/ping`           | ICMP ping          | Phase 2 (deferred) |
-| Traceroute     | POST   | `/rest/tool/traceroute`     | Network traceroute | Phase 2 (deferred) |
-| Bandwidth test | POST   | `/rest/tool/bandwidth-test` | Speed test         | Phase 2 (deferred) |
+| Ping           | POST   | `/rest/tool/ping`           | ICMP ping          | Phase 3 (deferred) |
+| Traceroute     | POST   | `/rest/tool/traceroute`     | Network traceroute | Phase 3 (deferred) |
+| Bandwidth test | POST   | `/rest/tool/bandwidth-test` | Speed test         | Phase 3 (deferred) |
 
 **Field Mappings:**
 
