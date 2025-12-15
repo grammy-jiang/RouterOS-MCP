@@ -10,8 +10,6 @@ from authlib.jose import jwt
 from routeros_mcp.security.auth import InvalidTokenError, MissingClaimError, User
 from routeros_mcp.security.oidc import (
     CLOCK_SKEW_SECONDS,
-    JWKS_CACHE_TTL_SECONDS,
-    TOKEN_CACHE_TTL_SECONDS,
     CachedJWKS,
     CachedToken,
     OIDCValidator,
@@ -85,13 +83,14 @@ class TestOIDCValidator:
         assert len(hash1) == 64  # SHA256 produces 64 hex chars
         assert hash1 != token  # Hash should differ from plaintext
 
-    def test_cache_token(self, validator):
+    @pytest.mark.asyncio
+    async def test_cache_token(self, validator):
         """Test token caching."""
         user = User(sub="user-123", email="test@example.com", role="admin")
         token_hash = "abc123"
         exp = time.time() + 3600
 
-        validator._cache_token(token_hash, user, exp)
+        await validator._cache_token(token_hash, user, exp)
 
         cached = validator._token_cache[token_hash]
         assert cached.user == user
@@ -124,10 +123,11 @@ class TestOIDCValidator:
 
         cached = validator._get_cached_token(token_hash)
         assert cached is None
-        # Expired entry should be removed
-        assert token_hash not in validator._token_cache
+        # Expired entry should NOT be removed here (cleanup happens in _cache_token)
+        # Just verify it returns None for expired tokens
 
-    def test_cleanup_token_cache(self, validator):
+    @pytest.mark.asyncio
+    async def test_cleanup_token_cache(self, validator):
         """Test token cache cleanup."""
         # Add valid and expired tokens
         now = time.time()
@@ -141,7 +141,7 @@ class TestOIDCValidator:
             user=User(sub="u3", email=None, role="admin"), expires_at=now - 50
         )
 
-        validator._cleanup_token_cache()
+        await validator._cleanup_token_cache()
 
         # Only valid token should remain
         assert "valid1" in validator._token_cache

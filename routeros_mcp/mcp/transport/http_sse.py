@@ -167,7 +167,13 @@ class HTTPSSETransport:
                 Middleware(
                     AuthMiddleware,
                     validator=validator,
-                    exempt_paths=["/health", f"{self.settings.mcp_http_base_path}/health"],
+                    # Exempt health endpoints with and without base path, and with/without trailing slash
+                    exempt_paths=[
+                        "/health",
+                        "/health/",
+                        f"{self.settings.mcp_http_base_path.rstrip('/')}/health",
+                        f"{self.settings.mcp_http_base_path.rstrip('/')}/health/",
+                    ],
                 )
             )
 

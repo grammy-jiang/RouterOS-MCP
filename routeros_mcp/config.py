@@ -215,6 +215,13 @@ class Settings(BaseSettings):
             if missing:
                 raise ValueError(f"OIDC enabled but missing required fields: {', '.join(missing)}")
 
+            # Validate HTTPS in production/staging
+            if self.oidc_provider_url and self.environment in ["staging", "prod"]:
+                if not self.oidc_provider_url.startswith("https://"):
+                    raise ValueError(
+                        f"oidc_provider_url must use HTTPS in {self.environment} environment"
+                    )
+
             # Warn if skip_verification enabled
             if self.oidc_skip_verification and self.environment in ["staging", "prod"]:
                 warnings.warn(

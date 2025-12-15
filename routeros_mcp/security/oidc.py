@@ -9,6 +9,7 @@ Provides JWT token validation against OIDC provider with:
 See docs/02-security-oauth-integration-and-access-control.md for design.
 """
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -98,6 +99,10 @@ class OIDCValidator:
         # Caches
         self._jwks_cache: CachedJWKS | None = None
         self._token_cache: dict[str, CachedToken] = {}
+        
+        # Thread safety locks
+        self._jwks_lock = asyncio.Lock()
+        self._token_cache_lock = asyncio.Lock()
 
         if skip_verification:
             logger.warning(
@@ -177,7 +182,7 @@ class OIDCValidator:
             user = self._extract_user_claims(claims)
 
             # Cache the validated token
-            self._cache_token(token_hash, user, exp)
+            await self._cache_token(token_hash, user, exp)
 
             logger.info(
                 "Token validated successfully",
@@ -196,6 +201,12 @@ class OIDCValidator:
                 extra={"error": str(e), "token_hash": token_hash[:16]},
             )
             raise InvalidTokenError(f"Invalid JWT token: {e}") from e
+        except (InvalidTokenError, MissingClaimError) as e:
+            logger.warning(
+                "JWT validation failed",
+                extra={"error": str(e), "token_hash": token_hash[:16]},
+            )
+            raise
 
     def _decode_header(self, token: str | bytes) -> dict[str, Any]:
         """Decode JWT header without verification.
@@ -220,7 +231,11 @@ class OIDCValidator:
                 raise InvalidTokenError("Invalid JWT format")
 
             # Decode header (base64url decode)
-            header_bytes = base64.urlsafe_b64decode(parts[0] + "==")
+            # Add proper padding if needed
+            header_b64 = parts[0]
+            padding = (4 - len(header_b64) % 4) % 4
+            header_b64 += "=" * padding
+            header_bytes = base64.urlsafe_b64decode(header_b64)
             return json.loads(header_bytes)
         except Exception as e:
             raise InvalidTokenError(f"Failed to decode JWT header: {e}") from e
@@ -251,11 +266,38 @@ class OIDCValidator:
             # Take first role if multiple
             role = role[0] if role else "read_only"
 
+        # Validate role against allowed roles
+        allowed_roles = {"read_only", "ops_rw", "admin"}
+        if role not in allowed_roles:
+            logger.warning(
+                "Invalid role claim value, defaulting to read_only",
+                extra={"role": role, "sub": sub}
+            )
+            role = "read_only"
+
         # Extract device scope if present
         device_scope = claims.get("device_scope") or claims.get("https://routeros-mcp/devices")
-        if isinstance(device_scope, str):
+        if device_scope is None:
+            pass
+        elif isinstance(device_scope, str):
             # Convert comma-separated string to list
-            device_scope = [d.strip() for d in device_scope.split(",")]
+            device_scope = [d.strip() for d in device_scope.split(",") if d.strip()]
+        elif isinstance(device_scope, list):
+            # Ensure all elements are strings
+            if all(isinstance(d, str) for d in device_scope):
+                device_scope = [d.strip() for d in device_scope if d.strip()]
+            else:
+                logger.warning(
+                    "device_scope claim contains non-string elements; ignoring device_scope",
+                    extra={"sub": sub}
+                )
+                device_scope = None
+        else:
+            logger.warning(
+                "device_scope claim has invalid type; ignoring device_scope",
+                extra={"type": type(device_scope).__name__, "sub": sub}
+            )
+            device_scope = None
 
         return User(
             sub=sub,
@@ -271,77 +313,89 @@ class OIDCValidator:
         Returns:
             Cached JWKS or None if fetch fails
         """
-        # Check cache first
+        # Check cache first (read without lock for performance)
         if self._jwks_cache and time.time() < self._jwks_cache.expires_at:
             logger.debug("JWKS cache hit")
             return self._jwks_cache
 
-        # Fetch from OIDC discovery endpoint
-        try:
-            # First get OIDC configuration
-            discovery_url = f"{self.provider_url}/.well-known/openid-configuration"
-            client = self._http_client or httpx.AsyncClient()
+        # Acquire lock for fetching
+        async with self._jwks_lock:
+            # Double-check cache after acquiring lock
+            if self._jwks_cache and time.time() < self._jwks_cache.expires_at:
+                return self._jwks_cache
 
+            # Fetch from OIDC discovery endpoint
             try:
-                logger.debug("Fetching OIDC discovery", extra={"url": discovery_url})
-                response = await client.get(discovery_url, timeout=10.0)
-                response.raise_for_status()
-                config = response.json()
+                # First get OIDC configuration
+                discovery_url = f"{self.provider_url}/.well-known/openid-configuration"
+                client = self._http_client or httpx.AsyncClient()
 
-                jwks_uri = config.get("jwks_uri")
-                if not jwks_uri:
-                    raise AuthenticationError("OIDC discovery missing jwks_uri")
+                try:
+                    logger.debug("Fetching OIDC discovery", extra={"url": discovery_url})
+                    response = await client.get(discovery_url, timeout=10.0)
+                    response.raise_for_status()
+                    config = response.json()
 
-                # Fetch JWKS
-                logger.debug("Fetching JWKS", extra={"url": jwks_uri})
-                jwks_response = await client.get(jwks_uri, timeout=10.0)
-                jwks_response.raise_for_status()
-                jwks_data = jwks_response.json()
+                    jwks_uri = config.get("jwks_uri")
+                    if not jwks_uri:
+                        raise AuthenticationError("OIDC discovery missing jwks_uri")
 
-                # Parse and cache keys
-                keys = {}
-                for key_data in jwks_data.get("keys", []):
-                    kid = key_data.get("kid")
-                    if kid:
-                        # Parse key with authlib
-                        keys[kid] = JsonWebKey.import_key(key_data)
+                    # Fetch JWKS
+                    logger.debug("Fetching JWKS", extra={"url": jwks_uri})
+                    jwks_response = await client.get(jwks_uri, timeout=10.0)
+                    jwks_response.raise_for_status()
+                    jwks_data = jwks_response.json()
 
-                # Cache for 1 hour
-                self._jwks_cache = CachedJWKS(
-                    keys=keys, expires_at=time.time() + JWKS_CACHE_TTL_SECONDS
+                    # Parse and cache keys
+                    keys = {}
+                    for key_data in jwks_data.get("keys", []):
+                        kid = key_data.get("kid")
+                        if kid:
+                            # Parse key with authlib
+                            keys[kid] = JsonWebKey.import_key(key_data)
+
+                    # Validate that at least one key was imported
+                    if not keys:
+                        raise AuthenticationError(
+                            "OIDC provider returned empty keys array in JWKS response"
+                        )
+
+                    # Cache for 1 hour
+                    self._jwks_cache = CachedJWKS(
+                        keys=keys, expires_at=time.time() + JWKS_CACHE_TTL_SECONDS
+                    )
+
+                    logger.info(
+                        "JWKS fetched and cached",
+                        extra={"key_count": len(keys), "ttl_seconds": JWKS_CACHE_TTL_SECONDS},
+                    )
+
+                    return self._jwks_cache
+
+                finally:
+                    if not self._http_client:
+                        await client.aclose()
+
+            except httpx.HTTPError as e:
+                logger.error(
+                    "Failed to fetch JWKS from OIDC provider",
+                    extra={"error": str(e), "provider_url": self.provider_url},
                 )
-
-                logger.info(
-                    "JWKS fetched and cached",
-                    extra={"key_count": len(keys), "ttl_seconds": JWKS_CACHE_TTL_SECONDS},
+                # Return stale cache if available (graceful degradation)
+                if self._jwks_cache:
+                    logger.warning("Using stale JWKS cache due to fetch failure")
+                    return self._jwks_cache
+                return None
+            except Exception as e:
+                logger.error(
+                    "Unexpected error fetching JWKS",
+                    extra={"error": str(e), "provider_url": self.provider_url},
                 )
-
-                return self._jwks_cache
-
-            finally:
-                if not self._http_client:
-                    await client.aclose()
-
-        except httpx.HTTPError as e:
-            logger.error(
-                "Failed to fetch JWKS from OIDC provider",
-                extra={"error": str(e), "provider_url": self.provider_url},
-            )
-            # Return stale cache if available (graceful degradation)
-            if self._jwks_cache:
-                logger.warning("Using stale JWKS cache due to fetch failure")
-                return self._jwks_cache
-            return None
-        except Exception as e:
-            logger.error(
-                "Unexpected error fetching JWKS",
-                extra={"error": str(e), "provider_url": self.provider_url},
-            )
-            # Return stale cache if available
-            if self._jwks_cache:
-                logger.warning("Using stale JWKS cache due to unexpected error")
-                return self._jwks_cache
-            return None
+                # Return stale cache if available
+                if self._jwks_cache:
+                    logger.warning("Using stale JWKS cache due to unexpected error")
+                    return self._jwks_cache
+                return None
 
     def _hash_token(self, token: str | bytes) -> str:
         """Hash token for cache key (don't store plaintext).
@@ -374,13 +428,13 @@ class OIDCValidator:
 
         # Check if expired
         if time.time() >= cached.expires_at:
-            # Remove expired entry
-            del self._token_cache[token_hash]
+            # Don't modify cache here to avoid race conditions
+            # Cleanup will be done in _cache_token
             return None
 
         return cached
 
-    def _cache_token(self, token_hash: str, user: User, exp: float) -> None:
+    async def _cache_token(self, token_hash: str, user: User, exp: float) -> None:
         """Cache validated token result.
 
         Args:
@@ -391,13 +445,17 @@ class OIDCValidator:
         # Cache for min(token expiry, 5 minutes)
         cache_until = min(exp, time.time() + TOKEN_CACHE_TTL_SECONDS)
 
-        self._token_cache[token_hash] = CachedToken(user=user, expires_at=cache_until)
+        async with self._token_cache_lock:
+            self._token_cache[token_hash] = CachedToken(user=user, expires_at=cache_until)
 
-        # Cleanup expired entries (simple strategy)
-        self._cleanup_token_cache()
+            # Cleanup expired entries (simple strategy)
+            await self._cleanup_token_cache()
 
-    def _cleanup_token_cache(self) -> None:
-        """Remove expired tokens from cache."""
+    async def _cleanup_token_cache(self) -> None:
+        """Remove expired tokens from cache.
+        
+        Note: This method should be called with _token_cache_lock held.
+        """
         now = time.time()
         expired = [k for k, v in self._token_cache.items() if now >= v.expires_at]
         for k in expired:

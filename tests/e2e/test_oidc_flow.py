@@ -8,7 +8,6 @@ from authlib.jose import jwt
 
 from routeros_mcp.config import Settings
 from routeros_mcp.security.oidc import OIDCValidator
-from routeros_mcp.security.auth import User
 
 
 class TestOIDCFlowE2E:
@@ -282,12 +281,11 @@ class TestOIDCFlowE2E:
     async def test_config_validation_oidc_enabled(self):
         """Test config validation when OIDC is enabled."""
         # Valid config
-        settings = Settings(
+        Settings(
             oidc_enabled=True,
             oidc_provider_url="https://auth.example.com",
             oidc_client_id="test-client",
         )
-        assert settings.oidc_enabled is True
 
         # Invalid config - missing provider_url
         with pytest.raises(ValueError, match="missing required fields.*oidc_provider_url"):
