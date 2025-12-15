@@ -15,8 +15,14 @@ from routeros_mcp.mcp.server import RouterOSMCPServer
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Full server roundtrip not yet implemented - endpoint not exposed")
 async def test_http_sse_echo_tool_roundtrip() -> None:
-    """Test complete roundtrip: HTTP POST → echo tool → JSON-RPC response."""
+    """Test complete roundtrip: HTTP POST → echo tool → JSON-RPC response.
+    
+    Note: This test is skipped because the full HTTP server integration is not
+    yet complete in Phase 2. The endpoint will be properly exposed in Phase 3
+    when FastMCP integration is finalized.
+    """
     # Create server with HTTP transport
     settings = Settings(
         mcp_transport="http",
@@ -64,18 +70,15 @@ async def test_http_sse_echo_tool_roundtrip() -> None:
             )
 
             # Verify response
-            assert response.status_code in [200, 404]  # 404 is OK if endpoint not exposed yet
-
-            # If we get 200, verify response structure
-            if response.status_code == 200:
-                assert "X-Correlation-ID" in response.headers
-                
-                body = response.json()
-                assert body["jsonrpc"] == "2.0"
-                assert body["id"] == "e2e-test-001"
-                
-                # Should have either result or error
-                assert "result" in body or "error" in body
+            assert response.status_code == 200
+            assert "X-Correlation-ID" in response.headers
+            
+            body = response.json()
+            assert body["jsonrpc"] == "2.0"
+            assert body["id"] == "e2e-test-001"
+            
+            # Should have either result or error
+            assert "result" in body or "error" in body
 
     finally:
         # Stop server

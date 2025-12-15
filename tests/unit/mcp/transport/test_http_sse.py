@@ -135,7 +135,7 @@ async def test_http_sse_transport_run_with_middleware() -> None:
     assert len(call_kwargs["middleware"]) > 0
     # Verify correlation ID middleware is included
     middleware_list = call_kwargs["middleware"]
-    assert any("CorrelationIDMiddleware" in str(m) for m in middleware_list)
+    assert any(getattr(m, "cls", None) and getattr(m.cls, "__name__", "") == "CorrelationIDMiddleware" for m in middleware_list)
 
 
 @pytest.mark.asyncio

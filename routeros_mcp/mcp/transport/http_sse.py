@@ -212,7 +212,7 @@ class HTTPSSETransport:
                 )
 
             # Extract user context from auth middleware (if available)
-            user_context = getattr(request.state, "user", None)
+            user_context = getattr(getattr(request, "state", None), "user", None)
             
             # Process MCP request
             response = await self._process_mcp_request(
@@ -342,7 +342,13 @@ class HTTPSSETransport:
                 },
             }
             
-            return create_success_response(request_id=request_id or "unknown", result=result)
+            # For notifications (no id), we should not return a response per JSON-RPC 2.0
+            # For now, we require id to be present (validated earlier in handle_request)
+            # If request_id is None at this point, it's a server error
+            if request_id is None:
+                raise ValueError("Request ID is required for JSON-RPC responses")
+            
+            return create_success_response(request_id=request_id, result=result)
             
         except Exception as e:
             logger.error(
