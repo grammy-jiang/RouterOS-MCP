@@ -1,0 +1,9 @@
+{
+    "chat.mcp.serverSampling": {
+        "RouterOS-MCP/.vscode/mcp.json: routeros-mcp": {
+            "allowedModels": [
+                "copilot/auto"
+            ]
+        }
+    }
+}
