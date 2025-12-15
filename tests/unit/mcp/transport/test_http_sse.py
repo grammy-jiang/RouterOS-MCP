@@ -1,6 +1,6 @@
 """Tests for HTTP/SSE transport implementation."""
 
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
