@@ -322,3 +322,96 @@ class TestOIDCFlowE2E:
 
             # Should have warning about skip_verification in prod
             assert any("DANGEROUS" in str(warning.message) for warning in w)
+
+   
+    @pytest.mark.asyncio
+    async def test_e2e_oidc_with_real_signature_verification(self, settings, mock_http_client):
+        """Test E2E OIDC flow with actual JWT signature verification (not skip mode)."""
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.backends import default_backend
+        from authlib.jose import JsonWebKey
+        
+        # Generate RSA key pair for signing
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=default_backend()
+        )
+        
+        # Serialize keys to PEM
+        private_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption()
+        )
+        
+        public_pem = private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        
+        # Import with authlib
+        private_jwk = JsonWebKey.import_key(private_pem)
+        public_jwk = JsonWebKey.import_key(public_pem)
+        
+        # Create public JWK dict for JWKS response
+        public_jwk_dict = public_jwk.as_dict()
+        public_jwk_dict['kid'] = 'production-key-1'
+        public_jwk_dict['use'] = 'sig'
+        public_jwk_dict['alg'] = 'RS256'
+        
+        # Setup mock OIDC responses
+        discovery_response = Mock()
+        discovery_response.json.return_value = {
+            "issuer": "https://auth.example.com",
+            "jwks_uri": "https://auth.example.com/jwks",
+        }
+        discovery_response.raise_for_status = Mock()
+        
+        jwks_response = Mock()
+        jwks_response.json.return_value = {
+            "keys": [public_jwk_dict]
+        }
+        jwks_response.raise_for_status = Mock()
+        
+        mock_http_client.get = AsyncMock(
+            side_effect=[discovery_response, jwks_response]
+        )
+        
+        # Create validator WITHOUT skip_verification (production mode)
+        validator = OIDCValidator(
+            provider_url=settings.oidc_provider_url,
+            client_id=settings.oidc_client_id,
+            audience=settings.oidc_audience,
+            skip_verification=False,  # Real signature verification
+            http_client=mock_http_client,
+        )
+        
+        # Create properly signed JWT token
+        header = {'alg': 'RS256', 'typ': 'JWT', 'kid': 'production-key-1'}
+        claims = {
+            "sub": "prod-user-123",
+            "email": "prod@example.com",
+            "name": "Production User",
+            "role": "ops_rw",
+            "device_scope": ["prod-router-1", "prod-router-2"],
+            "exp": time.time() + 3600,
+            "iss": "https://auth.example.com",
+            "aud": "test-audience",
+        }
+        
+        token = jwt.encode(header, claims, private_jwk)
+        
+        # Validate with full signature verification
+        user = await validator.validate_token(token)
+        
+        # Verify all claims extracted correctly
+        assert user.sub == "prod-user-123"
+        assert user.email == "prod@example.com"
+        assert user.name == "Production User"
+        assert user.role == "ops_rw"
+        assert user.device_scope == ["prod-router-1", "prod-router-2"]
+        
+        # Verify JWKS was fetched
+        assert mock_http_client.get.call_count == 2  # Discovery + JWKS

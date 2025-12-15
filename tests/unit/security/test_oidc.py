@@ -464,3 +464,168 @@ class TestOIDCValidator:
 
             with pytest.raises(InvalidTokenError, match="Token expired"):
                 await validator_skip_verification.validate_token(token)
+
+    @pytest.mark.asyncio
+    async def test_validate_token_with_signature_verification(self, mock_http_client):
+        """Test token validation with actual JWT signature verification."""
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.backends import default_backend
+        from authlib.jose import JsonWebKey
+        
+        # Generate RSA key pair
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=default_backend()
+        )
+        
+        # Serialize keys to PEM format
+        private_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption()
+        )
+        
+        public_pem = private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        
+        # Import keys with authlib
+        private_jwk = JsonWebKey.import_key(private_pem)
+        public_jwk = JsonWebKey.import_key(public_pem)
+        
+        # Create public JWK dict for JWKS response
+        public_jwk_dict = public_jwk.as_dict()
+        public_jwk_dict['kid'] = 'test-key-1'
+        public_jwk_dict['use'] = 'sig'
+        public_jwk_dict['alg'] = 'RS256'
+        
+        # Mock OIDC discovery and JWKS responses
+        discovery_response = Mock()
+        discovery_response.json.return_value = {
+            "jwks_uri": "https://auth.example.com/jwks"
+        }
+        discovery_response.raise_for_status = Mock()
+        
+        jwks_response = Mock()
+        jwks_response.json.return_value = {
+            "keys": [public_jwk_dict]
+        }
+        jwks_response.raise_for_status = Mock()
+        
+        mock_http_client.get = AsyncMock(
+            side_effect=[discovery_response, jwks_response]
+        )
+        
+        # Create validator WITHOUT skip_verification
+        validator = OIDCValidator(
+            provider_url="https://auth.example.com",
+            client_id="test-client-id",
+            audience="test-audience",
+            skip_verification=False,
+            http_client=mock_http_client,
+        )
+        
+        # Create signed JWT token
+        header = {'alg': 'RS256', 'typ': 'JWT', 'kid': 'test-key-1'}
+        claims = {
+            "sub": "user-123",
+            "email": "test@example.com",
+            "role": "admin",
+            "exp": time.time() + 3600,
+            "iss": "https://auth.example.com",
+            "aud": "test-audience",
+        }
+        
+        token = jwt.encode(header, claims, private_jwk)
+        
+        # Validate token with signature verification
+        user = await validator.validate_token(token)
+        
+        assert user.sub == "user-123"
+        assert user.email == "test@example.com"
+        assert user.role == "admin"
+    
+    @pytest.mark.asyncio
+    async def test_validate_token_invalid_signature(self, mock_http_client):
+        """Test that invalid signatures are rejected."""
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.backends import default_backend
+        from authlib.jose import JsonWebKey
+        
+        # Generate two different RSA key pairs
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=default_backend()
+        )
+        
+        wrong_private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=default_backend()
+        )
+        
+        # Serialize keys
+        wrong_private_pem = wrong_private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption()
+        )
+        
+        public_pem = private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        
+        # Import with authlib
+        wrong_private_jwk = JsonWebKey.import_key(wrong_private_pem)
+        public_jwk = JsonWebKey.import_key(public_pem)
+        
+        # Create public JWK dict from FIRST key for JWKS response
+        public_jwk_dict = public_jwk.as_dict()
+        public_jwk_dict['kid'] = 'test-key-1'
+        public_jwk_dict['use'] = 'sig'
+        public_jwk_dict['alg'] = 'RS256'
+        
+        # Mock OIDC discovery and JWKS responses
+        discovery_response = Mock()
+        discovery_response.json.return_value = {
+            "jwks_uri": "https://auth.example.com/jwks"
+        }
+        discovery_response.raise_for_status = Mock()
+        
+        jwks_response = Mock()
+        jwks_response.json.return_value = {
+            "keys": [public_jwk_dict]
+        }
+        jwks_response.raise_for_status = Mock()
+        
+        mock_http_client.get = AsyncMock(
+            side_effect=[discovery_response, jwks_response]
+        )
+        
+        validator = OIDCValidator(
+            provider_url="https://auth.example.com",
+            client_id="test-client-id",
+            skip_verification=False,
+            http_client=mock_http_client,
+        )
+        
+        # Sign token with WRONG key
+        header = {'alg': 'RS256', 'typ': 'JWT', 'kid': 'test-key-1'}
+        claims = {
+            "sub": "user-123",
+            "exp": time.time() + 3600,
+            "iss": "https://auth.example.com",
+            "aud": "test-client-id",
+        }
+        
+        token = jwt.encode(header, claims, wrong_private_jwk)
+        
+        # Should fail signature verification
+        with pytest.raises(InvalidTokenError, match="Invalid JWT token"):
+            await validator.validate_token(token)
