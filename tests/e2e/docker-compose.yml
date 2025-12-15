@@ -106,7 +106,7 @@ services:
       start_period: 10s
     networks:
       - mcp-test
-    command: python scripts/run_mcp_streamable_http.py
+    command: python scripts/run_mcp_streamable_http.py --config config/lab.yaml
 
 networks:
   mcp-test:

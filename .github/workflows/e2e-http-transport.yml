@@ -89,19 +89,6 @@ jobs:
           ROUTEROS_MCP_DEBUG: "false"
           ROUTEROS_MCP_LOG_LEVEL: "INFO"
       
-      - name: Run E2E tests with OIDC enabled
-        run: |
-          # Restart services with OIDC enabled
-          docker-compose -f tests/e2e/docker-compose.yml down
-          docker-compose -f tests/e2e/docker-compose.yml up -d
-          sleep 10
-          
-          # Run OIDC-specific tests (if any are not skipped)
-          pytest tests/e2e/test_http_transport_clients.py::test_mcp_client_authentication_valid_token -v || echo "OIDC tests skipped"
-        timeout-minutes: 5
-        env:
-          ROUTEROS_MCP_OIDC_ENABLED: "true"
-      
       - name: Stop Docker Compose services
         if: always()
         run: |

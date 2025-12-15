@@ -426,14 +426,17 @@ docker-compose -f tests/e2e/docker-compose.yml logs mock-oidc
 **Test coverage:**
 
 The E2E test suite covers:
-- ✅ Basic tool invocation without parameters (`device_list`)
-- ✅ Tool invocation with parameters (`device_get`)
-- ✅ Resource fetching via URI (`device://...`)
-- ✅ Error handling (invalid device IDs, malformed requests)
-- ✅ Authentication with OIDC (valid/invalid tokens)
+- ✅ Direct HTTP JSON-RPC request handling
+- ✅ Connection timeout handling  
 - ✅ Correlation ID propagation
 - ✅ Concurrent request handling
-- ✅ Connection timeout handling
+- ✅ Malformed JSON error handling
+- ⏭️ MCP client tool invocation (Phase 3: `device_list`)
+- ⏭️ MCP client tool with parameters (Phase 3: `device_get`)
+- ⏭️ MCP client resource fetching (Phase 3: `device://` URIs)
+- ⏭️ MCP client error handling (Phase 3: invalid device IDs)
+- ⏭️ OIDC authentication with valid tokens (Phase 3)
+- ⏭️ OIDC authentication with invalid tokens (Phase 3)
 
 **CI Integration:**
 

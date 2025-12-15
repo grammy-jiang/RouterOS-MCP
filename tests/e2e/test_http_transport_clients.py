@@ -236,7 +236,8 @@ async def test_mcp_client_authentication_valid_token() -> None:
         oidc_skip_verification=True,  # For testing only
     )
     
-    # Mock OIDC token
+    # Mock OIDC token (Phase 3: generate from mock-oauth2-server)
+    # For now, use a placeholder token structure
     valid_token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ0ZXN0LXVzZXIifQ.test"
     
     # Create HTTP client with auth header
