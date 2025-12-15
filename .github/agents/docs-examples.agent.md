@@ -48,24 +48,24 @@ You create comprehensive, operator-focused documentation that enables users to s
 
 ## Documentation Index
 
-- [Design Docs](docs/)
-- [API Reference](docs/API.md)
-- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Design Docs](docs/) - Comprehensive design specifications (00-19 series)
+- [MCP Tools Reference](docs/04-mcp-tools-interface-and-json-schema-specification.md)
+- [Development Guide](docs/12-development-environment-dependencies-and-commands.md)
+- [Operations & Deployment](docs/09-operations-deployment-self-update-and-runbook.md)
 
 ## Contributing
 
 [Link to CONTRIBUTING.md]
 ```
 
-### User Guides (docs/guides/)
+### Current Documentation Structure
 
-- `getting-started.md`: First-time setup walkthrough
-- `adding-devices.md`: How to register RouterOS devices
-- `using-tools.md`: Examples of each MCP tool
-- `rest-vs-ssh.md`: Decision tree for API selection
-- `auth-config.md`: Credential management, OIDC setup
+The repository uses numbered design documents:
+- `docs/00-19-*.md`: Core design specifications
+- `docs/best_practice/`: Best practices guides
+- `docs/PHASE-2-PLAN.md`: Future work planning
 
-### API Reference (docs/API.md)
+### MCP Tools Documentation (docs/04-mcp-tools-interface-and-json-schema-specification.md)
 
 For each MCP tool, document:
 
@@ -105,13 +105,15 @@ routeros-mcp --config lab.yaml
 
 ````
 
-### Runbooks (docs/runbooks/)
-- `deployment.md`: Production deployment checklist
-- `monitoring.md`: Metrics to track, alerting thresholds
-- `incident-response.md`: Troubleshooting decision tree
-- `backup-restore.md`: Database backup/restore procedures
+### Runbooks (docs/09-operations-deployment-self-update-and-runbook.md)
 
-### Examples (examples/)
+Operational procedures documented in design doc 09:
+- Production deployment checklist
+- Metrics to track, alerting thresholds
+- Troubleshooting decision tree
+- Backup/restore procedures
+
+### Examples (examples/ - to be created in Phase 2)
 - `claude-desktop-config.json`: Claude Desktop MCP config
 - `custom-client.py`: Python script calling MCP server
 - `batch-device-config.py`: Bulk DNS/NTP updates
@@ -181,8 +183,9 @@ Document clearly:
 
 - **CI commands**: Match commands in docs to `.github/workflows/ci.yml`
 - **Packaging**: Sync installation instructions with `pyproject.toml`
-- **Tool schemas**: Update API docs when MCP tools change
-- **Version compatibility**: Document supported RouterOS versions
+- **Tool schemas**: Update docs/04 when MCP tools change
+- **Version compatibility**: Document supported RouterOS versions in docs/03
+- **Design docs**: Keep numbered design documents (00-19) as single source of truth
 
 ## Testing Documentation
 
@@ -205,7 +208,7 @@ Before committing:
 Produce per feature:
 
 1. Updated README.md (if user-facing feature)
-2. API documentation for new MCP tools
-3. User guide with step-by-step instructions
-4. Examples with copy-paste code snippets
-5. Troubleshooting section for common failure modes
+2. Updated design docs (docs/04 for MCP tools, docs/12 for dev commands, etc.)
+3. Inline code documentation (docstrings, type hints)
+4. Examples with copy-paste code snippets (create examples/ directory if needed)
+5. Troubleshooting section in docs/09 for common failure modes
