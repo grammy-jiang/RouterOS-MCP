@@ -21,7 +21,12 @@ You implement continuous integration, packaging, and release automation.
 
 ## GitHub Actions Workflows
 
-### 1. CI Workflow (`.github/workflows/ci.yml`)
+### Current State
+
+The repository currently has:
+- `.github/workflows/copilot-setup-steps.yml` - Reusable workflow for CI setup and testing
+
+### 1. CI Workflow (`.github/workflows/ci.yml` - to be created)
 
 Runs on push to main and all PRs.
 
@@ -46,7 +51,7 @@ Runs on push to main and all PRs.
 - Cache dependencies: `actions/setup-python@v5` with `cache: pip`
 - Set timeout: `timeout-minutes: 30`
 
-### 2. Release Workflow (`.github/workflows/release.yml`)
+### 2. Release Workflow (`.github/workflows/release.yml` - to be created)
 
 Runs on Git tags (`v*`).
 
@@ -91,11 +96,12 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
 
-[tool.hatch.build.targets.wheel]
-packages = ["routeros_mcp"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["routeros_mcp*"]
 ```
 
 ### Dependency Pinning

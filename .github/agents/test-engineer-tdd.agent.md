@@ -61,9 +61,13 @@ def test_<what>_when_<condition>_then_<expected>():
 
 ## Coverage Thresholds
 
-Enforce in `pytest.ini` or `pyproject.toml`:
+Enforce in `pyproject.toml`:
 
 ```toml
+[tool.pytest.ini_options]
+addopts = "--cov=routeros_mcp --cov-report=html --cov-report=xml --cov-report=term"
+testpaths = ["tests"]
+
 [tool.coverage.run]
 source = ["routeros_mcp"]
 omit = ["*/tests/*", "*/__pycache__/*"]

@@ -61,6 +61,7 @@ You create comprehensive, operator-focused documentation that enables users to s
 ### Current Documentation Structure
 
 The repository uses numbered design documents:
+
 - `docs/00-19-*.md`: Core design specifications
 - `docs/best_practice/`: Best practices guides
 - `docs/PHASE-2-PLAN.md`: Future work planning
@@ -181,7 +182,7 @@ Document clearly:
 
 ## Keep Docs Synchronized
 
-- **CI commands**: Match commands in docs to `.github/workflows/ci.yml`
+- **CI commands**: Match commands in docs to actual workflows (currently `.github/workflows/copilot-setup-steps.yml`)
 - **Packaging**: Sync installation instructions with `pyproject.toml`
 - **Tool schemas**: Update docs/04 when MCP tools change
 - **Version compatibility**: Document supported RouterOS versions in docs/03
