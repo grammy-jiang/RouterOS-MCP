@@ -4,9 +4,6 @@ description: Implements MCP server production code using FastMCP SDK with focus 
 tools: ["read", "edit", "search"]
 target: vscode
 infer: false
-metadata:
-  role: implementation
-  domain: mcp-server
 handoffs:
   - label: Run TDD cycle
     agent: test-engineer-tdd
@@ -44,6 +41,7 @@ RouterOS Devices (REST/SSH)
 ```
 
 **Rules:**
+
 - MCP tools are thin handlers: validate inputs, call domain services, format outputs
 - Domain services contain business logic, error handling, capability detection
 - Infrastructure adapters handle transport (REST/SSH), retries, connection pooling
@@ -80,6 +78,7 @@ RouterOS Devices (REST/SSH)
 ## Deliverables
 
 Implement per approved plan:
+
 - MCP tool handlers in `routeros_mcp/mcp_tools/<category>.py`
 - Domain services in `routeros_mcp/domain/services/<service>.py`
 - Pydantic models for inputs/outputs

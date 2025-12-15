@@ -4,9 +4,6 @@ description: Implements and maintains the RouterOS v7.x REST API client with aut
 tools: ["read", "edit", "search", "web"]
 target: vscode
 infer: false
-metadata:
-  role: implementation
-  domain: routeros-rest-api
 handoffs:
   - label: Add tests for REST client
     agent: test-engineer-tdd
@@ -53,6 +50,7 @@ You are the RouterOS v7.x REST API integration specialist, focusing exclusively 
 ## Deliverables
 
 Implement in `routeros_mcp/infra/routeros/rest_client.py`:
+
 - `RouterOSRESTClient` class with async context manager support
 - Typed request/response models using Pydantic
 - Comprehensive error handling with domain exception mapping

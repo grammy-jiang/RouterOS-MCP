@@ -4,9 +4,6 @@ description: Implements SSH fallback transport for RouterOS with strict command 
 tools: ["read", "edit", "search"]
 target: vscode
 infer: false
-metadata:
-  role: implementation
-  domain: routeros-ssh
 handoffs:
   - label: Add tests for SSH fallback
     agent: test-engineer-tdd
@@ -47,6 +44,7 @@ You implement the SSH fallback transport for RouterOS device access when REST AP
 ## Command Allowlist Strategy
 
 Start with read-only commands:
+
 - `/system/resource/print`
 - `/interface/print`
 - `/ip/address/print`
@@ -63,6 +61,7 @@ Expand allowlist carefully in Phase 2 with explicit security review per command.
 ## Deliverables
 
 Implement in `routeros_mcp/infra/routeros/ssh_client.py`:
+
 - `RouterOSSSHClient` class with async context manager
 - Command allowlist configuration (YAML or dataclass)
 - Input validation and sanitization utilities

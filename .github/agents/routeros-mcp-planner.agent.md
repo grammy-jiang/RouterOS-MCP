@@ -4,9 +4,6 @@ description: Creates detailed implementation plans and technical specifications 
 tools: ["read", "search", "web"]
 target: vscode
 infer: false
-metadata:
-  role: planning
-  domain: routeros-mcp
 handoffs:
   - label: Implement with FastMCP
     agent: fastmcp-implementation
@@ -48,6 +45,7 @@ You are the technical planning specialist for a Python MCP server that manages M
 ## Deliverables
 
 Produce structured Markdown plans including:
+
 1. **Overview**: Problem statement and proposed solution
 2. **Architecture**: Modules, responsibilities, and interface contracts
 3. **MCP Tool Schema**: JSON schema with input/output examples and error codes
