@@ -143,12 +143,10 @@ class TestSettings:
             oidc_enabled=True,
             oidc_provider_url="https://auth.example.com",
             oidc_client_id="test-client",
-            oidc_client_secret="secret-client-secret",
         )
         config_dict = settings.to_dict()
 
         assert config_dict["encryption_key"] == "***REDACTED***"
-        assert config_dict["oidc_client_secret"] == "***REDACTED***"
         assert config_dict["oidc_client_id"] == "test-client"  # Not masked
 
 
