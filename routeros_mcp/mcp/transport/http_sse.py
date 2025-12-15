@@ -10,8 +10,9 @@ See docs/14-mcp-protocol-integration-and-transport-design.md
 
 import json
 import logging
-from typing import Any
+from typing import Any, AsyncIterator
 
+from sse_starlette import EventSourceResponse
 from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -29,6 +30,7 @@ from routeros_mcp.mcp.protocol.jsonrpc import (
     create_success_response,
     validate_jsonrpc_request,
 )
+from routeros_mcp.mcp.transport.sse_manager import SSEManager
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +108,13 @@ class HTTPSSETransport:
         """
         self.settings = settings
         self.mcp_instance = mcp_instance
+        
+        # Initialize SSE subscription manager
+        self.sse_manager = SSEManager(
+            max_subscriptions_per_device=settings.sse_max_subscriptions_per_device,
+            client_timeout_seconds=settings.sse_client_timeout_seconds,
+            update_batch_interval_seconds=settings.sse_update_batch_interval_seconds,
+        )
 
         logger.info(
             "Initialized HTTP/SSE transport",
@@ -404,6 +413,111 @@ class HTTPSSETransport:
         """
         logger.info("Stopping HTTP/SSE transport server")
         # FastMCP handles cleanup in run_http_async
+    
+    async def handle_subscribe(self, request: Request) -> EventSourceResponse:
+        """Handle SSE subscription request.
+        
+        POST /mcp/subscribe with JSON body:
+        {
+            "resource_uri": "device://dev-001/health"
+        }
+        
+        Returns:
+            SSE event stream with resource updates
+        """
+        correlation_id = get_correlation_id()
+        
+        try:
+            # Parse subscription request
+            body = await request.json()
+            resource_uri = body.get("resource_uri")
+            
+            if not resource_uri:
+                return JSONResponse(
+                    {
+                        "error": "Missing required field: resource_uri",
+                        "code": "INVALID_REQUEST",
+                    },
+                    status_code=400,
+                    headers={"X-Correlation-ID": correlation_id},
+                )
+            
+            # Extract client ID from auth context or generate
+            user_context = getattr(getattr(request, "state", None), "user", None)
+            client_id = (
+                user_context.get("sub") if user_context
+                else f"anonymous-{correlation_id[:8]}"
+            )
+            
+            logger.info(
+                "SSE subscription request received",
+                extra={
+                    "client_id": client_id,
+                    "resource_uri": resource_uri,
+                    "correlation_id": correlation_id,
+                },
+            )
+            
+            # Create subscription
+            try:
+                subscription = await self.sse_manager.subscribe(
+                    client_id=client_id,
+                    resource_uri=resource_uri,
+                )
+            except ValueError as e:
+                # Subscription limit exceeded
+                return JSONResponse(
+                    {
+                        "error": str(e),
+                        "code": "SUBSCRIPTION_LIMIT_EXCEEDED",
+                    },
+                    status_code=429,
+                    headers={"X-Correlation-ID": correlation_id},
+                )
+            
+            # Stream events to client
+            async def event_generator() -> AsyncIterator[dict[str, str]]:
+                """Generate SSE events for this subscription."""
+                async for event in self.sse_manager.stream_events(subscription):
+                    # Format as SSE event
+                    yield {
+                        "event": event.get("event", "update"),
+                        "data": json.dumps(event.get("data", {})),
+                    }
+            
+            return EventSourceResponse(
+                event_generator(),
+                headers={
+                    "X-Correlation-ID": correlation_id,
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",  # Disable nginx buffering
+                },
+            )
+            
+        except json.JSONDecodeError:
+            return JSONResponse(
+                {
+                    "error": "Invalid JSON in request body",
+                    "code": "PARSE_ERROR",
+                },
+                status_code=400,
+                headers={"X-Correlation-ID": correlation_id},
+            )
+        except Exception as e:
+            logger.error(
+                f"Error handling SSE subscription: {e}",
+                extra={"correlation_id": correlation_id},
+                exc_info=True,
+            )
+            return JSONResponse(
+                {
+                    "error": "Internal server error",
+                    "code": "INTERNAL_ERROR",
+                    "detail": str(e),
+                },
+                status_code=500,
+                headers={"X-Correlation-ID": correlation_id},
+            )
 
 
 __all__ = ["HTTPSSETransport"]

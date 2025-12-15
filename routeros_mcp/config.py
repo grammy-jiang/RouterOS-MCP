@@ -87,6 +87,31 @@ class Settings(BaseSettings):
     mcp_http_base_path: str = Field(default="/mcp", description="Base path for MCP HTTP endpoints")
 
     # ========================================
+    # SSE Subscription Configuration
+    # ========================================
+
+    sse_max_subscriptions_per_device: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        description="Maximum SSE subscriptions per device (prevent DoS)",
+    )
+
+    sse_client_timeout_seconds: int = Field(
+        default=1800,  # 30 minutes
+        ge=0,
+        le=7200,
+        description="Timeout for inactive SSE clients (0 = no timeout)",
+    )
+
+    sse_update_batch_interval_seconds: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=60.0,
+        description="Debounce interval for batching SSE updates",
+    )
+
+    # ========================================
     # Database Configuration
     # ========================================
 
