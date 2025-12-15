@@ -11,10 +11,12 @@ See docs/14-mcp-protocol-integration-and-transport-design.md
 import json
 import logging
 from typing import Any
+from collections.abc import AsyncIterator
 
+from sse_starlette import EventSourceResponse
 from starlette.middleware import Middleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse
 
 from routeros_mcp.config import Settings
 from routeros_mcp.infra.observability import get_correlation_id, set_correlation_id
@@ -29,6 +31,7 @@ from routeros_mcp.mcp.protocol.jsonrpc import (
     create_success_response,
     validate_jsonrpc_request,
 )
+from routeros_mcp.mcp.transport.sse_manager import SSEManager
 
 logger = logging.getLogger(__name__)
 
@@ -56,26 +59,24 @@ class CorrelationIDMiddleware:
             # Extract correlation ID from headers or generate new one
             headers = dict(scope.get("headers", []))
             correlation_id_bytes = headers.get(b"x-correlation-id")
-            
+
             if correlation_id_bytes:
                 correlation_id = correlation_id_bytes.decode("utf-8")
             else:
                 correlation_id = get_correlation_id()
-            
+
             # Set correlation ID in context
             set_correlation_id(correlation_id)
-            
+
             # Add correlation ID to response headers
             async def send_with_correlation_id(message: dict[str, Any]) -> None:
                 if message["type"] == "http.response.start":
                     headers = message.get("headers", [])
                     # Add correlation ID header
-                    headers.append(
-                        (b"x-correlation-id", correlation_id.encode("utf-8"))
-                    )
+                    headers.append((b"x-correlation-id", correlation_id.encode("utf-8")))
                     message["headers"] = headers
                 await send(message)
-            
+
             await self.app(scope, receive, send_with_correlation_id)
         else:
             await self.app(scope, receive, send)
@@ -89,7 +90,7 @@ class HTTPSSETransport:
 
     The transport integrates with the RouterOS MCP server and uses
     configuration settings to determine host, port, and path.
-    
+
     Additionally provides:
     - JSON-RPC request processing with validation
     - Correlation ID propagation via X-Correlation-ID header
@@ -106,6 +107,13 @@ class HTTPSSETransport:
         """
         self.settings = settings
         self.mcp_instance = mcp_instance
+
+        # Initialize SSE subscription manager
+        self.sse_manager = SSEManager(
+            max_subscriptions_per_device=settings.sse_max_subscriptions_per_device,
+            client_timeout_seconds=settings.sse_client_timeout_seconds,
+            update_batch_interval_seconds=settings.sse_update_batch_interval_seconds,
+        )
 
         logger.info(
             "Initialized HTTP/SSE transport",
@@ -251,11 +259,9 @@ class HTTPSSETransport:
 
             # Extract user context from auth middleware (if available)
             user_context = getattr(getattr(request, "state", None), "user", None)
-            
+
             # Process MCP request
-            response = await self._process_mcp_request(
-                body, user_context=user_context
-            )
+            response = await self._process_mcp_request(body, user_context=user_context)
 
             return JSONResponse(
                 response,
@@ -303,9 +309,7 @@ class HTTPSSETransport:
                 exc_info=True,
             )
             mapped_error = map_exception_to_error(e)
-            error_response = create_error_response(
-                request_id=request_id, error=mapped_error
-            )
+            error_response = create_error_response(request_id=request_id, error=mapped_error)
             return JSONResponse(
                 error_response,
                 status_code=500,
@@ -358,11 +362,11 @@ class HTTPSSETransport:
         # - server._mcp_server.call_tool() for tools/call
         # - server._mcp_server.list_tools() for tools/list
         # - etc.
-        
+
         # This is a simplified implementation that returns a proper structure
         # The actual integration with FastMCP's internal processor would go here
         # For Phase 2, we're implementing the request/response handling infrastructure
-        
+
         try:
             # Return a placeholder response for now
             # Real implementation would integrate with FastMCP's request handlers
@@ -379,15 +383,15 @@ class HTTPSSETransport:
                     "has_user_context": user_context is not None,
                 },
             }
-            
+
             # For notifications (no id), we should not return a response per JSON-RPC 2.0
             # For now, we require id to be present (validated earlier in handle_request)
             # If request_id is None at this point, it's a server error
             if request_id is None:
                 raise ValueError("Request ID is required for JSON-RPC responses")
-            
+
             return create_success_response(request_id=request_id, result=result)
-            
+
         except Exception as e:
             logger.error(
                 f"Error in _process_mcp_request: {e}",
@@ -404,6 +408,120 @@ class HTTPSSETransport:
         """
         logger.info("Stopping HTTP/SSE transport server")
         # FastMCP handles cleanup in run_http_async
+
+    async def handle_subscribe(
+        self, request: Request
+    ) -> EventSourceResponse | JSONResponse:
+        """Handle SSE subscription request.
+
+        NOTE: This method is not currently registered as a route in FastMCP.
+        To enable SSE subscriptions, this endpoint needs to be registered with
+        FastMCP's router or a custom Starlette application. This is a placeholder
+        for future integration when custom routes are supported.
+
+        TODO: Wire this handler to POST /mcp/subscribe route once FastMCP supports
+        custom route registration or when using a custom Starlette application.
+
+        POST /mcp/subscribe with JSON body:
+        {
+            "resource_uri": "device://dev-001/health"
+        }
+
+        Returns:
+            SSE event stream with resource updates
+        """
+        correlation_id = get_correlation_id()
+
+        try:
+            # Parse subscription request
+            body = await request.json()
+            resource_uri = body.get("resource_uri")
+
+            if not resource_uri:
+                return JSONResponse(
+                    {
+                        "error": "Missing required field: resource_uri",
+                        "code": "INVALID_REQUEST",
+                    },
+                    status_code=400,
+                    headers={"X-Correlation-ID": correlation_id},
+                )
+
+            # Extract client ID from auth context or generate
+            user_context = getattr(getattr(request, "state", None), "user", None)
+            client_id = (
+                user_context.get("sub") if user_context else f"anonymous-{correlation_id[:8]}"
+            )
+
+            logger.info(
+                "SSE subscription request received",
+                extra={
+                    "client_id": client_id,
+                    "resource_uri": resource_uri,
+                    "correlation_id": correlation_id,
+                },
+            )
+
+            # Create subscription
+            try:
+                subscription = await self.sse_manager.subscribe(
+                    client_id=client_id,
+                    resource_uri=resource_uri,
+                )
+            except ValueError as e:
+                # Subscription limit exceeded
+                return JSONResponse(
+                    {
+                        "error": str(e),
+                        "code": "SUBSCRIPTION_LIMIT_EXCEEDED",
+                    },
+                    status_code=429,
+                    headers={"X-Correlation-ID": correlation_id},
+                )
+
+            # Stream events to client
+            async def event_generator() -> AsyncIterator[dict[str, str]]:
+                """Generate SSE events for this subscription."""
+                async for event in self.sse_manager.stream_events(subscription):
+                    # Format as SSE event
+                    yield {
+                        "event": event.get("event", "update"),
+                        "data": json.dumps(event.get("data", {})),
+                    }
+
+            return EventSourceResponse(
+                event_generator(),
+                headers={
+                    "X-Correlation-ID": correlation_id,
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",  # Disable nginx buffering
+                },
+            )
+
+        except json.JSONDecodeError:
+            return JSONResponse(
+                {
+                    "error": "Invalid JSON in request body",
+                    "code": "PARSE_ERROR",
+                },
+                status_code=400,
+                headers={"X-Correlation-ID": correlation_id},
+            )
+        except Exception as e:
+            logger.error(
+                f"Error handling SSE subscription: {e}",
+                extra={"correlation_id": correlation_id},
+                exc_info=True,
+            )
+            return JSONResponse(
+                {
+                    "error": "Internal server error",
+                    "code": "INTERNAL_ERROR",
+                    "detail": str(e),
+                },
+                status_code=500,
+                headers={"X-Correlation-ID": correlation_id},
+            )
 
 
 __all__ = ["HTTPSSETransport"]
