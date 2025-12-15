@@ -24,6 +24,7 @@ You implement continuous integration, packaging, and release automation.
 ### Current State
 
 The repository currently has:
+
 - `.github/workflows/copilot-setup-steps.yml` - Reusable workflow for CI setup and testing
 
 ### 1. CI Workflow (`.github/workflows/ci.yml` - to be created)
