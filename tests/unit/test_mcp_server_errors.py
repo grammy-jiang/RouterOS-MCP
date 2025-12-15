@@ -116,6 +116,7 @@ async def test_service_health_tool():
 
 @pytest.mark.asyncio
 async def test_start_not_implemented_transport(monkeypatch: pytest.MonkeyPatch):
+    """Test that HTTP transport raises RuntimeError when MCP doesn't support it."""
     settings = Settings()
     settings.mcp_transport = "http"
 
@@ -138,7 +139,8 @@ async def test_start_not_implemented_transport(monkeypatch: pytest.MonkeyPatch):
         server_module, "register_audit_resources", lambda *args, **kwargs: None, raising=False
     )
 
-    with pytest.raises(NotImplementedError):
+    # HTTP transport now implemented, but FakeMCP doesn't have run_http_async
+    with pytest.raises(RuntimeError, match="does not support HTTP transport"):
         await server.start()
 
 
