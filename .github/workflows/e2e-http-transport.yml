@@ -69,8 +69,8 @@ jobs:
           timeout 60 bash -c 'until curl -f http://localhost:18080/default/.well-known/openid-configuration 2>/dev/null; do sleep 2; done'
           echo "Mock OIDC is ready"
           
-          # Wait for RouterOS-MCP HTTP server (health endpoint)
-          timeout 60 bash -c 'until curl -f http://localhost:18765/mcp/health 2>/dev/null; do sleep 2; done'
+          # Wait for RouterOS-MCP HTTP server (port listening)
+          timeout 60 bash -c 'until nc -z localhost 18765 2>/dev/null; do sleep 2; done'
           echo "RouterOS-MCP HTTP server is ready"
       
       - name: Display service logs (for debugging)

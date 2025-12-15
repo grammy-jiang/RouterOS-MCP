@@ -97,7 +97,9 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8765/mcp/health"]
+      # Note: Health endpoint may not be exposed by FastMCP in Phase 2
+      # For now, just check if the port is listening
+      test: ["CMD", "sh", "-c", "nc -z localhost 8765 || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 15
