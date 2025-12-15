@@ -623,6 +623,43 @@ When MCP tool execution fails:
    mcp-inspector "uv run python -m routeros_mcp.main -- --config config/lab.yaml"
    ```
 
+## Developer utility scripts (`scripts/`)
+
+These scripts are intentionally included in the repository to accelerate developer workflows, local testing, and operational sanity checks. They are not part of the production service runtime and should be used with care in production environments.
+
+Why include scripts?
+
+- Make common tasks reproducible and shareable across the team
+- Reduce friction for onboarding and demos
+- Provide concrete examples of interacting with domain services and the DB session manager
+
+Scripts:
+
+- `scripts/add_device.py`
+  - Purpose: Register a RouterOS device in the MCP database and add a REST credential.
+  - When to use: Lab onboarding, quick demos, e2e tests.
+  - Notes: Encrypts credentials at rest (ensure encryption key in non-lab). Can attempt RouterOS identity fetch via SSH if name/id not provided.
+
+- `scripts/test_connectivity.py`
+  - Purpose: Sanity check that a registered device is reachable via the DeviceService.
+  - When to use: After adding a device or when validating network/config during development.
+  - Notes: Returns a simple reachable flag and metadata for quick diagnostics.
+
+- `scripts/run_mcp_streamable_http.py`
+  - Purpose: Launch MCP over HTTP/SSE for tools that require a network endpoint.
+  - When to use: Editor integrations that don’t support stdio transports.
+  - Notes: Forces `mcp_transport: http`. For production, enable OAuth/OIDC and place behind secure ingress.
+
+- `scripts/fix_credential_type.py`
+  - Purpose: One-off helper to normalize `credential_type` values (e.g., `rest` -> `ssh`).
+  - When to use: After schema/data changes or early development when mismatches may exist.
+  - Notes: Direct DB mutation; prefer lab/staging. Pass `--from-type`/`--to-type` to customize mapping.
+
+General guidance:
+
+- Treat these scripts as operator utilities. Prefer the main CLI/admin API for day-to-day operations when available.
+- Review code and flags before running in production. Many scripts default to `config/lab.yaml` for safety.
+
 ### Local health checks
 
 After starting the service, you should be able to:

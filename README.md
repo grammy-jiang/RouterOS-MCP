@@ -14,21 +14,82 @@ All design decisions for the 1.x line are captured in the [`docs/`](docs/) direc
 
 ## Key Features
 
+### Phase 1 (COMPLETED)
+
 - ✅ **MCP Protocol Compliant** – Full support for tools, resources, and prompts
-- ✅ **Dual Transport** – Stdio (local development) and HTTP/SSE (production)
-- ✅ **OAuth/OIDC Authentication** – Enterprise-ready security via external IdP
+- ✅ **STDIO Transport** – Fully functional local development transport
+- ✅ **39 Tools Implemented** – Fundamental, advanced, and professional tiers
+- ✅ **12+ Resources** – Device, fleet, plan, and audit resources
+- ✅ **8 Prompts** – Guided workflows for common operations
 - ✅ **Role-Based Authorization** – Three tiers (fundamental/advanced/professional)
 - ✅ **Environment Separation** – Lab, staging, production with capability flags
 - ✅ **Plan/Apply Workflows** – Safe multi-device operations with approvals
 - ✅ **Comprehensive Observability** – Structured logging, metrics, tracing
-- ✅ **Test-Driven Development** – 85%+ coverage for non-core modules, 95%+ (aiming for 100%) for core modules, with tests exercising all return and exception paths
+- ✅ **Test-Driven Development** – 85%+ coverage for non-core, 95%+ for core modules
 
-## Current Phase 1 surface area (matches running implementation)
+### Phase 2 (CURRENT - In Progress)
 
-- **Tools (34 registered):** platform helpers (echo, service health), device registry, system, interface, IP, DNS/NTP, routing, firewall/logs, firewall write, and professional DNS/NTP rollout workflow. Diagnostics (`ping`, `traceroute`) exist in code but are **not registered** yet. See [docs/04](docs/04-mcp-tools-interface-and-json-schema-specification.md#phase-1-current-implementation-tool-snapshot) for the authoritative list.
-- **Resources (13 templates + 1 concrete):** the concrete resource `fleet://health-summary` shows up in `resources/list`; the remaining templated URIs (device/fleet/plan/audit) appear via `resources/listTemplates` (e.g., `device://{device_id}/overview`, `plan://{plan_id}/details`). Details in [docs/15](docs/15-mcp-resources-and-prompts-design.md#phase-1-current-implementation-snapshot).
-- **Prompts (8):** address-list-sync, comprehensive-device-review, device-onboarding, dns-ntp-rollout, fleet-health-review, security-audit, troubleshoot-device, troubleshoot-dns-ntp.
-- **SSH fallbacks:** Read-only CLI commands (e.g., `/ip/route/print`, `/interface/print`, `/system/package/print`) are used when REST data is incomplete. Command coverage and descriptions live in [docs/15](docs/15-mcp-resources-and-prompts-design.md#ssh-commands-used-by-phase-1-resourcestools-reference).
+- ⚠️ **HTTP/SSE Transport** – Scaffold exists, needs completion
+  - Add `sse-starlette` dependency
+  - Integrate with FastMCP request handling
+  - OAuth/OIDC middleware implementation
+  - Resource subscription via SSE
+- 🔜 **Read-Only Expansion** – Wireless, DHCP, bridge visibility
+  - 6 new read-only tools for network topology
+  - Additional troubleshooting prompts
+- 🔜 **Resource Optimization** – Caching and performance
+  - TTL-based resource cache
+  - Cache invalidation on state changes
+  - Subscription support
+
+### Phase 3+ (Future)
+
+- 🔮 Network diagnostics (ping/traceroute/bandwidth-test)
+- 🔮 SSH key authentication
+- 🔮 Advanced firewall write operations
+- 🔮 Client compatibility modes
+
+## Current Implementation Status
+
+### Phase 1 (COMPLETED)
+
+**MCP Surface:**
+
+- **39 Tools (registered):** Platform helpers (echo, service health), device management, system, interface, IP, DNS/NTP, routing, firewall/logs, firewall write, and professional DNS/NTP rollout workflows
+- **12+ Resources (templates + 1 concrete):** Concrete resource `fleet://health-summary` plus templated URIs for device/fleet/plan/audit (e.g., `device://{device_id}/overview`, `plan://{plan_id}/details`)
+- **8 Prompts:** address-list-sync, comprehensive-device-review, device-onboarding, dns-ntp-rollout, fleet-health-review, security-audit, troubleshoot-device, troubleshoot-dns-ntp
+- **Transport:** STDIO fully functional (HTTP/SSE scaffold exists but not wired)
+
+**SSH Fallbacks:**
+
+- Read-only CLI commands (e.g., `/ip/route/print`, `/interface/print`, `/system/package/print`) used when REST data is incomplete
+- Details in [docs/15](docs/15-mcp-resources-and-prompts-design.md#ssh-commands-used-by-phase-1-resourcestools-reference)
+
+### Phase 2 (IN PROGRESS)
+
+**HTTP/SSE Transport Completion:**
+
+- [ ] Add `sse-starlette` dependency
+- [ ] Complete `_process_mcp_request()` integration with FastMCP
+- [ ] Wire HTTP mode in `mcp/server.py`
+- [ ] OAuth/OIDC middleware
+- [ ] Resource subscription via SSE
+- [ ] E2E testing
+
+**Read-Only Expansion:**
+
+- [ ] `wireless/get-interfaces` + `wireless/get-clients`
+- [ ] `dhcp/get-server-status` + `dhcp/get-leases`
+- [ ] `bridge/list-bridges` + `bridge/list-ports`
+- [ ] Wireless/DHCP troubleshooting prompts
+
+**Resource Optimization:**
+
+- [ ] Resource cache with TTL
+- [ ] Cache invalidation
+- [ ] Performance benchmarking
+
+See [docs/04](docs/04-mcp-tools-interface-and-json-schema-specification.md#phase-1-current-implementation-tool-snapshot) for detailed tool list.
 
 ## Architecture Highlights
 
@@ -38,7 +99,8 @@ Built on the official **FastMCP SDK** for Python:
 
 - Zero-boilerplate tool registration via decorators
 - Automatic schema generation from type hints
-- Support for stdio (development) and HTTP/SSE (production) transports
+- STDIO transport fully implemented (Phase 1)
+- HTTP/SSE transport in progress (Phase 2)
 - MCP Inspector compatible for interactive testing
 
 ### Security Model
@@ -126,6 +188,13 @@ Detailed implementation guidelines:
 | [17](docs/17-configuration-specification.md)                             | **Configuration Specification**    | Settings class, CLI args, env vars, config files                                           |
 | [18](docs/18-database-schema-and-orm-specification.md)                   | **Database Schema & ORM**          | SQLAlchemy models, migrations, session management                                          |
 | [19](docs/19-json-rpc-error-codes-and-mcp-protocol-specification.md)     | **JSON-RPC Error Codes**           | Complete error taxonomy, protocol compliance                                               |
+
+### 📈 Planning & Best Practices
+
+- [docs/PHASE-2-PLAN.md](docs/PHASE-2-PLAN.md) – Phase 2 implementation plan and checklist
+- [docs/best_practice/vscode-copilot-custom-agents-best-practices.md](docs/best_practice/vscode-copilot-custom-agents-best-practices.md) – VS Code Copilot custom agents best practices
+- [GITHUB-COPILOT-AGENT-INSTRUCTIONS.md](GITHUB-COPILOT-AGENT-INSTRUCTIONS.md) – Copilot Coding Agent onboarding for this repo
+- [GITHUB-COPILOT-TASKS.md](GITHUB-COPILOT-TASKS.md) – Structured task list mapped to phases
 
 ### 📊 Key Design Enhancements
 
@@ -283,29 +352,6 @@ Future capabilities (implementation pending):
 - MCP tools, resources, and prompts
 - Claude Desktop integration
 
-### Development
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed development instructions.
-
-Quick commands:
-
-```bash
-# Run tests
-pytest
-
-# Run tests with coverage
-pytest --cov=routeros_mcp --cov-report=html
-
-# Type checking
-mypy routeros_mcp
-
-# Linting
-ruff check routeros_mcp
-
-# Code formatting
-black routeros_mcp
-```
-
 ## Development
 
 ### Run Tests
@@ -355,6 +401,8 @@ uv run alembic upgrade head
 # Rollback
 uv run alembic downgrade -1
 ```
+
+Note: For greenfield setups without legacy data, you can generate the initial migration on demand and keep `alembic/versions/` untracked until the schema stabilizes.
 
 ## Production Deployment
 
@@ -523,15 +571,18 @@ This design follows official MCP best practices from Anthropic:
 
 ---
 
-**Status**: ✅ **Design Complete** - This is a comprehensive, production-ready design specification with 20 numbered documents covering all aspects of the RouterOS MCP service. Implementation is organized in phases (0-5) as described in the roadmap above. The design incorporates official MCP best practices from Anthropic and follows industry standards for Python development.
+Phase 1 Complete, Phase 2 In Progress\*\* - This repository contains a production-ready design specification with 20 comprehensive documents. Phase 1 implementation is complete with 39 tools, 12+ resources, 8 prompts, and full STDIO transport. Phase 2 focuses on HTTP/SSE transport completion and read-only feature expansion.
 
-**Key Metrics**:
+**Key Metrics (Phase 1)**:
 
-- **46 MCP tools** (23 fundamental, 9 advanced, 14 professional)
-- **41 RouterOS REST endpoints** (25 read-only, 10 advanced writes, 6 high-risk)
-- **6 Phase-1 fallback tools** for tools-only client compatibility (ChatGPT, Mistral)
+- **39 MCP tools** (14 fundamental, 10 advanced, 8 professional, 6 fallbacks, 1 admin)
+- **12+ resource URIs** (device, fleet, plan, audit)
+- **8 prompts** for guided workflows
+- **STDIO transport** fully functional
+- **HTTP/SSE transport** scaffold exists (Phase 2 completion)
 - **20 design documents** (~50,000 lines) with comprehensive specifications
-- **3 security tiers** with OAuth 2.1 / OIDC integration
+- **3 security tiers** with OS-level auth (Phase 1) + OAuth 2.1/OIDC (Phase 2)
+- **Test coverage**: 80%+ overall (Phase 1), targeting 85% non-core / 95%+ core
 - **Test coverage targets**: at least 85% for non-core modules and at least 95% (ideally 100%) for core modules
 
 For questions or contributions, please open an issue or discussion on GitHub.
