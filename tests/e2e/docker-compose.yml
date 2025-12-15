@@ -1,0 +1,114 @@
+version: '3.8'
+
+# Docker Compose configuration for E2E testing of HTTP/SSE transport
+# 
+# This environment includes:
+# - RouterOS-MCP HTTP server
+# - Mock OIDC provider (for authentication tests)
+# - PostgreSQL database (optional, can use SQLite)
+# 
+# Usage:
+#   docker-compose -f tests/e2e/docker-compose.yml up -d
+#   pytest tests/e2e/test_http_transport_clients.py -v
+#   docker-compose -f tests/e2e/docker-compose.yml down
+
+services:
+  # Mock OIDC provider for authentication testing
+  mock-oidc:
+    image: ghcr.io/navikt/mock-oauth2-server:2.1.1
+    container_name: routeros-mcp-mock-oidc
+    ports:
+      - "18080:8080"
+    environment:
+      SERVER_PORT: 8080
+      JSON_CONFIG: |
+        {
+          "interactiveLogin": false,
+          "httpServer": "NettyWrapper",
+          "tokenCallbacks": []
+        }
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/default/.well-known/openid-configuration"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - mcp-test
+
+  # PostgreSQL database (optional - tests can use SQLite)
+  postgres:
+    image: postgres:16-alpine
+    container_name: routeros-mcp-postgres-test
+    ports:
+      - "15432:5432"
+    environment:
+      POSTGRES_DB: routeros_mcp_test
+      POSTGRES_USER: mcp_test
+      POSTGRES_PASSWORD: test_password_only_for_e2e
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mcp_test -d routeros_mcp_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - mcp-test
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  # RouterOS-MCP HTTP server
+  routeros-mcp:
+    build:
+      context: ../..
+      dockerfile: tests/e2e/Dockerfile.test
+    container_name: routeros-mcp-http-server
+    ports:
+      - "18765:8765"
+    environment:
+      # Transport configuration
+      ROUTEROS_MCP_TRANSPORT: http
+      ROUTEROS_MCP_HTTP_HOST: 0.0.0.0
+      ROUTEROS_MCP_HTTP_PORT: 8765
+      ROUTEROS_MCP_HTTP_BASE_PATH: /mcp
+      
+      # Environment
+      ROUTEROS_MCP_ENVIRONMENT: lab
+      
+      # Database (use SQLite for simplicity in tests)
+      ROUTEROS_MCP_DATABASE_URL: sqlite+aiosqlite:////tmp/routeros_mcp_test.db
+      # Or use PostgreSQL:
+      # ROUTEROS_MCP_DATABASE_URL: postgresql+asyncpg://mcp_test:test_password_only_for_e2e@postgres:5432/routeros_mcp_test
+      
+      # OIDC (disabled by default, enable in specific tests)
+      ROUTEROS_MCP_OIDC_ENABLED: "false"
+      ROUTEROS_MCP_OIDC_PROVIDER_URL: http://mock-oidc:8080/default
+      ROUTEROS_MCP_OIDC_CLIENT_ID: routeros-mcp-test
+      ROUTEROS_MCP_OIDC_AUDIENCE: routeros-mcp-test
+      ROUTEROS_MCP_OIDC_SKIP_VERIFICATION: "true"
+      
+      # Encryption key (test-only)
+      ROUTEROS_MCP_ENCRYPTION_KEY: dGVzdC1rZXktZm9yLWUyZS10ZXN0cy0zMi1ieXRlcy1sb25n
+      
+      # Logging
+      ROUTEROS_MCP_LOG_LEVEL: INFO
+      ROUTEROS_MCP_DEBUG: "false"
+    depends_on:
+      mock-oidc:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/mcp/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 10s
+    networks:
+      - mcp-test
+    command: python scripts/run_mcp_streamable_http.py
+
+networks:
+  mcp-test:
+    driver: bridge
+
+volumes:
+  postgres-data:

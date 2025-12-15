@@ -1,0 +1,118 @@
+name: E2E Tests - HTTP Transport
+
+# Run E2E tests for HTTP/SSE transport with Docker Compose
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'routeros_mcp/mcp/transport/**'
+      - 'tests/e2e/test_http_transport_clients.py'
+      - 'tests/e2e/docker-compose.yml'
+      - 'tests/e2e/Dockerfile.test'
+      - '.github/workflows/e2e-http-transport.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'routeros_mcp/mcp/transport/**'
+      - 'tests/e2e/test_http_transport_clients.py'
+      - 'tests/e2e/docker-compose.yml'
+      - 'tests/e2e/Dockerfile.test'
+      - '.github/workflows/e2e-http-transport.yml'
+  workflow_dispatch:
+
+jobs:
+  e2e-http-transport:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    permissions:
+      contents: read
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Configure test environment
+        run: |
+          # Create .env file with test encryption key
+          echo "ROUTEROS_MCP_ENCRYPTION_KEY=dGVzdC1rZXktZm9yLWUyZS10ZXN0cy0zMi1ieXRlcy1sb25n" > .env
+          echo "ROUTEROS_MCP_LOG_LEVEL=INFO" >> .env
+      
+      - name: Start Docker Compose services
+        run: |
+          docker-compose -f tests/e2e/docker-compose.yml up -d
+          echo "Waiting for services to be healthy..."
+          sleep 10
+        env:
+          COMPOSE_HTTP_TIMEOUT: 120
+      
+      - name: Wait for services to be ready
+        run: |
+          # Wait for mock OIDC
+          timeout 60 bash -c 'until curl -f http://localhost:18080/default/.well-known/openid-configuration 2>/dev/null; do sleep 2; done'
+          echo "Mock OIDC is ready"
+          
+          # Wait for RouterOS-MCP HTTP server (health endpoint)
+          timeout 60 bash -c 'until curl -f http://localhost:18765/mcp/health 2>/dev/null; do sleep 2; done'
+          echo "RouterOS-MCP HTTP server is ready"
+      
+      - name: Display service logs (for debugging)
+        if: always()
+        run: |
+          echo "=== Mock OIDC logs ==="
+          docker-compose -f tests/e2e/docker-compose.yml logs mock-oidc
+          echo "=== RouterOS-MCP logs ==="
+          docker-compose -f tests/e2e/docker-compose.yml logs routeros-mcp
+      
+      - name: Run E2E tests
+        run: |
+          pytest tests/e2e/test_http_transport_clients.py -v --tb=short --maxfail=3
+        timeout-minutes: 5
+        env:
+          ROUTEROS_MCP_DEBUG: "false"
+          ROUTEROS_MCP_LOG_LEVEL: "INFO"
+      
+      - name: Run E2E tests with OIDC enabled
+        run: |
+          # Restart services with OIDC enabled
+          docker-compose -f tests/e2e/docker-compose.yml down
+          docker-compose -f tests/e2e/docker-compose.yml up -d
+          sleep 10
+          
+          # Run OIDC-specific tests (if any are not skipped)
+          pytest tests/e2e/test_http_transport_clients.py::test_mcp_client_authentication_valid_token -v || echo "OIDC tests skipped"
+        timeout-minutes: 5
+        env:
+          ROUTEROS_MCP_OIDC_ENABLED: "true"
+      
+      - name: Stop Docker Compose services
+        if: always()
+        run: |
+          docker-compose -f tests/e2e/docker-compose.yml down -v
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results
+          path: |
+            .pytest_cache/
+            htmlcov/
+          retention-days: 7

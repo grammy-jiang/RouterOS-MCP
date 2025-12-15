@@ -1,0 +1,34 @@
+# Dockerfile for E2E testing of RouterOS-MCP HTTP transport
+# This image includes the application and all dependencies needed for testing
+
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy project files
+COPY pyproject.toml ./
+COPY README.md ./
+COPY routeros_mcp ./routeros_mcp
+COPY scripts ./scripts
+COPY alembic ./alembic
+COPY alembic.ini ./
+COPY config ./config
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -e .[dev]
+
+# Create directory for SQLite database
+RUN mkdir -p /tmp
+
+# Expose HTTP port
+EXPOSE 8765
+
+# Default command (can be overridden in docker-compose)
+CMD ["python", "scripts/run_mcp_streamable_http.py", "--config", "config/lab.yaml"]
