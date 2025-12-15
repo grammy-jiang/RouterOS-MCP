@@ -292,7 +292,7 @@ Types: feat, fix, docs, style, refactor, test, chore
 2. `docs/17-configuration-specification.md` - Config system, env vars, defaults
 3. `docs/10-testing-validation-and-sandbox-strategy-and-safety-nets.md` - Testing strategy
 4. `docs/04-mcp-tools-interface-and-json-schema-specification.md` - Tool contracts, schemas
-5. `GITHUB-COPILOT-TASKS.md` - Curated task list
+5. (Legacy Copilot task file removed)
 
 ## Trust These Instructions First
 

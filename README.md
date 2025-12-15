@@ -193,8 +193,7 @@ Detailed implementation guidelines:
 
 - [docs/PHASE-2-PLAN.md](docs/PHASE-2-PLAN.md) – Phase 2 implementation plan and checklist
 - [docs/best_practice/vscode-copilot-custom-agents-best-practices.md](docs/best_practice/vscode-copilot-custom-agents-best-practices.md) – VS Code Copilot custom agents best practices
-- [GITHUB-COPILOT-AGENT-INSTRUCTIONS.md](GITHUB-COPILOT-AGENT-INSTRUCTIONS.md) – Copilot Coding Agent onboarding for this repo
-- [GITHUB-COPILOT-TASKS.md](GITHUB-COPILOT-TASKS.md) – Structured task list mapped to phases
+- _Removed legacy Copilot agent instruction/task files_
 
 ### 📊 Key Design Enhancements
 
@@ -474,7 +473,7 @@ If you are implementing this service:
 
 ### 2. Use GitHub Copilot Agent for Implementation
 
-**📋 See [GITHUB-COPILOT-TASKS.md](GITHUB-COPILOT-TASKS.md) for structured implementation tasks.**
+**📋 Structured implementation tasks live in the design docs and issue tracker (legacy Copilot task file removed).**
 
 This file contains **13 tasks (Phase 0-2)** organized into 6-hour blocks for GitHub Copilot Agent:
 
@@ -497,7 +496,7 @@ Each task includes:
 
 ### 4. Implement Using Structured Tasks
 
-- Use tasks from [GITHUB-COPILOT-TASKS.md](GITHUB-COPILOT-TASKS.md)
+- Use the design docs and current issue tracker for task breakdown (legacy Copilot task file removed)
 - Create GitHub issues for each task
 - Assign to GitHub Copilot Agent with custom prompts
 - Review output against design specifications

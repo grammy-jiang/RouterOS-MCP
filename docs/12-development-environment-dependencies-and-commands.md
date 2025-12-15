@@ -636,16 +636,19 @@ Why include scripts?
 Scripts:
 
 - `scripts/add_device.py`
+
   - Purpose: Register a RouterOS device in the MCP database and add a REST credential.
   - When to use: Lab onboarding, quick demos, e2e tests.
   - Notes: Encrypts credentials at rest (ensure encryption key in non-lab). Can attempt RouterOS identity fetch via SSH if name/id not provided.
 
 - `scripts/test_connectivity.py`
+
   - Purpose: Sanity check that a registered device is reachable via the DeviceService.
   - When to use: After adding a device or when validating network/config during development.
   - Notes: Returns a simple reachable flag and metadata for quick diagnostics.
 
 - `scripts/run_mcp_streamable_http.py`
+
   - Purpose: Launch MCP over HTTP/SSE for tools that require a network endpoint.
   - When to use: Editor integrations that don’t support stdio transports.
   - Notes: Forces `mcp_transport: http`. For production, enable OAuth/OIDC and place behind secure ingress.
