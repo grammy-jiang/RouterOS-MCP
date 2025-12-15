@@ -144,6 +144,7 @@ async def test_mcp_server_start_stdio(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.mark.asyncio
 async def test_mcp_server_start_http_not_implemented(monkeypatch: pytest.MonkeyPatch):
+    """Test that HTTP transport raises RuntimeError when MCP doesn't support it."""
     settings = Settings(mcp_transport="http")
     dummy_mcp = _DummyFastMCP()
 
@@ -177,7 +178,8 @@ async def test_mcp_server_start_http_not_implemented(monkeypatch: pytest.MonkeyP
 
     server = mcp_server.RouterOSMCPServer(settings)
 
-    with pytest.raises(NotImplementedError):
+    # HTTP transport now implemented, but _DummyFastMCP doesn't have run_http_async
+    with pytest.raises(RuntimeError, match="does not support HTTP transport"):
         await server.start()
 
 

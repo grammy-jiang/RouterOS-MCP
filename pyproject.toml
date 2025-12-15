@@ -31,6 +31,7 @@ dependencies = [
     # Web framework and ASGI server
     "fastapi>=0.109.0",
     "uvicorn[standard]>=0.27.0",
+    "sse-starlette>=1.6.0",
     
     # Data validation and settings
     "pydantic>=2.5.0",
