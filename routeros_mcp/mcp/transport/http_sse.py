@@ -409,8 +409,18 @@ class HTTPSSETransport:
         logger.info("Stopping HTTP/SSE transport server")
         # FastMCP handles cleanup in run_http_async
 
-    async def handle_subscribe(self, request: Request) -> EventSourceResponse:
+    async def handle_subscribe(
+        self, request: Request
+    ) -> EventSourceResponse | JSONResponse:
         """Handle SSE subscription request.
+
+        NOTE: This method is not currently registered as a route in FastMCP.
+        To enable SSE subscriptions, this endpoint needs to be registered with
+        FastMCP's router or a custom Starlette application. This is a placeholder
+        for future integration when custom routes are supported.
+
+        TODO: Wire this handler to POST /mcp/subscribe route once FastMCP supports
+        custom route registration or when using a custom Starlette application.
 
         POST /mcp/subscribe with JSON body:
         {

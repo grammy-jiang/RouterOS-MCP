@@ -95,6 +95,9 @@ class SSEManager:
         self._subscriptions_by_resource: dict[str, set[str]] = defaultdict(set)
         self._subscriptions_by_client: dict[str, set[str]] = defaultdict(set)
 
+        # Lock to prevent race conditions during subscription creation
+        self._subscription_lock = asyncio.Lock()
+
         # Debouncing state
         self._pending_updates: dict[str, dict[str, Any]] = {}
         self._debounce_tasks: dict[str, asyncio.Task[None]] = {}
@@ -129,43 +132,44 @@ class SSEManager:
         Raises:
             ValueError: If subscription limit exceeded for this device
         """
-        # Check subscription limits per device
-        device_id = self._extract_device_id(resource_uri)
-        if device_id:
-            device_subscriptions = sum(
-                1
-                for sub_id in self._subscriptions.values()
-                if self._extract_device_id(sub_id.resource_uri) == device_id
-            )
-
-            if device_subscriptions >= self.max_subscriptions_per_device:
-                raise ValueError(
-                    f"Subscription limit exceeded for device {device_id}: "
-                    f"{device_subscriptions} active (max: {self.max_subscriptions_per_device})"
+        async with self._subscription_lock:
+            # Check subscription limits per device
+            device_id = self._extract_device_id(resource_uri)
+            if device_id:
+                device_subscriptions = sum(
+                    1
+                    for sub_id in self._subscriptions.values()
+                    if self._extract_device_id(sub_id.resource_uri) == device_id
                 )
 
-        # Create subscription
-        subscription = SSESubscription(
-            client_id=client_id,
-            resource_uri=resource_uri,
-        )
+                if device_subscriptions >= self.max_subscriptions_per_device:
+                    raise ValueError(
+                        f"Subscription limit exceeded for device {device_id}: "
+                        f"{device_subscriptions} active (max: {self.max_subscriptions_per_device})"
+                    )
 
-        # Track subscription
-        self._subscriptions[subscription.subscription_id] = subscription
-        self._subscriptions_by_resource[resource_uri].add(subscription.subscription_id)
-        self._subscriptions_by_client[client_id].add(subscription.subscription_id)
+            # Create subscription
+            subscription = SSESubscription(
+                client_id=client_id,
+                resource_uri=resource_uri,
+            )
 
-        logger.info(
-            "Client subscribed to resource",
-            extra={
-                "subscription_id": subscription.subscription_id,
-                "client_id": client_id,
-                "resource_uri": resource_uri,
-                "total_subscriptions": len(self._subscriptions),
-            },
-        )
+            # Track subscription
+            self._subscriptions[subscription.subscription_id] = subscription
+            self._subscriptions_by_resource[resource_uri].add(subscription.subscription_id)
+            self._subscriptions_by_client[client_id].add(subscription.subscription_id)
 
-        return subscription
+            logger.info(
+                "Client subscribed to resource",
+                extra={
+                    "subscription_id": subscription.subscription_id,
+                    "client_id": client_id,
+                    "resource_uri": resource_uri,
+                    "total_subscriptions": len(self._subscriptions),
+                },
+            )
+
+            return subscription
 
     async def unsubscribe(self, subscription_id: str) -> None:
         """Unsubscribe and cleanup a subscription.
@@ -329,8 +333,6 @@ class SSEManager:
                 },
             }
 
-            last_ping = datetime.now(UTC)
-
             while True:
                 try:
                     # Wait for event with timeout for periodic pings
@@ -352,10 +354,8 @@ class SSEManager:
                             "timestamp": now.isoformat(),
                         },
                     }
-                    subscription.last_activity = now
-                    last_ping = now
 
-                    # Check for client timeout
+                    # Check for client timeout (based on last actual activity, not ping)
                     if self.client_timeout_seconds > 0:
                         inactive_seconds = (now - subscription.last_activity).total_seconds()
                         if inactive_seconds > self.client_timeout_seconds:

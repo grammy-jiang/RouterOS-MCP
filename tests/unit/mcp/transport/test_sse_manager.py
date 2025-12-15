@@ -54,9 +54,9 @@ async def test_subscribe_multiple_clients() -> None:
     """Test multiple clients can subscribe to the same resource."""
     manager = SSEManager()
 
-    sub1 = await manager.subscribe("client-1", "device://dev-001/health")
-    sub2 = await manager.subscribe("client-2", "device://dev-001/health")
-    sub3 = await manager.subscribe("client-3", "device://dev-002/health")
+    await manager.subscribe("client-1", "device://dev-001/health")
+    await manager.subscribe("client-2", "device://dev-001/health")
+    await manager.subscribe("client-3", "device://dev-002/health")
 
     assert manager.get_subscription_count() == 3
     assert manager.get_subscription_count("device://dev-001/health") == 2
@@ -294,12 +294,14 @@ async def test_subscription_cleanup_on_stream_cancel() -> None:
     try:
         await stream_gen.__anext__()
     except StopAsyncIteration:
+        # Stream may be exhausted; safe to ignore in test context
         pass
 
     # Close the generator which triggers cleanup
     try:
         await stream_gen.aclose()
     except Exception:  # noqa: S110
+        # Ignore any exceptions during cleanup
         pass
 
     # Give cleanup time to run
