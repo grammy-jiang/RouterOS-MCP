@@ -113,6 +113,10 @@ class Settings(BaseSettings):
 
     oidc_enabled: bool = Field(default=False, description="Enable OIDC authentication")
 
+    oidc_provider_url: str | None = Field(
+        default=None, description="OIDC provider URL (e.g., https://auth0.example.com)"
+    )
+
     oidc_issuer: str | None = Field(default=None, description="OIDC issuer URL")
 
     oidc_client_id: str | None = Field(default=None, description="OIDC client ID")
@@ -120,6 +124,10 @@ class Settings(BaseSettings):
     oidc_client_secret: str | None = Field(default=None, description="OIDC client secret")
 
     oidc_audience: str | None = Field(default=None, description="Expected token audience")
+
+    oidc_skip_verification: bool = Field(
+        default=False, description="Skip JWT signature verification (dev mode only, DANGEROUS)"
+    )
 
     # ========================================
     # RouterOS Integration
@@ -204,13 +212,21 @@ class Settings(BaseSettings):
         """Validate OIDC configuration if enabled."""
         if self.oidc_enabled:
             required_fields = {
-                "oidc_issuer": self.oidc_issuer,
+                "oidc_provider_url": self.oidc_provider_url,
                 "oidc_client_id": self.oidc_client_id,
-                "oidc_client_secret": self.oidc_client_secret,
             }
             missing = [k for k, v in required_fields.items() if not v]
             if missing:
                 raise ValueError(f"OIDC enabled but missing required fields: {', '.join(missing)}")
+
+            # Warn if skip_verification enabled
+            if self.oidc_skip_verification and self.environment in ["staging", "prod"]:
+                warnings.warn(
+                    "oidc_skip_verification=true in staging/prod is DANGEROUS and not recommended",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
         return self
 
     @model_validator(mode="after")
