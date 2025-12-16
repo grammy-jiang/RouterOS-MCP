@@ -9,6 +9,7 @@ from routeros_mcp.config import Settings
 from routeros_mcp.domain.services.job import JobService
 from routeros_mcp.domain.services.plan import PlanService
 from routeros_mcp.infra.db.session import DatabaseSessionManager
+from routeros_mcp.infra.observability.resource_cache import with_cache
 from routeros_mcp.mcp_resources.utils import format_resource_content
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,7 @@ def register_plan_resources(
     """
 
     @mcp.resource("plan://{plan_id}/summary")
+    @with_cache("plan://{plan_id}/summary")
     async def plan_summary(plan_id: str) -> str:
         """Plan summary with basic information.
 
@@ -79,6 +81,7 @@ def register_plan_resources(
             return format_resource_content(error_result, "application/json")
 
     @mcp.resource("plan://{plan_id}/details")
+    @with_cache("plan://{plan_id}/details")
     async def plan_details(plan_id: str) -> str:
         """Detailed plan information with per-device changes.
 
@@ -132,6 +135,7 @@ def register_plan_resources(
             return format_resource_content(error_result, "application/json")
 
     @mcp.resource("plan://{plan_id}/execution-log")
+    @with_cache("plan://{plan_id}/execution-log")
     async def plan_execution_log(plan_id: str) -> str:
         """Plan execution log with per-device results.
 

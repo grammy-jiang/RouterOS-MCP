@@ -193,6 +193,28 @@ class Settings(BaseSettings):
     )
 
     # ========================================
+    # Resource Cache Configuration
+    # ========================================
+
+    mcp_resource_cache_enabled: bool = Field(
+        default=True, description="Enable in-memory resource caching with TTL"
+    )
+
+    mcp_resource_cache_ttl_seconds: int = Field(
+        default=300,
+        ge=10,
+        le=3600,
+        description="Time-to-live for cached resource entries in seconds",
+    )
+
+    mcp_resource_cache_max_entries: int = Field(
+        default=1000,
+        ge=10,
+        le=10000,
+        description="Maximum number of cached entries (LRU eviction when exceeded)",
+    )
+
+    # ========================================
     # Security & Encryption
     # ========================================
 

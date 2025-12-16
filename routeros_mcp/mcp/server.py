@@ -272,6 +272,23 @@ require appropriate device capabilities and permissions.
         self.session_factory = await initialize_session_manager(self.settings)
         logger.info("Database session manager initialized")
 
+        # Initialize resource cache
+        from routeros_mcp.infra.observability.resource_cache import initialize_cache
+
+        initialize_cache(
+            ttl_seconds=self.settings.mcp_resource_cache_ttl_seconds,
+            max_entries=self.settings.mcp_resource_cache_max_entries,
+            enabled=self.settings.mcp_resource_cache_enabled,
+        )
+        logger.info(
+            "Resource cache initialized",
+            extra={
+                "enabled": self.settings.mcp_resource_cache_enabled,
+                "ttl_seconds": self.settings.mcp_resource_cache_ttl_seconds,
+                "max_entries": self.settings.mcp_resource_cache_max_entries,
+            },
+        )
+
         # Register resources (now that we have session_factory)
         from routeros_mcp.mcp_resources import (
             register_device_resources,

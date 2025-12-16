@@ -9,6 +9,7 @@ from routeros_mcp.config import Settings
 from routeros_mcp.domain.services.device import DeviceService
 from routeros_mcp.domain.services.health import HealthService
 from routeros_mcp.infra.db.session import DatabaseSessionManager
+from routeros_mcp.infra.observability.resource_cache import with_cache
 from routeros_mcp.mcp.errors import MCPError
 from routeros_mcp.mcp_resources.utils import format_resource_content
 
@@ -29,6 +30,7 @@ def register_fleet_resources(
     """
 
     @mcp.resource("fleet://health-summary")
+    @with_cache("fleet://health-summary")
     async def fleet_health_summary() -> str:
         """Fleet-wide health summary with aggregated metrics.
 
