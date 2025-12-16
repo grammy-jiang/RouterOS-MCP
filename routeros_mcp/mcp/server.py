@@ -98,6 +98,7 @@ require appropriate device capabilities and permissions.
             register_ip_tools,
             register_routing_tools,
             register_system_tools,
+            register_wireless_tools,
         )
 
         # Echo tool for testing
@@ -219,6 +220,7 @@ require appropriate device capabilities and permissions.
         register_firewall_logs_tools(self.mcp, self.settings)
         register_firewall_write_tools(self.mcp, self.settings)
         register_config_tools(self.mcp, self.settings)
+        register_wireless_tools(self.mcp, self.settings)
 
         logger.info("Registered all MCP tools")
 
@@ -272,6 +274,7 @@ require appropriate device capabilities and permissions.
             register_fleet_resources,
             register_plan_resources,
             register_audit_resources,
+            register_wireless_resources,
         )
 
         try:
@@ -279,6 +282,7 @@ require appropriate device capabilities and permissions.
             register_fleet_resources(self.mcp, self.session_factory, self.settings)
             register_plan_resources(self.mcp, self.session_factory, self.settings)
             register_audit_resources(self.mcp, self.session_factory, self.settings)
+            register_wireless_resources(self.mcp, self.session_factory, self.settings)
             logger.info("Registered MCP resources")
         except Exception as e:
             logger.error(f"Failed to register resources: {e}", exc_info=True)
