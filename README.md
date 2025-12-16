@@ -375,6 +375,77 @@ ruff check routeros_mcp
 black routeros_mcp
 ```
 
+### E2E Testing with HTTP Transport
+
+End-to-end tests for HTTP/SSE transport use Docker Compose to orchestrate a complete test environment including:
+- RouterOS-MCP HTTP server
+- Mock OIDC provider for authentication testing
+- PostgreSQL database (optional, can use SQLite)
+
+**Prerequisites:**
+- Docker and Docker Compose installed
+- Python dependencies installed (`pip install -e .[dev]`)
+
+**Run E2E tests locally:**
+
+```bash
+# Start Docker Compose services
+docker-compose -f tests/e2e/docker-compose.yml up -d
+
+# Wait for services to be healthy (about 10-15 seconds)
+sleep 15
+
+# Run E2E tests
+pytest tests/e2e/test_http_transport_clients.py -v
+
+# Stop services when done
+docker-compose -f tests/e2e/docker-compose.yml down
+```
+
+**Run E2E tests with one command:**
+
+```bash
+# Start services, run tests, and clean up
+docker-compose -f tests/e2e/docker-compose.yml up -d && \
+  sleep 15 && \
+  (pytest tests/e2e/test_http_transport_clients.py -v; EXIT_CODE=$?; docker-compose -f tests/e2e/docker-compose.yml down; exit $EXIT_CODE)
+```
+
+**Debug service logs:**
+
+```bash
+# View all service logs
+docker-compose -f tests/e2e/docker-compose.yml logs
+
+# View specific service logs
+docker-compose -f tests/e2e/docker-compose.yml logs routeros-mcp
+docker-compose -f tests/e2e/docker-compose.yml logs mock-oidc
+```
+
+**Test coverage:**
+
+The E2E test suite covers:
+- ✅ Direct HTTP JSON-RPC request handling
+- ✅ Connection timeout handling  
+- ✅ Correlation ID propagation
+- ✅ Concurrent request handling
+- ✅ Malformed JSON error handling
+- ⏭️ MCP client tool invocation (Phase 3: `device_list`)
+- ⏭️ MCP client tool with parameters (Phase 3: `device_get`)
+- ⏭️ MCP client resource fetching (Phase 3: `device://` URIs)
+- ⏭️ MCP client error handling (Phase 3: invalid device IDs)
+- ⏭️ OIDC authentication with valid tokens (Phase 3)
+- ⏭️ OIDC authentication with invalid tokens (Phase 3)
+
+**CI Integration:**
+
+E2E tests run automatically in GitHub Actions on:
+- Push to `main` or `develop` branches
+- Pull requests that modify transport or E2E test files
+- Manual workflow dispatch
+
+See `.github/workflows/e2e-http-transport.yml` for CI configuration.
+
 ### Linting and Formatting
 
 ```bash
