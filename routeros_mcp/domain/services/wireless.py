@@ -211,8 +211,9 @@ class WirelessService:
                     band = parts[idx + 3] if idx + 3 < len(parts) else ""
 
                     # Determine running and disabled status from flags
+                    # R = running, X = disabled, D = dynamic
                     running = "R" in flags
-                    disabled = "D" in flags
+                    disabled = "X" in flags
 
                     interfaces.append({
                         "id": iface_id,
@@ -322,16 +323,16 @@ class WirelessService:
                             "signal_strength": self._parse_signal_strength(
                                 client_entry.get("signal-strength", "")
                             ),
-                            "signal_to_noise": self._parse_signal_strength(
+                            "signal_to_noise": self._parse_snr(
                                 client_entry.get("signal-to-noise", "")
                             ),
                             "tx_rate": self._parse_rate(client_entry.get("tx-rate", "")),
                             "rx_rate": self._parse_rate(client_entry.get("rx-rate", "")),
                             "uptime": client_entry.get("uptime", ""),
-                            "bytes_sent": client_entry.get("bytes", 0),
-                            "bytes_received": client_entry.get("bytes", 0),
-                            "packets_sent": client_entry.get("packets", 0),
-                            "packets_received": client_entry.get("packets", 0),
+                            "bytes_sent": client_entry.get("tx-bytes", 0),
+                            "bytes_received": client_entry.get("rx-bytes", 0),
+                            "packets_sent": client_entry.get("tx-packets", 0),
+                            "packets_received": client_entry.get("rx-packets", 0),
                         })
 
             return result
@@ -429,6 +430,27 @@ class WirelessService:
             value_str = str(value).strip().lower()
             # Remove "dbm" suffix if present
             value_str = value_str.replace("dbm", "").replace("@", "").strip()
+            return int(value_str)
+        except (ValueError, AttributeError):
+            return 0
+
+    @staticmethod
+    def _parse_snr(value: Any) -> int:
+        """Parse signal-to-noise ratio value to integer.
+
+        SNR is typically a positive value representing the ratio between signal and noise.
+        """
+        if value is None or value == "":
+            return 0
+
+        if isinstance(value, int):
+            return value
+
+        # Parse string like "35" or "35dB"
+        try:
+            value_str = str(value).strip().lower()
+            # Remove "db" suffix if present
+            value_str = value_str.replace("db", "").strip()
             return int(value_str)
         except (ValueError, AttributeError):
             return 0

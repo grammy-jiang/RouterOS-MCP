@@ -63,8 +63,10 @@ class _FakeRestClient:
                     "tx-rate": "54Mbps",
                     "rx-rate": "54Mbps",
                     "uptime": "1h23m45s",
-                    "bytes": 1024000,
-                    "packets": 5000,
+                    "tx-bytes": 1024000,
+                    "rx-bytes": 2048000,
+                    "tx-packets": 5000,
+                    "rx-packets": 6000,
                 },
                 {
                     ".id": "*b",
@@ -75,8 +77,10 @@ class _FakeRestClient:
                     "tx-rate": "144.4Mbps",
                     "rx-rate": "144.4Mbps",
                     "uptime": "45m12s",
-                    "bytes": 512000,
-                    "packets": 2500,
+                    "tx-bytes": 512000,
+                    "rx-bytes": 768000,
+                    "tx-packets": 2500,
+                    "rx-packets": 3000,
                 },
             ],
         }
@@ -244,12 +248,17 @@ async def test_get_wireless_clients_via_rest():
     assert clients[0]["tx_rate"] == "54Mbps"
     assert clients[0]["rx_rate"] == "54Mbps"
     assert clients[0]["uptime"] == "1h23m45s"
+    assert clients[0]["bytes_sent"] == 1024000
+    assert clients[0]["bytes_received"] == 2048000
+    assert clients[0]["packets_sent"] == 5000
+    assert clients[0]["packets_received"] == 6000
     assert clients[0]["transport"] == "rest"
 
     # Check second client
     assert clients[1]["id"] == "*b"
     assert clients[1]["mac_address"] == "77:88:99:aa:bb:cc"
     assert clients[1]["signal_strength"] == -72
+    assert clients[1]["signal_to_noise"] == 28
     assert clients[1]["tx_rate"] == "144.4Mbps"
 
     # Verify REST API was called
@@ -300,6 +309,15 @@ def test_parse_signal_strength():
     assert WirelessService._parse_signal_strength(None) == 0
 
 
+def test_parse_snr():
+    """Test signal-to-noise ratio parsing."""
+    assert WirelessService._parse_snr("35") == 35
+    assert WirelessService._parse_snr("35dB") == 35
+    assert WirelessService._parse_snr(28) == 28
+    assert WirelessService._parse_snr("") == 0
+    assert WirelessService._parse_snr(None) == 0
+
+
 def test_parse_rate():
     """Test rate parsing."""
     assert WirelessService._parse_rate("54Mbps") == "54Mbps"
@@ -328,7 +346,7 @@ Columns: NAME, SSID, FREQUENCY, BAND
     assert interfaces[1]["name"] == "wlan2"
     assert interfaces[1]["ssid"] == "GuestNetwork"
     assert interfaces[1]["running"] is False
-    assert interfaces[1]["disabled"] is True
+    assert interfaces[1]["disabled"] is False
 
 
 def test_parse_wireless_clients_output():
