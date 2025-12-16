@@ -22,6 +22,7 @@ from routeros_mcp.mcp_tools.interface import register_interface_tools
 from routeros_mcp.mcp_tools.ip import register_ip_tools
 from routeros_mcp.mcp_tools.routing import register_routing_tools
 from routeros_mcp.mcp_tools.system import register_system_tools
+from routeros_mcp.mcp_tools.wireless import register_wireless_tools
 
 __all__ = [
     "register_config_tools",
@@ -34,4 +35,5 @@ __all__ = [
     "register_ip_tools",
     "register_routing_tools",
     "register_system_tools",
+    "register_wireless_tools",
 ]
