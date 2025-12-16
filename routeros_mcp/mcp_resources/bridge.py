@@ -10,10 +10,7 @@ from routeros_mcp.domain.services.bridge import BridgeService
 from routeros_mcp.domain.services.device import DeviceService
 from routeros_mcp.infra.db.session import DatabaseSessionManager
 from routeros_mcp.mcp.errors import DeviceNotFoundError, MCPError
-from routeros_mcp.mcp_resources.utils import (
-    create_resource_metadata,
-    format_resource_content,
-)
+from routeros_mcp.mcp_resources.utils import format_resource_content
 
 logger = logging.getLogger(__name__)
 

@@ -138,10 +138,10 @@ class TestBridgeToolsE2E(unittest.TestCase):
         self.session_factory = FakeSessionFactory()
         self.settings = Settings(environment="lab")
 
-    @patch("routeros_mcp.domain.services.device.DeviceService")
-    @patch("routeros_mcp.domain.services.bridge.BridgeService")
-    @patch("routeros_mcp.infra.db.session.get_session_factory")
-    async def test_list_bridges_e2e(self, mock_get_session_factory, mock_bridge_service, mock_device_service):
+    @patch("routeros_mcp.mcp_tools.bridge.get_session_factory")
+    @patch("routeros_mcp.mcp_tools.bridge.BridgeService")
+    @patch("routeros_mcp.mcp_tools.bridge.DeviceService")
+    async def test_list_bridges_e2e(self, mock_device_service, mock_bridge_service, mock_get_session_factory):
         """Test end-to-end bridge listing workflow."""
         # Set up mocks
         mock_get_session_factory.return_value = self.session_factory
@@ -184,11 +184,11 @@ class TestBridgeToolsE2E(unittest.TestCase):
         self.assertTrue(bridges[1]["vlan_filtering"])
         self.assertEqual(bridges[1]["comment"], "VLAN bridge")
 
-    @patch("routeros_mcp.domain.services.device.DeviceService")
-    @patch("routeros_mcp.domain.services.bridge.BridgeService")
-    @patch("routeros_mcp.infra.db.session.get_session_factory")
+    @patch("routeros_mcp.mcp_tools.bridge.get_session_factory")
+    @patch("routeros_mcp.mcp_tools.bridge.BridgeService")
+    @patch("routeros_mcp.mcp_tools.bridge.DeviceService")
     async def test_list_bridge_ports_e2e(
-        self, mock_get_session_factory, mock_bridge_service, mock_device_service
+        self, mock_device_service, mock_bridge_service, mock_get_session_factory
     ):
         """Test end-to-end bridge port listing workflow."""
         # Set up mocks
@@ -240,11 +240,11 @@ class TestBridgeToolsE2E(unittest.TestCase):
         self.assertEqual(ports[2]["frame_types"], "admit-only-vlan-tagged")
         self.assertTrue(ports[2]["ingress_filtering"])
 
-    @patch("routeros_mcp.domain.services.device.DeviceService")
-    @patch("routeros_mcp.domain.services.bridge.BridgeService")
-    @patch("routeros_mcp.infra.db.session.get_session_factory")
+    @patch("routeros_mcp.mcp_tools.bridge.get_session_factory")
+    @patch("routeros_mcp.mcp_tools.bridge.BridgeService")
+    @patch("routeros_mcp.mcp_tools.bridge.DeviceService")
     async def test_bridge_tools_combined_workflow(
-        self, mock_get_session_factory, mock_bridge_service, mock_device_service
+        self, mock_device_service, mock_bridge_service, mock_get_session_factory
     ):
         """Test combined workflow: list bridges then list ports."""
         # Set up mocks

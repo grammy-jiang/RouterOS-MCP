@@ -198,7 +198,7 @@ class BridgeService:
 
                 # Check if second part contains flags (one or more flag characters)
                 flags = ""
-                if len(parts) > 1 and all(c in "RDSXrdsx " for c in parts[1]):
+                if len(parts) > 1 and len(parts[1]) <= 3 and all(c in "RDSXrdsx " for c in parts[1]):
                     flags = parts[1].replace(" ", "")
                     idx = 2
 
@@ -401,7 +401,7 @@ class BridgeService:
 
                 # Check if second part contains flags
                 flags = ""
-                if len(parts) > 1 and all(c in "HIDhid " for c in parts[1]):
+                if len(parts) > 1 and len(parts[1]) <= 3 and all(c in "HIDhid " for c in parts[1]):
                     flags = parts[1].replace(" ", "")
                     idx = 2
 

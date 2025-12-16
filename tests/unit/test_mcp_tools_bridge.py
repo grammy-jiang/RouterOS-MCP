@@ -6,8 +6,6 @@ import asyncio
 import unittest
 from unittest.mock import patch
 
-import pytest
-
 from routeros_mcp.config import Settings
 from routeros_mcp.mcp_tools import bridge as bridge_tools
 
