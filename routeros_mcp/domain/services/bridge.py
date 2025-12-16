@@ -413,22 +413,27 @@ class BridgeService:
                     # Remaining parts
                     remaining = parts[idx + 2:]
 
-                    # Parse remaining fields
+                    # Parse remaining fields in order: hw, pvid, priority, path-cost
                     hw = True
                     pvid = 1
                     priority = "0x80"
                     path_cost = 10
 
-                    for i, field in enumerate(remaining):
+                    field_idx = 0
+                    for field in remaining:
                         if field in ("yes", "no"):
                             hw = field == "yes"
+                            field_idx += 1
                         elif field.isdigit():
-                            if pvid == 1:
+                            # First number is PVID, second is path-cost
+                            if field_idx == 1:
                                 pvid = int(field)
-                            elif path_cost == 10:
+                            elif field_idx == 3:
                                 path_cost = int(field)
+                            field_idx += 1
                         elif field.startswith("0x"):
                             priority = field
+                            field_idx += 1
 
                     # Determine disabled status from flags
                     disabled = "D" in flags
