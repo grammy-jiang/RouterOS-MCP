@@ -469,6 +469,90 @@ ruff check routeros_mcp
 black routeros_mcp
 ```
 
+### Performance Testing
+
+Phase 2 introduces performance benchmarks and load tests to validate caching improvements:
+
+#### Run Load Tests
+
+Simulate 100 devices and 10 concurrent clients:
+
+```bash
+# Full 5-minute load test
+python tests/e2e/load_test.py
+
+# Or run via pytest
+pytest tests/e2e/load_test.py::test_load_test_5_minutes -v
+
+# Quick 30-second test for development
+pytest tests/e2e/load_test.py::test_load_test_quick -v
+```
+
+**Acceptance Criteria:**
+- Load test runs 5 minutes without errors
+- Cache hit rate >70%
+- Resource fetch latency <1s (95th percentile)
+- No memory leaks detected
+
+#### Run Benchmarks
+
+Single-device baseline performance tests:
+
+```bash
+# Run all benchmarks
+python tests/e2e/benchmark_test.py
+
+# Or run via pytest
+pytest tests/e2e/benchmark_test.py -v
+
+# Run specific benchmark
+pytest tests/e2e/benchmark_test.py::test_benchmark_resource_fetch_latency -v
+```
+
+**Benchmarks include:**
+- Resource fetch latency (with/without cache)
+- Cache hit rate validation
+- Memory leak detection
+
+#### Generate Performance Report
+
+Generate comprehensive report with graphs:
+
+```bash
+# Generate report from benchmark results
+python scripts/benchmark_report.py \
+    --benchmark reports/benchmark_results.json \
+    --load-test reports/load_test_results.json \
+    --output reports/phase2_benchmark.md
+
+# Compare against baseline (Phase 1)
+python scripts/benchmark_report.py \
+    --benchmark reports/benchmark_results.json \
+    --baseline reports/phase1_baseline.json \
+    --output reports/comparison_report.md
+
+# Generate JSON report
+python scripts/benchmark_report.py \
+    --benchmark reports/benchmark_results.json \
+    --output reports/phase2_benchmark.json \
+    --format json
+```
+
+**Report includes:**
+- Latency graphs (p50, p95, p99)
+- Cache hit rate visualization
+- Memory usage tracking
+- Comparison with Phase 1 baseline (if available)
+- Phase 2 acceptance criteria validation
+
+#### Performance Targets (Phase 2)
+
+- **Resource fetch latency:** <1s (95th percentile)
+- **Cache hit rate:** >70%
+- **Throughput:** >100 requests/second (10 concurrent clients)
+- **Memory:** No leaks, <50MB increase per 1000 requests
+- **Error rate:** <5%
+
 ### E2E Testing with HTTP Transport
 
 End-to-end tests for HTTP/SSE transport use Docker Compose to orchestrate a complete test environment including:
