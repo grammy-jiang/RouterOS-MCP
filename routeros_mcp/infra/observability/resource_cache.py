@@ -44,7 +44,9 @@ class ResourceCache:
 
     Example:
         cache = ResourceCache(ttl_seconds=300, max_entries=1000)
-        await cache.set("device://dev1/overview", "value_data", "dev1")
+        # Store data: set(resource_uri, value, resource_id)
+        await cache.set("device://dev1/overview", "cached_data", "dev1")
+        # Retrieve data: get(resource_uri, resource_id)
         result = await cache.get("device://dev1/overview", "dev1")
     """
 
