@@ -17,6 +17,7 @@ See docs/10-testing-validation-and-sandbox-strategy-and-safety-nets.md for testi
 import asyncio
 import json
 import logging
+import os
 import random
 import statistics
 import time
@@ -451,6 +452,10 @@ async def run_load_test(
 
 @pytest.mark.asyncio
 @pytest.mark.e2e
+@pytest.mark.skipif(
+    os.getenv("RUN_LONG_LOAD_TEST") != "1",
+    reason="5-minute load test disabled by default; set RUN_LONG_LOAD_TEST=1 to enable",
+)
 async def test_load_test_5_minutes():
     """Run 5-minute load test with 100 devices and 10 clients."""
     metrics = await run_load_test(
