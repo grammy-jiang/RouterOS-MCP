@@ -171,6 +171,13 @@ cache_evictions_total = Counter(
     registry=_registry,
 )
 
+cache_invalidations_total = Counter(
+    "routeros_mcp_cache_invalidations_total",
+    "Total number of cache invalidations by service",
+    ["service", "reason"],
+    registry=_registry,
+)
+
 cache_fetch_duration_seconds = Histogram(
     "routeros_mcp_cache_fetch_duration_seconds",
     "Duration of resource fetch operations (cache + RouterOS)",
@@ -437,6 +444,16 @@ def update_cache_size(size: int) -> None:
     cache_size_entries.set(size)
 
 
+def record_cache_invalidation(service: str, reason: str = "state_change") -> None:
+    """Record a cache invalidation event.
+
+    Args:
+        service: Service that triggered invalidation (e.g., "dns_ntp", "firewall", "device")
+        reason: Reason for invalidation (e.g., "state_change", "manual", "config_update")
+    """
+    cache_invalidations_total.labels(service=service, reason=reason).inc()
+
+
 __all__ = [
     "get_registry",
     "get_metrics_text",
@@ -453,4 +470,5 @@ __all__ = [
     "record_cache_eviction",
     "record_cache_fetch",
     "update_cache_size",
+    "record_cache_invalidation",
 ]

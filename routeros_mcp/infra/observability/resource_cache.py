@@ -195,9 +195,80 @@ class ResourceCache:
         async with self._lock:
             if key in self._cache:
                 del self._cache[key]
-                logger.debug(f"Cache invalidated: {key}")
+                metrics.update_cache_size(len(self._cache))
+                logger.info(f"Cache invalidated: {key}")
                 return True
             return False
+
+    async def invalidate_device(self, device_id: str) -> int:
+        """Invalidate all cache entries for a specific device.
+
+        Args:
+            device_id: Device identifier
+
+        Returns:
+            Number of entries invalidated
+        """
+        if not self._enabled:
+            return 0
+
+        async with self._lock:
+            # Find all keys for this device
+            # Keys are in format: "resource_uri:resource_id" or "resource_uri" (no resource_id)
+            # We need exact match on the resource_id part to avoid matching "dev1" with "dev10"
+            keys_to_invalidate = [
+                key for key in self._cache.keys()
+                if (
+                    # Exact match on resource_id part after colon
+                    key.endswith(f":{device_id}")
+                    # Or exact match in URI part (device://DEVICE_ID/)
+                    or f"device://{device_id}/" in key
+                )
+            ]
+
+            for key in keys_to_invalidate:
+                del self._cache[key]
+
+            count = len(keys_to_invalidate)
+            if count > 0:
+                metrics.update_cache_size(len(self._cache))
+                logger.info(
+                    f"Cache invalidated for device: {device_id} ({count} entries)",
+                    extra={"device_id": device_id, "invalidated_count": count}
+                )
+
+            return count
+
+    async def invalidate_pattern(self, pattern: str) -> int:
+        """Invalidate cache entries matching a pattern.
+
+        Args:
+            pattern: Pattern to match (substring match in cache key)
+
+        Returns:
+            Number of entries invalidated
+        """
+        if not self._enabled:
+            return 0
+
+        async with self._lock:
+            keys_to_invalidate = [
+                key for key in self._cache.keys()
+                if pattern in key
+            ]
+
+            for key in keys_to_invalidate:
+                del self._cache[key]
+
+            count = len(keys_to_invalidate)
+            if count > 0:
+                metrics.update_cache_size(len(self._cache))
+                logger.info(
+                    f"Cache invalidated by pattern: {pattern} ({count} entries)",
+                    extra={"pattern": pattern, "invalidated_count": count}
+                )
+
+            return count
 
     async def clear(self) -> int:
         """Clear all cache entries.

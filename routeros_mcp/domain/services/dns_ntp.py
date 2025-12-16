@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from routeros_mcp.config import Settings
 from routeros_mcp.domain.services.device import DeviceService
+from routeros_mcp.infra.observability import metrics
 from routeros_mcp.infra.routeros.exceptions import (
     RouterOSClientError,
     RouterOSNetworkError,
@@ -852,6 +853,10 @@ class DNSNTPService:
                 extra={"device_id": device_id},
             )
 
+            # Invalidate DNS cache after successful update
+            if self.settings.mcp_resource_cache_auto_invalidate:
+                await self._invalidate_dns_cache(device_id)
+
             return {
                 "changed": True,
                 "old_servers": current_servers,
@@ -895,6 +900,10 @@ class DNSNTPService:
                 f"Flushed DNS cache ({entries_before} entries)",
                 extra={"device_id": device_id},
             )
+
+            # Invalidate DNS cache after flush
+            if self.settings.mcp_resource_cache_auto_invalidate:
+                await self._invalidate_dns_cache(device_id)
 
             return {
                 "changed": True,
@@ -986,6 +995,10 @@ class DNSNTPService:
                 extra={"device_id": device_id},
             )
 
+            # Invalidate NTP cache after successful update
+            if self.settings.mcp_resource_cache_auto_invalidate:
+                await self._invalidate_ntp_cache(device_id)
+
             return {
                 "changed": True,
                 "old_servers": current_servers,
@@ -996,3 +1009,53 @@ class DNSNTPService:
 
         finally:
             await client.close()
+
+    async def _invalidate_dns_cache(self, device_id: str) -> None:
+        """Invalidate DNS-related cache entries for a device.
+
+        Args:
+            device_id: Device identifier
+        """
+        try:
+            from routeros_mcp.infra.observability.resource_cache import get_cache
+
+            cache = get_cache()
+
+            # Invalidate DNS status and cache resources
+            count = 0
+            count += int(await cache.invalidate(f"device://{device_id}/dns-status", device_id))
+            count += int(await cache.invalidate(f"device://{device_id}/dns-cache", device_id))
+
+            if count > 0:
+                metrics.record_cache_invalidation("dns_ntp", "config_update")
+                logger.info(
+                    f"Invalidated DNS cache entries for device {device_id}",
+                    extra={"device_id": device_id, "invalidated_count": count}
+                )
+        except RuntimeError:
+            # Cache not initialized - skip invalidation
+            logger.debug("Cache not initialized, skipping DNS cache invalidation")
+
+    async def _invalidate_ntp_cache(self, device_id: str) -> None:
+        """Invalidate NTP-related cache entries for a device.
+
+        Args:
+            device_id: Device identifier
+        """
+        try:
+            from routeros_mcp.infra.observability.resource_cache import get_cache
+
+            cache = get_cache()
+
+            # Invalidate NTP status resources
+            invalidated = await cache.invalidate(f"device://{device_id}/ntp-status", device_id)
+
+            if invalidated:
+                metrics.record_cache_invalidation("dns_ntp", "config_update")
+                logger.info(
+                    f"Invalidated NTP cache entries for device {device_id}",
+                    extra={"device_id": device_id, "invalidated": invalidated}
+                )
+        except RuntimeError:
+            # Cache not initialized - skip invalidation
+            logger.debug("Cache not initialized, skipping NTP cache invalidation")

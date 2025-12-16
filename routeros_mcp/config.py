@@ -214,6 +214,11 @@ class Settings(BaseSettings):
         description="Maximum number of cached entries (LRU eviction when exceeded)",
     )
 
+    mcp_resource_cache_auto_invalidate: bool = Field(
+        default=True,
+        description="Automatically invalidate cache on device state changes",
+    )
+
     # ========================================
     # Security & Encryption
     # ========================================

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from routeros_mcp.config import Settings
 from routeros_mcp.domain.services.device import DeviceService
+from routeros_mcp.infra.observability import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +210,10 @@ class FirewallService:
                     extra={"device_id": device_id, "entry_id": result_id},
                 )
 
+                # Invalidate firewall cache after successful update
+                if self.settings.mcp_resource_cache_auto_invalidate:
+                    await self._invalidate_firewall_cache(device_id)
+
                 return {
                     "changed": True,
                     "action": action,
@@ -226,6 +231,10 @@ class FirewallService:
                     extra={"device_id": device_id, "entry_id": entry_id},
                 )
 
+                # Invalidate firewall cache after successful update
+                if self.settings.mcp_resource_cache_auto_invalidate:
+                    await self._invalidate_firewall_cache(device_id)
+
                 return {
                     "changed": True,
                     "action": action,
@@ -237,3 +246,27 @@ class FirewallService:
 
         finally:
             await client.close()
+
+    async def _invalidate_firewall_cache(self, device_id: str) -> None:
+        """Invalidate firewall-related cache entries for a device.
+
+        Args:
+            device_id: Device identifier
+        """
+        try:
+            from routeros_mcp.infra.observability.resource_cache import get_cache
+
+            cache = get_cache()
+
+            # Invalidate firewall address-list resources
+            count = await cache.invalidate_pattern(f"device://{device_id}/firewall")
+
+            if count > 0:
+                metrics.record_cache_invalidation("firewall", "config_update")
+                logger.info(
+                    f"Invalidated firewall cache entries for device {device_id}",
+                    extra={"device_id": device_id, "invalidated_count": count}
+                )
+        except RuntimeError:
+            # Cache not initialized - skip invalidation
+            logger.debug("Cache not initialized, skipping firewall cache invalidation")
