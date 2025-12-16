@@ -34,7 +34,7 @@ class ReportConfig:
     load_test_file: Optional[Path] = None
     baseline_file: Optional[Path] = None
     output_dir: Path = Path("reports")
-    format: str = "markdown"  # markdown, html, json
+    output_format: str = "markdown"  # markdown, html, json
     generate_graphs: bool = True
 
 
@@ -489,7 +489,7 @@ def main() -> int:
         load_test_file=args.load_test,
         baseline_file=args.baseline,
         output_dir=args.output.parent,
-        format=args.format,
+        output_format=args.format,
         generate_graphs=not args.no_graphs,
     )
 

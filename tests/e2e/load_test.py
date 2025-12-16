@@ -17,6 +17,7 @@ See docs/10-testing-validation-and-sandbox-strategy-and-safety-nets.md for testi
 import asyncio
 import json
 import logging
+import random
 import statistics
 import time
 from collections import defaultdict
@@ -157,8 +158,6 @@ class MockDeviceFactory:
 
     def _create_devices(self) -> None:
         """Create mock devices."""
-        from datetime import datetime
-        
         for i in range(self.num_devices):
             device = Device(
                 id=f"dev-load-{i:03d}",
@@ -184,8 +183,6 @@ class MockDeviceFactory:
 
     def get_random_device(self) -> Device:
         """Get a random device."""
-        import random
-
         return random.choice(self.devices)
 
     def create_system_overview_response(self, device: Device) -> Dict[str, Any]:
@@ -319,8 +316,6 @@ class ConcurrentClient:
         Args:
             duration_seconds: Duration to run in seconds (default 5 minutes)
         """
-        import random
-
         self.running = True
         end_time = time.time() + duration_seconds
 
