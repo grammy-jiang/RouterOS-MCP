@@ -124,7 +124,7 @@ def register_dhcp_tools(mcp: FastMCP, settings: Settings) -> None:
         Note: Only returns ACTIVE leases (status=bound). Expired or released leases are filtered out.
               Lease expiry is relative to last activity on RouterOS.
 
-        Tip: Use with system/get-arp-table to cross-reference active connections.
+        Tip: Use with ip/get-arp-table to cross-reference active connections.
 
         Args:
             device_id: Device identifier (e.g., 'dev-lab-01')
