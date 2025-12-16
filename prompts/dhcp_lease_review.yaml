@@ -1,0 +1,375 @@
+name: dhcp-lease-review
+description: Review DHCP lease assignments and identify potential conflicts or issues
+
+arguments:
+  - name: device_id
+    description: Device to review DHCP leases (optional, shows device selection if omitted)
+    type: string
+    required: false
+
+messages:
+  - role: user
+    content: |
+      # DHCP Lease Review Guide
+      {% if not device_id %}
+      
+      ## Getting Started
+      To review DHCP leases on a specific device, provide a `device_id` parameter.
+      
+      ### Find Devices with DHCP Servers
+      **Tool:** `device/list`
+      
+      ```json
+      {
+        "environment": "lab"
+      }
+      ```
+      
+      Review the list and identify devices running DHCP servers.
+      Once you have a device_id, re-run this prompt with that parameter.
+      
+      ## Why Review DHCP Leases?
+      
+      Regular DHCP lease review helps identify:
+      - IP address conflicts or duplicates
+      - Expired or stale leases
+      - Unexpected devices on the network
+      - DHCP pool exhaustion
+      - Devices using incorrect DHCP servers
+      - Lease time configuration issues
+      
+      {% else %}
+      
+      ## DHCP Lease Review: {{ device_name }}
+      
+      **Device ID:** {{ device_id }}
+      **Environment:** {{ device_environment }}
+      
+      ---
+      
+      ## Step-by-Step DHCP Review
+      
+      ### Step 1: Check DHCP Server Configuration
+      **Tool:** `dhcp/get-server-status`
+      
+      ```json
+      {
+        "device_id": "{{ device_id }}"
+      }
+      ```
+      
+      **Review:**
+      - How many DHCP servers are configured?
+      - Which interfaces are serving DHCP?
+      - What are the configured lease times?
+      - What address pools are in use?
+      - Are all servers enabled?
+      
+      **Key Points:**
+      - Multiple DHCP servers can exist on RouterOS
+      - Each server typically serves a different subnet
+      - Lease time affects how often clients renew
+      - Address pool should match network size
+      
+      ---
+      
+      ### Step 2: Review Active DHCP Leases
+      **Tool:** `dhcp/get-leases`
+      
+      ```json
+      {
+        "device_id": "{{ device_id }}"
+      }
+      ```
+      
+      **Review:**
+      - How many active leases are there?
+      - What IP addresses are assigned?
+      - What MAC addresses are present?
+      - What hostnames are associated with leases?
+      - Which DHCP server issued each lease?
+      
+      **Important Notes:**
+      - Only ACTIVE leases are shown (status=bound)
+      - Expired or released leases are filtered out
+      - Lease expiry is relative to last activity
+      
+      ---
+      
+      ### Step 3: Cross-Reference with Device Inventory
+      **Tool:** `system/get-arp-table`
+      
+      ```json
+      {
+        "device_id": "{{ device_id }}"
+      }
+      ```
+      
+      **Compare ARP table with DHCP leases:**
+      - Are all ARP entries accounted for in DHCP?
+      - Are there static IPs not in DHCP?
+      - Are there devices with IPs but no DHCP lease?
+      
+      **This helps identify:**
+      - Devices with static IPs
+      - Rogue DHCP clients
+      - IP conflicts
+      - Devices using wrong subnet
+      
+      ---
+      
+      ### Step 4: Check for IP Conflicts
+      
+      **Review DHCP leases for:**
+      
+      1. **Duplicate IP Addresses**
+         - Same IP assigned to multiple MAC addresses
+         - Indicates serious configuration issue
+         - **Action:** Investigate immediately
+      
+      2. **Duplicate MAC Addresses**
+         - Same MAC with multiple IPs
+         - May indicate lease renewal with new IP
+         - **Action:** Check DHCP server configuration
+      
+      3. **Missing Hostnames**
+         - Leases without hostname
+         - May indicate devices not sending DHCP hostname option
+         - **Action:** Document for inventory
+      
+      4. **Unexpected Devices**
+         - Unknown MAC addresses
+         - Hostnames not matching expected devices
+         - **Action:** Investigate and document
+      
+      ---
+      
+      ### Step 5: Check DHCP Pool Utilization
+      
+      **Calculate pool usage:**
+      
+      1. Count active leases per DHCP server
+      2. Compare with address pool size (from server status)
+      3. Calculate utilization percentage
+      
+      **Utilization Thresholds:**
+      - < 50%: Healthy, good capacity
+      - 50-70%: Moderate, monitor growth
+      - 70-85%: High, consider expanding pool
+      - > 85%: Critical, expand pool soon
+      - > 95%: Emergency, immediate action needed
+      
+      **If pool is exhausted:**
+      - Clients cannot get new leases
+      - Network connectivity issues for new devices
+      - **Action:** Expand address pool or reduce lease time
+      
+      ---
+      
+      ## Common DHCP Issues and Solutions
+      
+      ### Issue: IP Address Conflicts
+      
+      **Symptoms:**
+      - Same IP assigned to multiple devices
+      - Clients reporting duplicate IP warnings
+      - Intermittent connectivity
+      
+      **Diagnostic Steps:**
+      1. Review DHCP leases for duplicate IPs
+      2. Check ARP table for conflicts
+      3. Identify if static IPs overlap with DHCP pool
+      
+      **Resolution:**
+      - Remove duplicate static IP assignments
+      - Adjust DHCP pool to exclude static IP range
+      - Clear conflicting DHCP lease
+      - Verify DHCP server configuration
+      
+      ---
+      
+      ### Issue: DHCP Pool Exhaustion
+      
+      **Symptoms:**
+      - New clients cannot get IP addresses
+      - DHCP server shows no available addresses
+      - High lease count relative to pool size
+      
+      **Diagnostic Steps:**
+      1. Check pool utilization (active leases vs pool size)
+      2. Review lease times (very long leases hold addresses)
+      3. Identify stale leases (devices no longer on network)
+      
+      **Resolution:**
+      - Expand address pool range
+      - Reduce lease time to free addresses faster
+      - Clear expired or stale leases
+      - Implement lease reservations for critical devices
+      - Consider subnetting to add capacity
+      
+      ---
+      
+      ### Issue: Unexpected Devices
+      
+      **Symptoms:**
+      - Unknown MAC addresses in lease table
+      - Hostnames don't match expected inventory
+      - Devices from different VLANs appearing
+      
+      **Diagnostic Steps:**
+      1. Review all active leases
+      2. Cross-reference MAC addresses with known inventory
+      3. Check for rogue access points or devices
+      4. Review firewall logs for unauthorized access
+      
+      **Resolution:**
+      - Identify and document unknown devices
+      - Implement MAC address filtering if needed
+      - Remove unauthorized devices from network
+      - Enable DHCP snooping to prevent rogue DHCP servers
+      - Update device inventory
+      
+      ---
+      
+      ### Issue: Lease Renewal Failures
+      
+      **Symptoms:**
+      - Clients lose IP addresses unexpectedly
+      - Frequent lease churn in logs
+      - Clients requesting new leases frequently
+      
+      **Diagnostic Steps:**
+      1. Check DHCP server logs for errors
+      2. Review lease times (too short may cause issues)
+      3. Verify DHCP server is reachable
+      4. Check for network connectivity issues
+      
+      **Resolution:**
+      - Increase lease time for stable networks
+      - Verify DHCP server service is running
+      - Check firewall rules allow DHCP traffic (port 67/68)
+      - Ensure sufficient DHCP server capacity
+      
+      ---
+      
+      ### Issue: Wrong DHCP Server Responding
+      
+      **Symptoms:**
+      - Clients getting IPs from unexpected server
+      - IPs from wrong subnet
+      - Multiple DHCP servers on same network
+      
+      **Diagnostic Steps:**
+      1. Check if multiple DHCP servers are on same subnet
+      2. Review network topology for rogue DHCP servers
+      3. Verify relay agent configuration if using DHCP relay
+      
+      **Resolution:**
+      - Disable redundant DHCP servers
+      - Implement DHCP snooping to prevent rogue servers
+      - Configure DHCP relay properly
+      - Use VLANs to segregate DHCP scopes
+      
+      ---
+      
+      ## DHCP Best Practices
+      
+      ### Lease Time Configuration
+      - **Short-term networks (guest WiFi):** 1-4 hours
+      - **Office networks:** 8-24 hours
+      - **Stable networks:** 1-7 days
+      - **Static-like assignments:** Use DHCP reservations, not long leases
+      
+      ### Address Pool Planning
+      - Reserve 20-30% capacity above current usage
+      - Exclude static IP ranges from DHCP pools
+      - Document IP allocation scheme
+      - Use DHCP reservations for servers and infrastructure
+      
+      ### Monitoring and Maintenance
+      - Review DHCP leases weekly
+      - Monitor pool utilization monthly
+      - Clean up stale leases quarterly
+      - Audit unknown devices regularly
+      - Keep device inventory updated
+      
+      ---
+      
+      ## Review Checklist
+      
+      After completing DHCP lease review:
+      
+      - [ ] DHCP server configuration verified
+      - [ ] Active leases reviewed and documented
+      - [ ] No IP address conflicts detected
+      - [ ] Pool utilization is healthy (< 70%)
+      - [ ] All devices cross-referenced with ARP table
+      - [ ] Unknown devices identified and documented
+      - [ ] Lease times are appropriate for network type
+      - [ ] Address pools have adequate capacity
+      - [ ] No rogue DHCP servers detected
+      - [ ] Firewall rules allow DHCP traffic
+      
+      ---
+      
+      ## Next Steps
+      
+      ### If Issues Found:
+      
+      1. **Document findings:**
+         - List all conflicts and anomalies
+         - Record unknown devices
+         - Note pool utilization metrics
+      
+      2. **Prioritize resolutions:**
+         - Critical: IP conflicts, pool exhaustion
+         - High: Rogue devices, unauthorized servers
+         - Medium: Pool utilization warnings
+         - Low: Missing hostnames, documentation updates
+      
+      3. **Implement fixes:**
+         - Resolve conflicts immediately
+         - Expand pools if needed
+         - Update configurations
+         - Clean up stale entries
+      
+      4. **Verify fixes:**
+         - Re-run DHCP lease review
+         - Test client connectivity
+         - Monitor for recurring issues
+      
+      ### Preventive Measures:
+      
+      - Schedule regular DHCP reviews (weekly/monthly)
+      - Set up alerts for pool utilization thresholds
+      - Implement DHCP snooping where applicable
+      - Maintain up-to-date device inventory
+      - Document IP allocation scheme
+      - Use DHCP reservations for critical devices
+      
+      ---
+      
+      ## Related Resources and Prompts
+      - `device://{{ device_id }}/health` - Device health monitoring
+      - `device://{{ device_id }}/logs` - System logs for DHCP errors
+      - `audit://events/by-device/{{ device_id }}` - DHCP configuration changes
+      - `troubleshoot-device` prompt - General device diagnostics
+      - `troubleshoot-dns-ntp` prompt - DNS/NTP related issues
+      
+      ## Additional Tools for DHCP Management
+      - `interface/list` - Check interfaces serving DHCP
+      - `system/get-overview` - Verify device health
+      - `firewall/list-rules` - Check DHCP traffic rules
+      - `device/check-connectivity` - Verify device reachability
+      
+      {% endif %}
+
+template_vars:
+  device_name: "Unknown Device"
+  device_environment: "unknown"
+
+metadata:
+  category: troubleshooting
+  tier: fundamental
+  environments: [lab, staging, prod]
+  requires_approval: false
