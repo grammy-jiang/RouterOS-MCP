@@ -72,9 +72,10 @@ check_dependencies() {
         print_error "curl is not installed"
         exit 1
     fi
-    
+
     if ! command -v jq &> /dev/null; then
-        print_info "jq is not installed (optional, for pretty JSON output)"
+        print_error "jq is required (install with: sudo apt-get install jq)"
+        exit 1
     fi
 }
 
@@ -142,8 +143,17 @@ get_token_okta() {
 
 get_token_azure() {
     print_info "Requesting token from Azure AD..."
-    
-    response=$(curl -s -X POST "${OIDC_PROVIDER_URL}/token" \
+
+    token_base="${OIDC_PROVIDER_URL%/}"
+    if [[ "$token_base" == *"/oauth2/v2.0" ]]; then
+        token_url="${token_base}/token"
+    elif [[ "$token_base" == *"microsoftonline.com"* && "$token_base" == */v2.0 ]]; then
+        token_url="${token_base}/oauth2/v2.0/token"
+    else
+        token_url="${token_base}/token"
+    fi
+
+    response=$(curl -s -X POST "$token_url" \
         -H "Content-Type: application/x-www-form-urlencoded" \
         -d "client_id=${OIDC_CLIENT_ID}" \
         -d "client_secret=${OIDC_CLIENT_SECRET}" \

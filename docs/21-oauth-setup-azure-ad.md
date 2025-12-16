@@ -210,6 +210,8 @@ export ROUTEROS_MCP_OIDC_SKIP_VERIFICATION=false
 - `{tenant-id}` → Your Azure AD tenant ID (from Step 1.3)
 - `12345678-...` → Your application (client) ID (from Step 1.3)
 
+**Token endpoint note:** Azure AD's OAuth 2.0 token endpoint lives at `/oauth2/v2.0/token`. Example clients in this repo automatically derive that endpoint from a provider URL ending in `/v2.0`, so you do **not** need to embed `/oauth2/v2.0` in `ROUTEROS_MCP_OIDC_PROVIDER_URL`.
+
 ### 5.2 Alternative: Configuration File
 
 Create `config/azure-prod.yaml`:
