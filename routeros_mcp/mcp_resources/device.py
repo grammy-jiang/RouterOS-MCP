@@ -13,6 +13,7 @@ from routeros_mcp.domain.services.health import HealthService
 from routeros_mcp.domain.services.system import SystemService
 from routeros_mcp.infra.db.session import DatabaseSessionManager
 from routeros_mcp.infra.db.models import AuditEvent, Snapshot
+from routeros_mcp.infra.observability.resource_cache import with_cache
 from routeros_mcp.mcp.errors import DeviceNotFoundError, MCPError
 from routeros_mcp.mcp_resources.utils import (
     create_resource_metadata,
@@ -36,6 +37,7 @@ def register_device_resources(
     """
 
     @mcp.resource("device://{device_id}/overview")
+    @with_cache("device://{device_id}/overview")
     async def device_overview(device_id: str) -> str:
         """Device overview with system information and health status.
 
@@ -116,6 +118,7 @@ def register_device_resources(
                 )
 
     @mcp.resource("device://{device_id}/health")
+    @with_cache("device://{device_id}/health")
     async def device_health(device_id: str) -> str:
         """Device health metrics and status.
 
@@ -184,6 +187,7 @@ def register_device_resources(
                 )
 
     @mcp.resource("device://{device_id}/config")
+    @with_cache("device://{device_id}/config")
     async def device_config(device_id: str) -> str:
         """RouterOS configuration export.
 

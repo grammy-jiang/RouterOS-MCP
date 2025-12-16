@@ -9,6 +9,7 @@ from sqlalchemy import desc, select
 from routeros_mcp.config import Settings
 from routeros_mcp.infra.db.models import AuditEvent
 from routeros_mcp.infra.db.session import DatabaseSessionManager
+from routeros_mcp.infra.observability.resource_cache import with_cache
 from routeros_mcp.mcp.errors import MCPError
 from routeros_mcp.mcp_resources.utils import format_resource_content
 
