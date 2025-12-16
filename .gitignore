@@ -439,3 +439,6 @@ $RECYCLE.BIN/
 
 # End of https://www.toptal.com/developers/gitignore/api/git,vim,emacs,linux,macos,python,windows,jetbrains+all,visualstudiocode
 *.db
+
+# Performance test reports
+reports/

@@ -125,6 +125,10 @@ addopts = [
     "--cov-report=xml",
 ]
 asyncio_mode = "auto"
+markers = [
+    "e2e: End-to-end integration tests",
+    "lab: Tests that require lab RouterOS devices",
+]
 
 [tool.coverage.run]
 source = ["routeros_mcp"]

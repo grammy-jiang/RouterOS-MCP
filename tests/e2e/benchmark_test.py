@@ -21,6 +21,7 @@ import statistics
 import time
 import tracemalloc
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -161,7 +162,7 @@ class BenchmarkRunner:
 
         # Initialize database
         self.session_factory = DatabaseSessionManager(self.settings)
-        await self.session_factory.initialize()
+        await self.session_factory.init()
 
         # Warm up GC
         gc.collect()
@@ -204,6 +205,12 @@ class BenchmarkRunner:
             management_ip="192.168.1.1",
             management_port=443,
             environment="lab",
+            status="healthy",
+            tags={},
+            allow_advanced_writes=True,
+            allow_professional_workflows=False,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
         )
 
         # Disable cache for this test
@@ -272,6 +279,12 @@ class BenchmarkRunner:
             management_ip="192.168.1.2",
             management_port=443,
             environment="lab",
+            status="healthy",
+            tags={},
+            allow_advanced_writes=True,
+            allow_professional_workflows=False,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
         )
 
         cache = get_cache()
@@ -344,6 +357,12 @@ class BenchmarkRunner:
                 management_ip=f"192.168.1.{i}",
                 management_port=443,
                 environment="lab",
+                status="healthy",
+                tags={},
+                allow_advanced_writes=True,
+                allow_professional_workflows=False,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
             )
             for i in range(num_devices)
         ]

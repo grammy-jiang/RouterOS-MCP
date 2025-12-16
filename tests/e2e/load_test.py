@@ -157,6 +157,8 @@ class MockDeviceFactory:
 
     def _create_devices(self) -> None:
         """Create mock devices."""
+        from datetime import datetime
+        
         for i in range(self.num_devices):
             device = Device(
                 id=f"dev-load-{i:03d}",
@@ -164,9 +166,12 @@ class MockDeviceFactory:
                 management_ip=f"192.168.{i // 256}.{i % 256}",
                 management_port=443,
                 environment="lab",
+                status="healthy",
+                tags={"test": "load-test"},
                 allow_advanced_writes=True,
                 allow_professional_workflows=False,
-                tags=["load-test"],
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
             )
             self.devices.append(device)
 
@@ -385,7 +390,7 @@ async def run_load_test(
         resource_cache_ttl_seconds=300,
     )
     session_factory = DatabaseSessionManager(settings)
-    await session_factory.initialize()
+    await session_factory.init()
 
     # Create metrics collector
     metrics = LoadTestMetrics()
