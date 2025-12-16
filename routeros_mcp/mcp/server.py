@@ -91,6 +91,7 @@ require appropriate device capabilities and permissions.
         from routeros_mcp.mcp_tools import (
             register_config_tools,
             register_device_tools,
+            register_dhcp_tools,
             register_dns_ntp_tools,
             register_firewall_logs_tools,
             register_firewall_write_tools,
@@ -216,6 +217,7 @@ require appropriate device capabilities and permissions.
         register_interface_tools(self.mcp, self.settings)
         register_ip_tools(self.mcp, self.settings)
         register_dns_ntp_tools(self.mcp, self.settings)
+        register_dhcp_tools(self.mcp, self.settings)
         register_routing_tools(self.mcp, self.settings)
         register_firewall_logs_tools(self.mcp, self.settings)
         register_firewall_write_tools(self.mcp, self.settings)
@@ -271,6 +273,7 @@ require appropriate device capabilities and permissions.
         # Register resources (now that we have session_factory)
         from routeros_mcp.mcp_resources import (
             register_device_resources,
+            register_dhcp_resources,
             register_fleet_resources,
             register_plan_resources,
             register_audit_resources,
@@ -279,6 +282,7 @@ require appropriate device capabilities and permissions.
 
         try:
             register_device_resources(self.mcp, self.session_factory, self.settings)
+            register_dhcp_resources(self.mcp, self.session_factory, self.settings)
             register_fleet_resources(self.mcp, self.session_factory, self.settings)
             register_plan_resources(self.mcp, self.session_factory, self.settings)
             register_audit_resources(self.mcp, self.session_factory, self.settings)
