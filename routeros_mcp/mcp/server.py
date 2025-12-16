@@ -89,6 +89,7 @@ require appropriate device capabilities and permissions.
         """Register MCP tools with the server."""
         # Import tool registration functions
         from routeros_mcp.mcp_tools import (
+            register_bridge_tools,
             register_config_tools,
             register_device_tools,
             register_dhcp_tools,
@@ -215,6 +216,7 @@ require appropriate device capabilities and permissions.
         register_device_tools(self.mcp, self.settings)
         register_system_tools(self.mcp, self.settings)
         register_interface_tools(self.mcp, self.settings)
+        register_bridge_tools(self.mcp, self.settings)
         register_ip_tools(self.mcp, self.settings)
         register_dns_ntp_tools(self.mcp, self.settings)
         register_dhcp_tools(self.mcp, self.settings)
@@ -273,6 +275,7 @@ require appropriate device capabilities and permissions.
         # Register resources (now that we have session_factory)
         from routeros_mcp.mcp_resources import (
             register_device_resources,
+            register_bridge_resources,
             register_dhcp_resources,
             register_fleet_resources,
             register_plan_resources,
@@ -282,6 +285,7 @@ require appropriate device capabilities and permissions.
 
         try:
             register_device_resources(self.mcp, self.session_factory, self.settings)
+            register_bridge_resources(self.mcp, self.session_factory, self.settings)
             register_dhcp_resources(self.mcp, self.session_factory, self.settings)
             register_fleet_resources(self.mcp, self.session_factory, self.settings)
             register_plan_resources(self.mcp, self.session_factory, self.settings)
