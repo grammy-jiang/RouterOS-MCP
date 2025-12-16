@@ -39,11 +39,12 @@ class ResourceCache:
     """In-memory cache with TTL and LRU eviction.
 
     Thread-safe cache implementation using asyncio locks for concurrent access.
-    Entries are keyed by resource URI and optional device ID.
+    Entries are keyed by resource URI and optional resource identifier
+    (e.g., device_id, plan_id, user_sub).
 
     Example:
         cache = ResourceCache(ttl_seconds=300, max_entries=1000)
-        await cache.set("device://dev1/overview", "dev1", data)
+        await cache.set("device://dev1/overview", "value_data", "dev1")
         result = await cache.get("device://dev1/overview", "dev1")
     """
 
@@ -71,28 +72,28 @@ class ResourceCache:
             f"ttl={ttl_seconds}s, max_entries={max_entries}"
         )
 
-    def _make_key(self, resource_uri: str, device_id: Optional[str] = None) -> str:
-        """Create cache key from resource URI and optional device ID.
+    def _make_key(self, resource_uri: str, resource_id: Optional[str] = None) -> str:
+        """Create cache key from resource URI and optional resource identifier.
 
         Args:
             resource_uri: Resource URI (e.g., "device://dev1/overview")
-            device_id: Optional device identifier
+            resource_id: Optional resource identifier (device_id, plan_id, user_sub, etc.)
 
         Returns:
-            Cache key in format "{resource_uri}:{device_id}" or "{resource_uri}"
+            Cache key in format "{resource_uri}:{resource_id}" or "{resource_uri}"
         """
-        if device_id:
-            return f"{resource_uri}:{device_id}"
+        if resource_id:
+            return f"{resource_uri}:{resource_id}"
         return resource_uri
 
     async def get(
-        self, resource_uri: str, device_id: Optional[str] = None
+        self, resource_uri: str, resource_id: Optional[str] = None
     ) -> Optional[str]:
         """Get cached value if available and not expired.
 
         Args:
             resource_uri: Resource URI
-            device_id: Optional device identifier
+            resource_id: Optional resource identifier (device_id, plan_id, user_sub, etc.)
 
         Returns:
             Cached value or None if not found or expired
@@ -100,7 +101,7 @@ class ResourceCache:
         if not self._enabled:
             return None
 
-        key = self._make_key(resource_uri, device_id)
+        key = self._make_key(resource_uri, resource_id)
 
         async with self._lock:
             entry = self._cache.get(key)
@@ -132,19 +133,19 @@ class ResourceCache:
             return entry.value
 
     async def set(
-        self, resource_uri: str, value: str, device_id: Optional[str] = None
+        self, resource_uri: str, value: str, resource_id: Optional[str] = None
     ) -> None:
         """Store value in cache with TTL.
 
         Args:
             resource_uri: Resource URI
             value: Value to cache
-            device_id: Optional device identifier
+            resource_id: Optional resource identifier (device_id, plan_id, user_sub, etc.)
         """
         if not self._enabled:
             return
 
-        key = self._make_key(resource_uri, device_id)
+        key = self._make_key(resource_uri, resource_id)
         now = time.time()
 
         async with self._lock:
@@ -173,13 +174,13 @@ class ResourceCache:
             logger.debug(f"Cache set: {key} (ttl={self._ttl_seconds}s)")
 
     async def invalidate(
-        self, resource_uri: str, device_id: Optional[str] = None
+        self, resource_uri: str, resource_id: Optional[str] = None
     ) -> bool:
         """Invalidate (remove) a cache entry.
 
         Args:
             resource_uri: Resource URI
-            device_id: Optional device identifier
+            resource_id: Optional resource identifier (device_id, plan_id, user_sub, etc.)
 
         Returns:
             True if entry was found and removed, False otherwise
@@ -187,7 +188,7 @@ class ResourceCache:
         if not self._enabled:
             return False
 
-        key = self._make_key(resource_uri, device_id)
+        key = self._make_key(resource_uri, resource_id)
 
         async with self._lock:
             if key in self._cache:
@@ -299,13 +300,14 @@ def with_cache(resource_uri: str) -> Callable[[F], F]:
 
     This decorator wraps resource provider functions to automatically cache
     their results. The cache key is built from the resource URI and the
-    device_id parameter (if present).
+    first parameter extracted from the URI template (e.g., device_id, plan_id, user_sub).
 
     If the cache is not initialized (e.g., in tests), the decorator will
     skip caching and call the function directly.
 
     Args:
-        resource_uri: Resource URI template (e.g., "device://{device_id}/overview")
+        resource_uri: Resource URI template (e.g., "device://{device_id}/overview",
+                     "plan://{plan_id}/summary", "audit://events/by-user/{user_sub}")
 
     Returns:
         Decorator function
@@ -315,9 +317,19 @@ def with_cache(resource_uri: str) -> Callable[[F], F]:
         async def device_overview(device_id: str) -> str:
             # Expensive RouterOS call here
             return result
+            
+        @with_cache("plan://{plan_id}/summary")
+        async def plan_summary(plan_id: str) -> str:
+            # Cached by plan_id
+            return result
     """
     from functools import wraps
     import time as time_module
+    import re
+
+    # Extract parameter name from URI template (e.g., "{device_id}" -> "device_id")
+    param_match = re.search(r'\{(\w+)\}', resource_uri)
+    param_name = param_match.group(1) if param_match else None
 
     def decorator(func: F) -> F:
         @wraps(func)
@@ -329,18 +341,21 @@ def with_cache(resource_uri: str) -> Callable[[F], F]:
                 # Cache not initialized (e.g., in tests), skip caching
                 return await func(*args, **kwargs)
 
-            # Extract device_id from arguments
-            device_id = kwargs.get("device_id") or (args[0] if args else None)
+            # Extract resource_id from arguments based on parameter name
+            resource_id = None
+            if param_name:
+                # Try to get from kwargs first, then from first positional arg
+                resource_id = kwargs.get(param_name) or (args[0] if args else None)
 
-            # Build actual resource URI by replacing {device_id} placeholder
+            # Build actual resource URI by replacing parameter placeholder
             actual_uri = resource_uri
-            if device_id and "{device_id}" in resource_uri:
-                actual_uri = resource_uri.replace("{device_id}", str(device_id))
+            if resource_id and param_name:
+                actual_uri = resource_uri.replace(f"{{{param_name}}}", str(resource_id))
 
             # Try to get from cache
             start_time = time_module.time()
 
-            cached_value = await cache.get(actual_uri, device_id)
+            cached_value = await cache.get(actual_uri, resource_id)
             if cached_value is not None:
                 duration = time_module.time() - start_time
                 metrics.record_cache_fetch(actual_uri, duration, cache_hit=True)
@@ -350,7 +365,7 @@ def with_cache(resource_uri: str) -> Callable[[F], F]:
             result = await func(*args, **kwargs)
 
             # Store in cache
-            await cache.set(actual_uri, result, device_id)
+            await cache.set(actual_uri, result, resource_id)
 
             duration = time_module.time() - start_time
             metrics.record_cache_fetch(actual_uri, duration, cache_hit=False)

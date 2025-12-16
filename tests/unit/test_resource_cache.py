@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -277,7 +277,7 @@ class TestGlobalCacheFunctions:
     def test_get_cache_before_init(self) -> None:
         """get_cache should raise if not initialized."""
         # Reset global cache
-        import routeros_mcp.infra.observability.resource_cache as cache_module
+        from routeros_mcp.infra.observability import resource_cache as cache_module
 
         cache_module._cache_instance = None
 
@@ -413,3 +413,83 @@ class TestWithCacheDecorator:
         result2 = await fetch_overview("dev1")
         assert result2 == "overview_dev1_2"
         assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_decorator_with_plan_id(self) -> None:
+        """Decorator should work with plan_id parameter."""
+        initialize_cache(ttl_seconds=300, max_entries=100, enabled=True)
+
+        call_count = 0
+
+        @with_cache("plan://{plan_id}/summary")
+        async def fetch_plan(plan_id: str) -> str:
+            nonlocal call_count
+            call_count += 1
+            return f"plan_{plan_id}"
+
+        # First call - should hit function
+        result1 = await fetch_plan("plan-123")
+        assert result1 == "plan_plan-123"
+        assert call_count == 1
+
+        # Second call - should use cache
+        result2 = await fetch_plan("plan-123")
+        assert result2 == "plan_plan-123"
+        assert call_count == 1  # Not incremented
+
+        # Different plan_id - should hit function
+        result3 = await fetch_plan("plan-456")
+        assert result3 == "plan_plan-456"
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_decorator_with_user_sub(self) -> None:
+        """Decorator should work with user_sub parameter."""
+        initialize_cache(ttl_seconds=300, max_entries=100, enabled=True)
+
+        call_count = 0
+
+        @with_cache("audit://events/by-user/{user_sub}")
+        async def fetch_audit(user_sub: str) -> str:
+            nonlocal call_count
+            call_count += 1
+            return f"audit_{user_sub}"
+
+        # First call - should hit function
+        result1 = await fetch_audit("user-abc")
+        assert result1 == "audit_user-abc"
+        assert call_count == 1
+
+        # Second call - should use cache
+        result2 = await fetch_audit("user-abc")
+        assert result2 == "audit_user-abc"
+        assert call_count == 1  # Not incremented
+
+        # Different user_sub - should hit function
+        result3 = await fetch_audit("user-xyz")
+        assert result3 == "audit_user-xyz"
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_decorator_with_no_parameter(self) -> None:
+        """Decorator should work with URIs that have no parameters."""
+        initialize_cache(ttl_seconds=300, max_entries=100, enabled=True)
+
+        call_count = 0
+
+        @with_cache("fleet://health-summary")
+        async def fetch_fleet() -> str:
+            nonlocal call_count
+            call_count += 1
+            return "fleet_summary"
+
+        # First call - should hit function
+        result1 = await fetch_fleet()
+        assert result1 == "fleet_summary"
+        assert call_count == 1
+
+        # Second call - should use cache
+        result2 = await fetch_fleet()
+        assert result2 == "fleet_summary"
+        assert call_count == 1  # Not incremented
+
