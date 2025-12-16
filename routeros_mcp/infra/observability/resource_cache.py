@@ -15,11 +15,14 @@ import logging
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional, TypeVar
 
 from routeros_mcp.infra.observability import metrics
 
 logger = logging.getLogger(__name__)
+
+# Type variable for decorated function
+F = TypeVar("F", bound=Callable[..., Any])
 
 
 @dataclass
@@ -291,12 +294,15 @@ def initialize_cache(
     return _cache_instance
 
 
-def with_cache(resource_uri: str):
+def with_cache(resource_uri: str) -> Callable[[F], F]:
     """Decorator to add caching to resource providers.
 
     This decorator wraps resource provider functions to automatically cache
     their results. The cache key is built from the resource URI and the
     device_id parameter (if present).
+
+    If the cache is not initialized (e.g., in tests), the decorator will
+    skip caching and call the function directly.
 
     Args:
         resource_uri: Resource URI template (e.g., "device://{device_id}/overview")
@@ -313,9 +319,16 @@ def with_cache(resource_uri: str):
     from functools import wraps
     import time as time_module
 
-    def decorator(func):
+    def decorator(func: F) -> F:
         @wraps(func)
-        async def wrapper(*args, **kwargs):
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
+            # Try to get cache, but gracefully handle if not initialized
+            try:
+                cache = get_cache()
+            except RuntimeError:
+                # Cache not initialized (e.g., in tests), skip caching
+                return await func(*args, **kwargs)
+
             # Extract device_id from arguments
             device_id = kwargs.get("device_id") or (args[0] if args else None)
 
@@ -325,7 +338,6 @@ def with_cache(resource_uri: str):
                 actual_uri = resource_uri.replace("{device_id}", str(device_id))
 
             # Try to get from cache
-            cache = get_cache()
             start_time = time_module.time()
 
             cached_value = await cache.get(actual_uri, device_id)
@@ -345,9 +357,9 @@ def with_cache(resource_uri: str):
 
             return result
 
-        return wrapper
+        return wrapper  # type: ignore[return-value]
 
-    return decorator
+    return decorator  # type: ignore[return-value]
 
 
 __all__ = [
