@@ -28,7 +28,7 @@ This service leverages the three core MCP primitives to provide safe, ergonomic 
 
 - **Tools** (Model-controlled, dynamic queries and operations):
 
-  - Fundamental tier: Read-only queries (`device/list-devices`, `dns/get-status`; network diagnostics such as ping/traceroute are deferred to Phase 2)
+  - Fundamental tier: Read-only queries (`device/list-devices`, `dns/get-status`; network diagnostics such as ping/traceroute are deferred to Phase 3)
   - Advanced tier: Single-device low-risk writes (`dns/update-servers`, `system/set-identity`)
   - Professional tier: Multi-device orchestration (`config/plan-dns-ntp-rollout`, `config/apply-dns-ntp-rollout`)
   - Target: 40 tools in Phase 1, organized by category (device, dns, ntp, firewall, logs, system, tool, config, audit)
@@ -188,7 +188,7 @@ _04 – MCP Tools Interface & JSON Schemas_
 - Keep diagnostics (ping/traceroute/bandwidth-test) deferred to Phase 3
 - Keep SSH key auth and client compatibility modes deferred to Phase 3
 
-**Total Phase 1 tool count: ~39 tools** (14 fundamental + 10 advanced + 8 professional + 6 fallbacks + 1 admin onboarding tool; ping/traceroute deferred to Phase 2)
+**Total Phase 1 tool count: ~39 tools** (14 fundamental + 10 advanced + 8 professional + 6 fallbacks + 1 admin onboarding tool; diagnostics deferred to Phase 3)
 
 **Design principles for tool count:**
 

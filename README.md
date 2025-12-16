@@ -43,9 +43,11 @@ All design decisions for the 1.x line are captured in the [`docs/`](docs/) direc
   - Cache invalidation on state changes
   - Subscription support
 
-### Phase 3+ (Future)
+### Phase 3 (Planned)
 
-- 🔮 Network diagnostics (ping/traceroute/bandwidth-test)
+- 🔮 **Diagnostics Tools** – ping, traceroute, bandwidth-test (deferred from Phase 2)
+- 🔮 **Admin UI/CLI** – Device management, plan viewing, credential rotation
+- 🔮 **Advanced Writes** – Single-device DHCP/bridge configuration (lab/staging only)
 - 🔮 SSH key authentication
 - 🔮 Advanced firewall write operations
 - 🔮 Client compatibility modes
@@ -83,6 +85,7 @@ All design decisions for the 1.x line are captured in the [`docs/`](docs/) direc
 - [ ] `dhcp/get-server-status` + `dhcp/get-leases`
 - [ ] `bridge/list-bridges` + `bridge/list-ports`
 - [ ] Wireless/DHCP troubleshooting prompts
+- ⚠️ Diagnostics tools (ping/traceroute/bandwidth-test) deferred to Phase 3
 
 **Resource Optimization:**
 
