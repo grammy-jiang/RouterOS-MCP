@@ -1023,8 +1023,8 @@ class DNSNTPService:
 
             # Invalidate DNS status and cache resources
             count = 0
-            count += await cache.invalidate(f"device://{device_id}/dns-status", device_id)
-            count += await cache.invalidate(f"device://{device_id}/dns-cache", device_id)
+            count += int(await cache.invalidate(f"device://{device_id}/dns-status", device_id))
+            count += int(await cache.invalidate(f"device://{device_id}/dns-cache", device_id))
 
             if count > 0:
                 metrics.record_cache_invalidation("dns_ntp", "config_update")
@@ -1048,13 +1048,13 @@ class DNSNTPService:
             cache = get_cache()
 
             # Invalidate NTP status resources
-            count = await cache.invalidate(f"device://{device_id}/ntp-status", device_id)
+            invalidated = await cache.invalidate(f"device://{device_id}/ntp-status", device_id)
 
-            if count > 0:
+            if invalidated:
                 metrics.record_cache_invalidation("dns_ntp", "config_update")
                 logger.info(
                     f"Invalidated NTP cache entries for device {device_id}",
-                    extra={"device_id": device_id, "invalidated_count": count}
+                    extra={"device_id": device_id, "invalidated": invalidated}
                 )
         except RuntimeError:
             # Cache not initialized - skip invalidation

@@ -7,7 +7,6 @@ import pytest
 from routeros_mcp.infra.observability.resource_cache import (
     ResourceCache,
     initialize_cache,
-    get_cache,
 )
 
 
@@ -77,6 +76,29 @@ class TestCacheInvalidation:
 
         # Verify existing entry is not affected
         assert await cache.get("device://dev1/overview", "dev1") == "value1"
+
+    @pytest.mark.asyncio
+    async def test_invalidate_device_exact_match(self, cache: ResourceCache) -> None:
+        """invalidate_device() should use exact match to avoid substring collisions (dev1 vs dev10)."""
+        # Set up cache entries for devices with similar IDs
+        await cache.set("device://dev1/overview", "value1", "dev1")
+        await cache.set("device://dev1/dns-status", "dns1", "dev1")
+        await cache.set("device://dev10/overview", "value10", "dev10")
+        await cache.set("device://dev10/dns-status", "dns10", "dev10")
+        await cache.set("device://dev11/overview", "value11", "dev11")
+
+        # Invalidate dev1 entries only
+        count = await cache.invalidate_device("dev1")
+        assert count == 2
+
+        # Verify dev1 entries are gone
+        assert await cache.get("device://dev1/overview", "dev1") is None
+        assert await cache.get("device://dev1/dns-status", "dev1") is None
+
+        # Verify dev10 and dev11 entries remain intact
+        assert await cache.get("device://dev10/overview", "dev10") == "value10"
+        assert await cache.get("device://dev10/dns-status", "dev10") == "dns10"
+        assert await cache.get("device://dev11/overview", "dev11") == "value11"
 
     @pytest.mark.asyncio
     async def test_invalidate_pattern_matching(self, cache: ResourceCache) -> None:
@@ -233,8 +255,8 @@ class TestCacheInvalidationIntegration:
         assert await cache.get("device://dev1/dns-status", "dev1") == "old_dns_data"
 
         # Simulate config update that invalidates cache
-        count = await cache.invalidate("device://dev1/dns-status", "dev1")
-        assert count is True
+        result = await cache.invalidate("device://dev1/dns-status", "dev1")
+        assert result is True
 
         # Cache should be empty now
         assert await cache.get("device://dev1/dns-status", "dev1") is None
@@ -343,3 +365,279 @@ class TestCacheInvalidationMetrics:
             assert call(service="dns_ntp", reason="config_update") in calls
             assert call(service="firewall", reason="rule_change") in calls
             assert call(service="device", reason="status_change") in calls
+
+
+class TestDomainServiceInvalidation:
+    """Tests for cache invalidation in domain services."""
+
+    @pytest.mark.asyncio
+    async def test_dns_service_invalidates_on_update(self) -> None:
+        """DNS service should invalidate cache when DNS servers are updated."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from routeros_mcp.domain.services.dns_ntp import DNSNTPService
+        from routeros_mcp.config import Settings
+
+        # Initialize cache
+        cache = initialize_cache(ttl_seconds=300, max_entries=100, enabled=True)
+
+        # Set up cached DNS data
+        await cache.set("device://dev1/dns-status", "old_dns_data", "dev1")
+        assert await cache.get("device://dev1/dns-status", "dev1") == "old_dns_data"
+
+        # Mock settings with auto-invalidation enabled
+        settings = Settings()
+        settings.mcp_resource_cache_auto_invalidate = True
+
+        # Create service with mocked dependencies
+        session = MagicMock()
+        service = DNSNTPService(session, settings)
+
+        # Mock device service methods
+        service.device_service.get_device = AsyncMock()
+        service.device_service.get_rest_client = AsyncMock()
+
+        # Mock REST client
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(return_value={"servers": "1.1.1.1"})
+        mock_client.patch = AsyncMock()
+        mock_client.close = AsyncMock()
+        service.device_service.get_rest_client.return_value = mock_client
+
+        # Call update_dns_servers
+        await service.update_dns_servers("dev1", ["8.8.8.8"], dry_run=False)
+
+        # Cache should be invalidated
+        assert await cache.get("device://dev1/dns-status", "dev1") is None
+
+    @pytest.mark.asyncio
+    async def test_dns_service_skips_invalidation_when_disabled(self) -> None:
+        """DNS service should skip cache invalidation when auto_invalidate is disabled."""
+        from unittest.mock import AsyncMock, MagicMock
+        from routeros_mcp.domain.services.dns_ntp import DNSNTPService
+        from routeros_mcp.config import Settings
+
+        # Initialize cache
+        cache = initialize_cache(ttl_seconds=300, max_entries=100, enabled=True)
+
+        # Set up cached DNS data
+        await cache.set("device://dev1/dns-status", "cached_data", "dev1")
+
+        # Mock settings with auto-invalidation disabled
+        settings = Settings()
+        settings.mcp_resource_cache_auto_invalidate = False
+
+        # Create service with mocked dependencies
+        session = MagicMock()
+        service = DNSNTPService(session, settings)
+
+        # Mock device service methods
+        service.device_service.get_device = AsyncMock()
+        service.device_service.get_rest_client = AsyncMock()
+
+        # Mock REST client
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(return_value={"servers": "1.1.1.1"})
+        mock_client.patch = AsyncMock()
+        mock_client.close = AsyncMock()
+        service.device_service.get_rest_client.return_value = mock_client
+
+        # Call update_dns_servers
+        await service.update_dns_servers("dev1", ["8.8.8.8"], dry_run=False)
+
+        # Cache should NOT be invalidated
+        assert await cache.get("device://dev1/dns-status", "dev1") == "cached_data"
+
+    @pytest.mark.asyncio
+    async def test_ntp_service_invalidates_on_update(self) -> None:
+        """NTP service should invalidate cache when NTP servers are updated."""
+        from unittest.mock import AsyncMock, MagicMock
+        from routeros_mcp.domain.services.dns_ntp import DNSNTPService
+        from routeros_mcp.config import Settings
+
+        # Initialize cache
+        cache = initialize_cache(ttl_seconds=300, max_entries=100, enabled=True)
+
+        # Set up cached NTP data
+        await cache.set("device://dev1/ntp-status", "old_ntp_data", "dev1")
+
+        # Mock settings with auto-invalidation enabled
+        settings = Settings()
+        settings.mcp_resource_cache_auto_invalidate = True
+
+        # Create service with mocked dependencies
+        session = MagicMock()
+        service = DNSNTPService(session, settings)
+
+        # Mock device service methods
+        service.device_service.get_device = AsyncMock()
+        service.device_service.get_rest_client = AsyncMock()
+
+        # Mock REST client
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(return_value={"servers": "pool.ntp.org", "enabled": True})
+        mock_client.patch = AsyncMock()
+        mock_client.close = AsyncMock()
+        service.device_service.get_rest_client.return_value = mock_client
+
+        # Call update_ntp_servers
+        await service.update_ntp_servers("dev1", ["time.google.com"], enabled=True, dry_run=False)
+
+        # Cache should be invalidated
+        assert await cache.get("device://dev1/ntp-status", "dev1") is None
+
+    @pytest.mark.asyncio
+    async def test_firewall_service_invalidates_on_address_list_update(self) -> None:
+        """Firewall service should invalidate cache when address list is updated."""
+        from unittest.mock import AsyncMock, MagicMock
+        from routeros_mcp.domain.services.firewall import FirewallService
+        from routeros_mcp.config import Settings
+
+        # Initialize cache
+        cache = initialize_cache(ttl_seconds=300, max_entries=100, enabled=True)
+
+        # Set up cached firewall data
+        await cache.set("device://dev1/firewall-rules", "cached_fw_data", "dev1")
+
+        # Mock settings with auto-invalidation enabled
+        settings = Settings()
+        settings.mcp_resource_cache_auto_invalidate = True
+
+        # Create service with mocked dependencies
+        session = MagicMock()
+        service = FirewallService(session, settings)
+
+        # Mock device service methods
+        service.device_service.get_device = AsyncMock()
+        service.device_service.get_rest_client = AsyncMock()
+
+        # Mock REST client
+        mock_client = MagicMock()
+        mock_client.put = AsyncMock(return_value={".id": "*1"})
+        mock_client.close = AsyncMock()
+        service.device_service.get_rest_client.return_value = mock_client
+
+        # Call update_address_list_entry
+        await service.update_address_list_entry(
+            "dev1", "mcp-test-list", "10.0.0.1", action="add", dry_run=False
+        )
+
+        # Cache should be invalidated
+        assert await cache.get("device://dev1/firewall-rules", "dev1") is None
+
+    @pytest.mark.asyncio
+    async def test_device_service_invalidates_on_status_change(self) -> None:
+        """Device service should invalidate cache when device status changes."""
+        from unittest.mock import AsyncMock, MagicMock
+        from routeros_mcp.domain.services.device import DeviceService
+        from routeros_mcp.domain.models import DeviceUpdate
+        from routeros_mcp.config import Settings
+        from routeros_mcp.infra.db.models import Device as DeviceORM
+        from datetime import UTC, datetime
+
+        # Initialize cache
+        cache = initialize_cache(ttl_seconds=300, max_entries=100, enabled=True)
+
+        # Set up cached device data
+        await cache.set("device://dev1/overview", "cached_device_data", "dev1")
+        await cache.set("device://dev1/health", "cached_health_data", "dev1")
+
+        # Mock settings with auto-invalidation enabled
+        settings = Settings()
+        settings.mcp_resource_cache_auto_invalidate = True
+
+        # Create service with mocked dependencies
+        session = MagicMock()
+        service = DeviceService(session, settings)
+
+        # Create a real ORM object with proper attributes
+        now = datetime.now(UTC)
+        mock_device = DeviceORM(
+            id="dev1",
+            name="test-device",
+            management_ip="192.168.1.1",
+            management_port=443,
+            environment="lab",
+            status="healthy",
+            tags={},
+            routeros_version="7.0",
+            system_identity="test",
+            hardware_model="test",
+            serial_number="test",
+            software_id="test",
+            allow_advanced_writes=True,
+            allow_professional_workflows=True,
+            created_at=now,
+            updated_at=now,
+        )
+
+        # Mock database query
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_device
+        session.execute = AsyncMock(return_value=mock_result)
+        session.commit = AsyncMock()
+        session.refresh = AsyncMock()
+
+        # Call update_device with status change
+        await service.update_device("dev1", DeviceUpdate(status="unreachable"))
+
+        # Cache should be invalidated
+        assert await cache.get("device://dev1/overview", "dev1") is None
+        assert await cache.get("device://dev1/health", "dev1") is None
+
+    @pytest.mark.asyncio
+    async def test_device_service_skips_invalidation_when_status_unchanged(self) -> None:
+        """Device service should skip invalidation when status doesn't change."""
+        from unittest.mock import AsyncMock, MagicMock
+        from routeros_mcp.domain.services.device import DeviceService
+        from routeros_mcp.domain.models import DeviceUpdate
+        from routeros_mcp.config import Settings
+        from routeros_mcp.infra.db.models import Device as DeviceORM
+        from datetime import UTC, datetime
+
+        # Initialize cache
+        cache = initialize_cache(ttl_seconds=300, max_entries=100, enabled=True)
+
+        # Set up cached device data
+        await cache.set("device://dev1/overview", "cached_data", "dev1")
+
+        # Mock settings with auto-invalidation enabled
+        settings = Settings()
+        settings.mcp_resource_cache_auto_invalidate = True
+
+        # Create service with mocked dependencies
+        session = MagicMock()
+        service = DeviceService(session, settings)
+
+        # Create a real ORM object with proper attributes
+        now = datetime.now(UTC)
+        mock_device = DeviceORM(
+            id="dev1",
+            name="test-device",
+            management_ip="192.168.1.1",
+            management_port=443,
+            environment="lab",
+            status="healthy",
+            tags={},
+            routeros_version="7.0",
+            system_identity="test",
+            hardware_model="test",
+            serial_number="test",
+            software_id="test",
+            allow_advanced_writes=True,
+            allow_professional_workflows=True,
+            created_at=now,
+            updated_at=now,
+        )
+
+        # Mock database query
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_device
+        session.execute = AsyncMock(return_value=mock_result)
+        session.commit = AsyncMock()
+        session.refresh = AsyncMock()
+
+        # Call update_device with same status (no change)
+        await service.update_device("dev1", DeviceUpdate(name="new-name"))
+
+        # Cache should NOT be invalidated (status didn't change)
+        assert await cache.get("device://dev1/overview", "dev1") == "cached_data"
