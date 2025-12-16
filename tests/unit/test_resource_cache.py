@@ -471,6 +471,27 @@ class TestWithCacheDecorator:
         assert call_count == 2
 
     @pytest.mark.asyncio
+    async def test_decorator_missing_parameter_skips_cache(self) -> None:
+        """Decorator should bypass cache when required parameter is missing."""
+        initialize_cache(ttl_seconds=300, max_entries=100, enabled=True)
+
+        call_count = 0
+
+        @with_cache("device://{device_id}/overview")
+        async def fetch_overview(**kwargs: str) -> str:
+            nonlocal call_count
+            call_count += 1
+            return f"overview_{kwargs.get('device_id')}_{kwargs.get('wrong_id')}"
+
+        # Missing device_id should not be cached
+        result1 = await fetch_overview(wrong_id="first")
+        result2 = await fetch_overview(wrong_id="second")
+
+        assert result1 == "overview_None_first"
+        assert result2 == "overview_None_second"
+        assert call_count == 2
+
+    @pytest.mark.asyncio
     async def test_decorator_with_no_parameter(self) -> None:
         """Decorator should work with URIs that have no parameters."""
         initialize_cache(ttl_seconds=300, max_entries=100, enabled=True)

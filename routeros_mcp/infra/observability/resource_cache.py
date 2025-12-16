@@ -349,6 +349,19 @@ def with_cache(resource_uri: str) -> Callable[[F], F]:
                 # Try to get from kwargs first, then from first positional arg
                 resource_id = kwargs.get(param_name) or (args[0] if args else None)
 
+                if resource_id is None:
+                    logger.warning(
+                        "Cache skipped for %s: missing required parameter '%s'",
+                        resource_uri,
+                        param_name,
+                    )
+                    start_time = time_module.time()
+                    result = await func(*args, **kwargs)
+                    duration = time_module.time() - start_time
+                    metrics.record_cache_fetch(resource_uri, duration, cache_hit=False)
+                    metrics.record_cache_miss(resource_uri)
+                    return result
+
             # Build actual resource URI by replacing parameter placeholder
             actual_uri = resource_uri
             if resource_id and param_name:
