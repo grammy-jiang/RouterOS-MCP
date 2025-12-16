@@ -97,7 +97,7 @@ messages:
       ---
       
       ### Step 3: Cross-Reference with Device Inventory
-      **Tool:** `system/get-arp-table`
+      **Tool:** `ip/get-arp-table`
       
       ```json
       {
@@ -359,7 +359,7 @@ messages:
       ## Additional Tools for DHCP Management
       - `interface/list` - Check interfaces serving DHCP
       - `system/get-overview` - Verify device health
-      - `firewall/list-rules` - Check DHCP traffic rules
+      - `firewall/list-filter-rules` - Check DHCP traffic rules
       - `device/check-connectivity` - Verify device reachability
       
       {% endif %}

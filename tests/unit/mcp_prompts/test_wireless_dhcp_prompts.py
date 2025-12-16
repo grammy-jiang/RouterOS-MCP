@@ -7,7 +7,7 @@ from routeros_mcp.mcp_prompts.renderer import PromptRenderer
 
 
 @pytest.fixture
-def prompt_loader(tmp_path):
+def prompt_loader():
     """Create a prompt loader pointing to the prompts directory."""
     # Use actual prompts directory
     from pathlib import Path
@@ -174,7 +174,7 @@ def test_dhcp_lease_review_references_correct_tools(prompt_loader, prompt_render
     # Verify correct tool references
     assert "dhcp/get-server-status" in result
     assert "dhcp/get-leases" in result
-    assert "system/get-arp-table" in result
+    assert "ip/get-arp-table" in result
     assert "device/check-connectivity" in result
     assert "interface/list" in result
 
@@ -277,8 +277,7 @@ def test_prompt_validation(prompt_loader):
             assert len(critical_issues) == 0, f"{prompt_name} has critical validation issues: {critical_issues}"
 
 
-@pytest.mark.asyncio
-async def test_wireless_prompt_with_all_issue_types(prompt_loader, prompt_renderer):
+def test_wireless_prompt_with_all_issue_types(prompt_loader, prompt_renderer):
     """Test wireless prompt renders all issue types without errors."""
     templates = prompt_loader.load_all()
     template = templates["troubleshoot-wireless"]
