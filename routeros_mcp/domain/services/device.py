@@ -23,6 +23,7 @@ from routeros_mcp.domain.models import (
 )
 from routeros_mcp.infra.db.models import Credential as CredentialORM
 from routeros_mcp.infra.db.models import Device as DeviceORM
+from routeros_mcp.infra.observability import metrics
 from routeros_mcp.infra.routeros.exceptions import (
     RouterOSAuthenticationError,
     RouterOSAuthorizationError,
@@ -249,6 +250,9 @@ class DeviceService:
                 data={"device_id": device_id},
             )
 
+        # Track if status changed
+        old_status = device_orm.status
+
         # Apply updates
         update_data = updates.model_dump(exclude_unset=True)
         for field, value in update_data.items():
@@ -261,6 +265,11 @@ class DeviceService:
             "Updated device",
             extra={"device_id": device_id, "updates": list(update_data.keys())},
         )
+
+        # Invalidate cache if status changed (health/availability update)
+        new_status = device_orm.status
+        if old_status != new_status and self.settings.mcp_resource_cache_auto_invalidate:
+            await self._invalidate_device_cache(device_id, reason="status_change")
 
         return DeviceDomain.model_validate(device_orm)
 
@@ -605,3 +614,28 @@ class DeviceService:
         )
 
         return False, meta
+
+    async def _invalidate_device_cache(self, device_id: str, reason: str = "state_change") -> None:
+        """Invalidate device-related cache entries.
+
+        Args:
+            device_id: Device identifier
+            reason: Reason for invalidation
+        """
+        try:
+            from routeros_mcp.infra.observability.resource_cache import get_cache
+
+            cache = get_cache()
+
+            # Invalidate all device-related resources
+            count = await cache.invalidate_device(device_id)
+
+            if count > 0:
+                metrics.record_cache_invalidation("device", reason)
+                logger.info(
+                    f"Invalidated device cache entries for device {device_id}",
+                    extra={"device_id": device_id, "invalidated_count": count, "reason": reason}
+                )
+        except RuntimeError:
+            # Cache not initialized - skip invalidation
+            logger.debug("Cache not initialized, skipping device cache invalidation")
