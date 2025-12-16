@@ -43,7 +43,7 @@ def register_wireless_tools(mcp: FastMCP, settings: Settings) -> None:
         Returns: List of wireless interfaces with ID, name, SSID, frequency, band,
         channel width, TX power, mode, running status, disabled status, and client counts.
 
-        Note: 
+        Note:
         - TX power is device-specific and may be in dBm or percentage
         - Frequency is in MHz (e.g., 2412 for channel 1)
         - Signal strength in client info is RSSI in negative dBm (e.g., -65 dBm)

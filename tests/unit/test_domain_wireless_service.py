@@ -97,7 +97,7 @@ class _FakeSSHClient:
 
     async def execute(self, command: str) -> str:
         self.calls.append(("execute", command))
-        
+
         if "/interface/wireless/print" in command:
             return """Flags: D - DYNAMIC; R - RUNNING
 Columns: NAME, SSID, FREQUENCY, BAND
@@ -148,16 +148,16 @@ async def test_get_wireless_interfaces_via_rest():
     rest_client = _FakeRestClient()
     ssh_client = _FakeSSHClient()
     device_service = _FakeDeviceService(rest_client, ssh_client)
-    
+
     service = WirelessService(AsyncMock(), Settings())
     service.device_service = device_service
-    
+
     # Get wireless interfaces
     interfaces = await service.get_wireless_interfaces("dev-1")
-    
+
     # Verify results
     assert len(interfaces) == 2
-    
+
     # Check first interface
     assert interfaces[0]["id"] == "*1"
     assert interfaces[0]["name"] == "wlan1"
@@ -171,14 +171,14 @@ async def test_get_wireless_interfaces_via_rest():
     assert interfaces[0]["disabled"] is False
     assert interfaces[0]["registered_clients"] == 2
     assert interfaces[0]["transport"] == "rest"
-    
+
     # Check second interface
     assert interfaces[1]["id"] == "*2"
     assert interfaces[1]["name"] == "wlan2"
     assert interfaces[1]["ssid"] == "GuestNetwork"
     assert interfaces[1]["running"] is False
     assert interfaces[1]["disabled"] is True
-    
+
     # Verify REST API was called
     assert ("get", "/rest/interface/wireless", None) in rest_client.calls
 
@@ -189,24 +189,24 @@ async def test_get_wireless_interfaces_via_ssh_fallback():
     rest_client = _FakeRestClient()
     ssh_client = _FakeSSHClient()
     device_service = _FakeDeviceService(rest_client, ssh_client)
-    
+
     # Make REST fail
     rest_client.store["/rest/interface/wireless"] = None
     original_get = rest_client.get
-    
+
     async def failing_get(path: str, params: dict | None = None):
         if path == "/rest/interface/wireless":
             raise Exception("REST API failed")
         return await original_get(path, params)
-    
+
     rest_client.get = failing_get
-    
+
     service = WirelessService(AsyncMock(), Settings())
     service.device_service = device_service
-    
+
     # Get wireless interfaces - should fallback to SSH
     interfaces = await service.get_wireless_interfaces("dev-1")
-    
+
     # Verify results from SSH
     assert len(interfaces) == 2
     assert interfaces[0]["name"] == "wlan1"
@@ -214,7 +214,7 @@ async def test_get_wireless_interfaces_via_ssh_fallback():
     assert interfaces[0]["running"] is True
     assert interfaces[0]["transport"] == "ssh"
     assert interfaces[0]["fallback_used"] is True
-    
+
     # Verify SSH was called
     assert ("execute", "/interface/wireless/print") in ssh_client.calls
 
@@ -225,16 +225,16 @@ async def test_get_wireless_clients_via_rest():
     rest_client = _FakeRestClient()
     ssh_client = _FakeSSHClient()
     device_service = _FakeDeviceService(rest_client, ssh_client)
-    
+
     service = WirelessService(AsyncMock(), Settings())
     service.device_service = device_service
-    
+
     # Get wireless clients
     clients = await service.get_wireless_clients("dev-1")
-    
+
     # Verify results
     assert len(clients) == 2
-    
+
     # Check first client
     assert clients[0]["id"] == "*a"
     assert clients[0]["interface"] == "wlan1"
@@ -245,13 +245,13 @@ async def test_get_wireless_clients_via_rest():
     assert clients[0]["rx_rate"] == "54Mbps"
     assert clients[0]["uptime"] == "1h23m45s"
     assert clients[0]["transport"] == "rest"
-    
+
     # Check second client
     assert clients[1]["id"] == "*b"
     assert clients[1]["mac_address"] == "77:88:99:aa:bb:cc"
     assert clients[1]["signal_strength"] == -72
     assert clients[1]["tx_rate"] == "144.4Mbps"
-    
+
     # Verify REST API was called
     assert ("get", "/rest/interface/wireless/registration-table", None) in rest_client.calls
 
@@ -262,23 +262,23 @@ async def test_get_wireless_clients_via_ssh_fallback():
     rest_client = _FakeRestClient()
     ssh_client = _FakeSSHClient()
     device_service = _FakeDeviceService(rest_client, ssh_client)
-    
+
     # Make REST fail
     original_get = rest_client.get
-    
+
     async def failing_get(path: str, params: dict | None = None):
         if path == "/rest/interface/wireless/registration-table":
             raise Exception("REST API failed")
         return await original_get(path, params)
-    
+
     rest_client.get = failing_get
-    
+
     service = WirelessService(AsyncMock(), Settings())
     service.device_service = device_service
-    
+
     # Get wireless clients - should fallback to SSH
     clients = await service.get_wireless_clients("dev-1")
-    
+
     # Verify results from SSH
     assert len(clients) == 2
     assert clients[0]["interface"] == "wlan1"
@@ -286,7 +286,7 @@ async def test_get_wireless_clients_via_ssh_fallback():
     assert clients[0]["signal_strength"] == -65
     assert clients[0]["transport"] == "ssh"
     assert clients[0]["fallback_used"] is True
-    
+
     # Verify SSH was called
     assert ("execute", "/interface/wireless/registration-table/print") in ssh_client.calls
 
@@ -317,14 +317,14 @@ Columns: NAME, SSID, FREQUENCY, BAND
  1  D  wlan2   GuestNetwork  5180       5ghz-a/n/ac
 """
     interfaces = WirelessService._parse_wireless_print_output(output)
-    
+
     assert len(interfaces) == 2
     assert interfaces[0]["name"] == "wlan1"
     assert interfaces[0]["ssid"] == "TestNetwork"
     assert interfaces[0]["frequency"] == "2437"
     assert interfaces[0]["running"] is True
     assert interfaces[0]["disabled"] is False
-    
+
     assert interfaces[1]["name"] == "wlan2"
     assert interfaces[1]["ssid"] == "GuestNetwork"
     assert interfaces[1]["running"] is False
@@ -340,12 +340,12 @@ Columns: INTERFACE, MAC-ADDRESS, SIGNAL-STRENGTH
  1     wlan1      77:88:99:aa:bb:cc  -72
 """
     clients = WirelessService._parse_wireless_clients_output(output)
-    
+
     assert len(clients) == 2
     assert clients[0]["interface"] == "wlan1"
     assert clients[0]["mac_address"] == "11:22:33:44:55:66"
     assert clients[0]["signal_strength"] == -65
-    
+
     assert clients[1]["interface"] == "wlan1"
     assert clients[1]["mac_address"] == "77:88:99:aa:bb:cc"
     assert clients[1]["signal_strength"] == -72

@@ -106,7 +106,7 @@ class WirelessService:
                 return interfaces
             except Exception as ssh_exc:
                 logger.error(
-                    f"Both REST and SSH wireless interface listing failed",
+                    "Both REST and SSH wireless interface listing failed",
                     exc_info=ssh_exc,
                     extra={"device_id": device_id, "rest_error": str(rest_exc)},
                 )
@@ -291,7 +291,7 @@ class WirelessService:
                 return clients
             except Exception as ssh_exc:
                 logger.error(
-                    f"Both REST and SSH wireless client listing failed",
+                    "Both REST and SSH wireless client listing failed",
                     exc_info=ssh_exc,
                     extra={"device_id": device_id, "rest_error": str(rest_exc)},
                 )

@@ -1,7 +1,6 @@
 """MCP resources for wireless data (device://{device_id}/wireless URI scheme)."""
 
 import logging
-from typing import Any
 
 from fastmcp import FastMCP
 
@@ -11,7 +10,6 @@ from routeros_mcp.domain.services.wireless import WirelessService
 from routeros_mcp.infra.db.session import DatabaseSessionManager
 from routeros_mcp.mcp.errors import DeviceNotFoundError
 from routeros_mcp.mcp_resources.utils import (
-    create_resource_metadata,
     format_resource_content,
 )
 
