@@ -29,11 +29,12 @@ All design decisions for the 1.x line are captured in the [`docs/`](docs/) direc
 
 ### Phase 2 (CURRENT - In Progress)
 
-- ⚠️ **HTTP/SSE Transport** – Scaffold exists, needs completion
-  - Add `sse-starlette` dependency
-  - Integrate with FastMCP request handling
-  - OAuth/OIDC middleware implementation
-  - Resource subscription via SSE
+- ✅ **HTTP/SSE Transport Documentation** – Production deployment guides complete
+  - ✅ Deployment guide with system requirements, SSL/TLS, load balancing
+  - ✅ OAuth setup guides for Azure AD, Okta, Auth0
+  - ✅ Troubleshooting guide for common issues
+  - ✅ Python and curl client examples
+  - ⚠️ HTTP/SSE transport implementation needs completion (code exists, needs testing)
 - 🔜 **Read-Only Expansion** – Wireless, DHCP, bridge visibility
   - 6 new read-only tools for network topology
   - Additional troubleshooting prompts
@@ -331,6 +332,99 @@ routeros_retry_attempts: 2
 health_check_interval_seconds: 30
 health_check_jitter_seconds: 5
 ```
+
+### HTTP Transport Quickstart (Phase 2)
+
+For production deployments with multi-user access and OAuth authentication:
+
+#### Prerequisites
+
+- Valid SSL/TLS certificate (Let's Encrypt or commercial CA)
+- OAuth/OIDC provider configured (Azure AD, Okta, or Auth0)
+- PostgreSQL database (recommended for production)
+
+#### Configuration
+
+Create `config/prod.yaml`:
+
+```yaml
+# Production configuration
+environment: prod
+debug: false
+log_level: INFO
+log_format: json
+
+# HTTP Transport
+mcp_transport: http
+mcp_http_host: 0.0.0.0
+mcp_http_port: 8080
+mcp_http_base_path: /mcp
+
+# Database
+database_url: postgresql+asyncpg://user:password@localhost:5432/routeros_mcp
+database_pool_size: 20
+
+# OAuth/OIDC (REQUIRED for HTTP mode in production)
+oidc_enabled: true
+oidc_provider_url: https://your-provider.com
+oidc_client_id: your-client-id
+oidc_audience: https://mcp.example.com
+oidc_skip_verification: false  # NEVER true in production
+```
+
+#### Set Encryption Key
+
+```bash
+# Generate strong encryption key (32 bytes, base64-encoded)
+export ROUTEROS_MCP_ENCRYPTION_KEY=$(python3 -c "import os, base64; print(base64.b64encode(os.urandom(32)).decode())")
+
+# Store securely (use secrets manager in production)
+```
+
+#### Run HTTP Server
+
+```bash
+# Start server
+routeros-mcp --config config/prod.yaml
+
+# Or with systemd (see deployment guide)
+sudo systemctl start routeros-mcp
+```
+
+#### Test with Example Clients
+
+**Using curl:**
+
+```bash
+# Set environment
+export MCP_BASE_URL=https://mcp.example.com
+export OIDC_PROVIDER_URL=https://your-provider.com
+export OIDC_CLIENT_ID=your-client-id
+export OIDC_CLIENT_SECRET=your-client-secret
+
+# Run examples
+bash examples/curl_example.sh
+```
+
+**Using Python client:**
+
+```bash
+# Install dependencies
+pip install httpx authlib
+
+# Run client
+python examples/http_client.py --mcp-url https://mcp.example.com --device-id dev-001
+```
+
+#### Documentation
+
+For comprehensive deployment and OAuth setup guides:
+
+- **[HTTP/SSE Transport Deployment Guide](docs/20-http-sse-transport-deployment-guide.md)** - System requirements, SSL/TLS setup, load balancing, horizontal scaling
+- **[OAuth Setup: Azure AD](docs/21-oauth-setup-azure-ad.md)** - Step-by-step Azure AD integration
+- **[OAuth Setup: Okta](docs/22-oauth-setup-okta.md)** - Okta configuration and testing
+- **[OAuth Setup: Auth0](docs/23-oauth-setup-auth0.md)** - Auth0 application setup and claims
+- **[HTTP Transport Troubleshooting](docs/24-http-transport-troubleshooting.md)** - Common issues, debug logging, performance tuning
 
 ### Next Steps
 
