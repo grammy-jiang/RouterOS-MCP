@@ -45,12 +45,11 @@ All design decisions for the 1.x line are captured in the [`docs/`](docs/) direc
 
 ### Phase 3 (Planned)
 
-- 🔮 **Diagnostics Tools** – ping, traceroute, bandwidth-test (deferred from Phase 2)
+- 🔮 **Advanced Expert Workflows (single-device, lab/staging)** – static routes, templated NAT, selective firewall templates, policy-based routing, wireless RF/SSID/security, ACLs, VLAN, protocol tuning (plan/apply; disabled by default in production)
 - 🔮 **Admin UI/CLI** – Device management, plan viewing, credential rotation
 - 🔮 **Advanced Writes** – Single-device DHCP/bridge configuration (lab/staging only)
-- 🔮 SSH key authentication
-- 🔮 Advanced firewall write operations
-- 🔮 Client compatibility modes
+- ❌ Diagnostics deferred to Phase 4+
+- ❌ SSH key authentication & client compatibility deferred to Phase 4
 
 ## Current Implementation Status
 

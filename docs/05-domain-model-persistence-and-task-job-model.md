@@ -37,7 +37,7 @@ This section describes the **domain logic, business rules, and responsibilities*
 
 **Capability Flags** (Control tool access):
 - `allow_advanced_writes` (bool): Enable Advanced tier write operations (Phase 2)
-- `allow_professional_workflows` (bool): Enable Professional tier multi-device workflows (Phase 4)
+- `allow_professional_workflows` (bool): Enable Professional tier multi-device workflows (Phase 4) and approval workflows (Phase 5)
 - `allow_ssh_commands` (bool): Enable SSH command execution (default: false)
 
 **RouterOS Metadata** (Auto-populated from device):

@@ -426,7 +426,7 @@ class AuthorizationService:
             True if device accessible to user
         """
         # Phase 1: All users can access all devices (single-user deployment)
-        # Phase 4: Implement device scoping logic based on user.device_scope configuration
+        # Phase 5: Implement device scoping logic based on user.device_scope configuration
         return True
 ```
 
@@ -623,7 +623,7 @@ class DeviceService:
             devices = [d for d in devices if tag in d.tags]
 
         # Phase 1: No user device scope filtering (single-user deployment)
-        # Phase 4: Apply user device scope filtering based on user.device_scope
+        # Phase 5: Apply user device scope filtering based on user.device_scope
 
         return devices
 

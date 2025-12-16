@@ -1065,7 +1065,7 @@ This observability design provides comprehensive monitoring for MCP-based Router
 - **Capacity planning**: Track tool usage distribution, resource cache size, device fleet growth
 - **Compliance**: Audit logs separate from operational logs, long retention for sensitive operations
 
-**This observability design is production-ready for Phase 1 with clear extension paths for Phase 2 (resources/prompts) and Phase 4 (multi-user).**
+**This observability design is production-ready for Phase 1 with clear extension paths for Phase 2 (resources/prompts), Phase 4 (multi-device workflows), and Phase 5 (multi-user RBAC).**
 
 ---
 

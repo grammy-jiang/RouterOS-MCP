@@ -57,21 +57,24 @@ The MCP service architecture evolves across phases, with careful staging of comp
 
 **What's NOT Included:**
 - Resources and Prompts (deferred to Phase 2)
-- HTTP transport for MCP (deferred to Phase 4)
+- HTTP/SSE transport for MCP (deferred to Phase 2)
 - OAuth flows (OIDC token validation only, no OAuth Authorization Code flow)
 
 **Client Compatibility:** 100% of MCP clients (tools-only and full MCP clients)
 
 ---
 
-### Phase 2: Enhanced Workflows (Resources + Prompts)
+### Phase 2: Enhanced Workflows (Resources + Prompts + HTTP/SSE Transport)
 
-**Goal:** Richer user experience for capable MCP clients
+**Goal:** Richer user experience and remote access for capable MCP clients
 
 **Architecture Additions:**
 - **MCP Primitives:**
   - **Resources:** 12 resource URIs (device health, configs, fleet summaries)
   - **Prompts:** 8 workflow templates (dns_ntp_rollout, troubleshoot_dns_ntp, etc.)
+- **Transport:**
+  - **HTTP/SSE:** MCP protocol over HTTP (in addition to STDIO)
+  - **OIDC Middleware:** Bearer token validation for HTTP endpoints
 - **Infrastructure:**
   - **Resource Cache:** In-memory cache with TTL for device health/config
   - **Background Refresh:** Periodic job to update resource cache (every 60s)
@@ -85,11 +88,13 @@ The MCP service architecture evolves across phases, with careful staging of comp
 **What's Included:**
 - Efficient resource access for capable clients (Claude, VS Code)
 - Workflow guidance via prompts (DNS/NTP rollout, troubleshooting)
-- Backward compatibility: Phase-1 fallback tools still available for tools-only clients
+- HTTP/SSE transport for remote MCP clients
+- Single-user OIDC bearer token authentication
+- Backward compatibility: STDIO transport and Phase-1 fallback tools still available
 
 **What's NOT Included:**
-- HTTP transport (still STDIO only)
-- OAuth Authorization Code flow (still token validation only)
+- Multi-user OAuth Authorization Code flow (deferred to Phase 5)
+- Advanced Expert Workflows (firewall, routing, wireless; deferred to Phase 3)
 
 **Client Compatibility:**
 - **Full MCP clients** (40%): Get resources + prompts + tools
@@ -97,29 +102,114 @@ The MCP service architecture evolves across phases, with careful staging of comp
 
 ---
 
-### Phase 4: Remote/Enterprise (HTTP Transport + OAuth)
+### Phase 3: Advanced Expert Workflows (Single-Device Plan/Apply)
 
-**Goal:** Support remote MCP clients and OAuth-based authentication flows
+**Goal:** Enable advanced writes (firewall, routing, wireless, DHCP, bridge) with mandatory plan/apply guardrails for single-device operations in lab/staging environments
 
 **Architecture Additions:**
-- **Transport:**
-  - **HTTP/SSE:** MCP protocol over HTTP (in addition to STDIO)
-  - **WebSocket (optional):** For bidirectional streaming
-- **Security:**
-  - **OAuth Authorization Code + PKCE:** Full OAuth flow for browser-based clients
-  - **Token endpoint:** Issue short-lived access tokens for MCP API
-- **Deployment:**
-  - Cloudflare Tunnel can terminate at HTTP endpoint (not just forward STDIO)
-  - Load balancer can distribute HTTP/SSE requests across instances
+- **MCP Tools:**
+  - **Firewall:** Plan/apply workflows for filter rules (lab/staging only)
+  - **Routing:** Plan/apply workflows for static routes (non-core paths)
+  - **Wireless:** Plan/apply workflows for SSID/RF changes (lab/staging only)
+  - **DHCP:** Plan/apply workflows for DHCP server configuration (lab/staging only)
+  - **Bridge:** Plan/apply workflows for bridge ports and settings (lab/staging only)
+- **Safety Mechanisms:**
+  - Pre-checks for environment tags (lab/staging enforcement)
+  - Device capability flags (`allow_professional_workflows`, topic-specific flags)
+  - Risk classification per topic
+  - Approval token generation and validation
+  - Audit logs for all plan/apply operations
+- **Admin UI/CLI:**
+  - Device onboarding CLI
+  - Plan review and approval UI (browser-based or CLI)
+  - Audit log viewer
 
 **What's Included:**
-- MCP protocol over HTTP for remote clients (not just local STDIO)
-- OAuth login flow for admin UI and remote MCP clients
-- Approval token generation UI (for professional tools)
+- Professional-tier tools for single-device advanced writes
+- Plan/apply framework with mandatory approvals
+- Lab/staging environment enforcement
+- Admin tooling for device and plan management
+
+**What's NOT Included:**
+- Multi-device coordinated workflows (deferred to Phase 4)
+- Diagnostics tools (ping/traceroute/bandwidth-test; deferred to Phase 4)
+- SSH key authentication and client compatibility modes (deferred to Phase 4)
+
+**Client Compatibility:** 100% (STDIO or HTTP/SSE, client choice)
+
+---
+
+### Phase 4: Multi-Device Coordination & Diagnostics
+
+**Goal:** Support coordinated multi-device workflows, diagnostics, and SSH key authentication
+
+**Architecture Additions:**
+- **Multi-Device Workflows:**
+  - Batch plan/apply across multiple devices
+  - Staged rollout with health checks between batches
+  - Halt on failure with automatic rollback support
+- **Diagnostics Tools:**
+  - `tool/ping` (ICMP ping with streaming results)
+  - `tool/traceroute` (network traceroute with streaming results)
+  - `tool/bandwidth-test` (speed test with streaming results)
+- **SSH Enhancements:**
+  - SSH key-based authentication (in addition to password)
+  - Client compatibility modes for legacy RouterOS versions
+- **Automation:**
+  - Automated approval tokens for trusted environments
+  - Workflow orchestration for complex multi-device operations
+
+**What's Included:**
+- Coordinated multi-device plan/apply
+- Long-running diagnostics with JSON-RPC streaming
+- SSH key auth and client compatibility
+- Automated approvals for trusted workflows
+
+**What's NOT Included:**
+- Multi-user RBAC (deferred to Phase 5)
+- Approval workflow engine with separate approver roles (deferred to Phase 5)
+
+**Client Compatibility:** 100% (STDIO or HTTP/SSE, client choice)
+
+---
+
+### Phase 5: Multi-User RBAC & Governance
+
+### Phase 5: Multi-User RBAC & Governance
+
+**Goal:** Support multi-user access with role-based permissions, approval workflows, and enterprise governance
+
+**Architecture Additions:**
+- **Security:**
+  - **OAuth Authorization Code + PKCE:** Full OAuth flow for browser-based clients
+  - **Multi-user RBAC:** Role-based access control for users and devices
+  - **Per-user device scopes:** Users can only access devices they own or are granted access to
+- **Approval Workflow Engine:**
+  - Separate approver roles (initiator vs. approver)
+  - Approval queue UI
+  - Approval notifications (email, Slack, etc.)
+  - Approval delegation and escalation
+- **Governance & Observability:**
+  - Per-user audit trails
+  - Compliance reporting
+  - Policy enforcement (e.g., require approval for production devices)
+  - Resource quotas and rate limiting per user
+- **Deployment:**
+  - Token endpoint for OAuth access tokens
+  - Load balancer for distributed HTTP/SSE instances
+  - Shared session store (Redis) for multi-instance deployments
+
+**What's Included:**
+- Multi-user OAuth login flow
+- Role-based access control
+- Per-user device scopes
+- Approval workflow engine with separate approver roles
+- Enterprise governance and compliance features
 
 **What's Unchanged:**
-- STDIO transport still supported (for backward compatibility)
-- All Phase 1 and Phase 2 features remain
+- STDIO and HTTP/SSE transports still supported
+- Single-user mode still available (backward compatibility)
+- All Phase 1-4 features remain
 
 **Client Compatibility:** 100% (STDIO or HTTP/SSE, client choice)
 
@@ -152,8 +242,8 @@ At a high level, the system is split into three layers:
 │  Claude,     │ (v7 REST API)│  Okta)       │                    │
 │  VS Code)    │              │              │                    │
 └──────┬───────┴──────────────┴──────┬───────┴─────────┬──────────┘
-       │ STDIO (Phase 1)             │ HTTPS           │ HTTPS
-       │ HTTP/SSE (Phase 4)          │                 │
+       │ STDIO (Phase 1-5)           │ HTTPS           │ HTTPS
+       │ HTTP/SSE (Phase 2-5)        │                 │
        ▼                              ▼                 ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    MCP SERVER (Linux Host/Container)             │
@@ -279,7 +369,7 @@ Legend:
      - System, interface, IP, DNS, NTP, DHCP, routing, logs, diagnostics, etc.  
      - Encapsulate validation, idempotency, and mapping between domain objects and RouterOS API calls.  
    - **Plan & job orchestration service**:  
-     - Implements plan/apply, multi-device workflows, and long-running tasks (Phase 4–5).  
+     - Implements plan/apply, multi-device workflows, and long-running tasks (Phase 3-5).  
      - Coordinates pre-checks, validations, rollouts with backoff, and rollbacks.  
    - **Audit & policy service**:  
      - Applies cross-cutting policies (e.g., environment/capability constraints).  
@@ -315,7 +405,7 @@ Legend:
 
 The MCP service uses different transports across phases, balancing universal client compatibility with deployment flexibility:
 
-**Phase 1: STDIO Transport (Universal Client Compatibility)**
+**Phase 1-2: STDIO Transport (Universal Client Compatibility)**
 
 - **Primary transport**: STDIO (stdin/stdout) for MCP JSON-RPC protocol
 - **Why STDIO**: Ensures compatibility with 100% of MCP clients:
@@ -335,12 +425,12 @@ The MCP service uses different transports across phases, balancing universal cli
 - **Not MCP protocol**: This is standard REST/JSON for UIs, not MCP JSON-RPC
 - **Security**: Protected by OIDC, typically behind Cloudflare Tunnel
 
-**Phase 4: HTTP Transport for MCP Protocol (Remote/Enterprise)**
+**Phase 2-5: HTTP Transport for MCP Protocol (Remote/Enterprise)**
 
-- **Future evolution**: MCP protocol over HTTP/SSE (not STDIO)
-- **When needed**: Remote clients, cloud deployments, OAuth flows
+- **Evolution**: MCP protocol over HTTP/SSE (in addition to STDIO)
+- **When used**: Remote clients, cloud deployments, OAuth flows
 - **Phase 1 compatibility**: STDIO remains supported even after HTTP is added
-- **Implementation note**: FastMCP supports both STDIO and HTTP transports; Phase 1 uses STDIO exclusively
+- **Implementation note**: FastMCP supports both STDIO and HTTP transports; Phase 1 uses STDIO exclusively, Phase 2+ adds HTTP/SSE
 
 **Transport Selection Logic**
 
@@ -350,7 +440,7 @@ Phase 1 deployment:
   Admin API: HTTP on :8080 (human operators)
   Logging: stderr only
 
-Phase 4 deployment:
+Phase 2+ deployment:
   MCP protocol: STDIO OR HTTP/SSE (client choice)
   Admin API: HTTP on :8080
   Logging: stderr (STDIO mode) or structured JSON logs (HTTP mode)
@@ -635,7 +725,7 @@ The architecture enforces multiple security zones with explicit trust boundaries
 
 ### Multi-device workflows
 
-- Multi-device workflows (Phase 4–5) are implemented via plan/apply:  
+- Multi-device workflows (Phase 3-5) are implemented via plan/apply:  
   - Plan generation computes changes across many devices and writes a `Plan` entity to the DB.  
   - Apply executes the plan in stages (e.g., batches) with health checks and potential rollback.  
 - The orchestration service must consider:

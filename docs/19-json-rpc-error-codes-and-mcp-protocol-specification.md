@@ -227,7 +227,7 @@ These extend JSON-RPC for MCP tool operations:
 }
 ```
 
-**Phase 1 Note:** In single-user stdio mode, this error is rare (OS-level auth). Appears in Phase 4 with OAuth/OIDC.
+**Phase 1 Note:** In single-user stdio mode, this error is rare (OS-level auth). Appears in Phase 5 with OAuth/OIDC multi-user.
 
 ---
 
@@ -236,7 +236,7 @@ These extend JSON-RPC for MCP tool operations:
 **When:** User/device lacks permission for operation
 
 **Scenarios:**
-1. Tool tier exceeds user role (Phase 4+)
+1. Tool tier exceeds user role (Phase 5+)
 2. Device capability flag disabled
 3. Environment mismatch
 4. Operation not allowed on device
@@ -555,7 +555,7 @@ These extend JSON-RPC for MCP tool operations:
 
 ---
 
-### Plan/Apply Errors (Phase 4+)
+### Plan/Apply Errors (Phase 3+)
 
 #### `PLAN_NOT_APPROVED` (-32030)
 
@@ -715,7 +715,7 @@ def raise_forbidden_tier(device: Device, tool_tier: str) -> None:
 | `-32000` to `-32009` | General MCP | Internal, Unauthorized, Forbidden, Not found |
 | `-32010` to `-32019` | Device communication | Unreachable, Auth failed, Device error |
 | `-32020` to `-32029` | Configuration | Invalid config, Unsafe operation |
-| `-32030` to `-32039` | Plan/Apply (Phase 4+) | Not approved, Expired |
+| `-32030` to `-32039` | Plan/Apply (Phase 3+) | Not approved, Expired |
 
 ### Phase 1 Most Common Errors
 

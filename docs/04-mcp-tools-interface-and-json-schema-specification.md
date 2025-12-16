@@ -19,7 +19,7 @@ The running service currently registers **34 tools**. This list is authoritative
 - **Firewall write (1):** `update_firewall_address_list` (advanced)
 - **Professional workflow (3):** `config_plan_dns_ntp_rollout`, `config_apply_dns_ntp_rollout`, `config_rollback_plan`
 
-> Diagnostics (`ping`, `traceroute`) are implemented in code but **not registered** in Phase 1; they will be enabled in a later phase once guardrails are finalized.
+> Diagnostics (`ping`, `traceroute`) are implemented in code but **not registered** in Phase 1-2-3; they will be enabled in Phase 4+ once guardrails are finalized.
 
 Prompts and resources currently exposed are listed in [Doc 15](15-mcp-resources-and-prompts-design.md#phase-1-current-implementation-snapshot).
 
@@ -3237,7 +3237,7 @@ Side effects:
 - Audit logged per device
 
 Safety:
-- Requires approval token (Phase 4: multi-user approval; Phase 1: self-approval)
+- Requires approval token (Phase 5: multi-user approval; Phase 1-4: self-approval)
 - Plan must be valid and not expired
 - Requires allow_professional_workflows=true on devices
 - Rollback available via snapshots
@@ -3262,7 +3262,7 @@ Note: Execution is sequential across devices to minimize blast radius.
     "name": "config/apply-dns-ntp-rollout",
     "arguments": {
       "plan_id": "plan-20250115-001",
-      "approval_token": "approval-token-xyz" // Phase 4: multi-user approval; Phase 1: self-approval allowed
+      "approval_token": "approval-token-xyz" // Phase 5: multi-user approval; Phase 1-4: self-approval allowed
     }
   }
 }
@@ -4239,7 +4239,7 @@ Each tool must embed its safety rules and validation logic:
 2. Check device capability flags for tool tier
 3. No user role checks (all operations allowed at OS level)
 
-### Phase 4 (Multi-User)
+### Phase 5 (Multi-User RBAC)
 
 **Authorization Model:**
 
@@ -4441,7 +4441,7 @@ Resources are URI-addressable content that MCP clients can read. Unlike tools (w
 
 ## Streaming Support for Long-Running Tools (Phase 3)
 
-**Phase 3 may add JSON-RPC streaming for long-running diagnostics.**
+**Phase 4 may add JSON-RPC streaming for long-running diagnostics.**
 
 ### Streaming-Compatible Tools
 

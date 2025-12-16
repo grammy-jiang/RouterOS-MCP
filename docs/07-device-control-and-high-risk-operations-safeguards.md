@@ -3,7 +3,7 @@
 ## Purpose
 
 Define which high-risk operations exist on RouterOS (e.g., reboot, upgrade, reset configuration, interface shutdown on WAN, major routing and firewall changes), how and whether they are exposed via MCP, and what guardrails, approvals, and rollbacks are required to keep usage safe. This document serves as the “safety bible” for adding or changing MCP tools that can impact device reachability or production traffic.
-
+**Phasing Note**: Phase 3 introduces Advanced Expert Workflows (firewall, routing, wireless, DHCP, bridge) as **single-device, lab/staging-only operations** with mandatory plan/apply workflows. Multi-device coordination and diagnostics (ping/traceroute/bandwidth-test) are deferred to Phase 4+. Phase 5 extends to multi-user RBAC and approval workflow engines.
 ---
 
 ## Catalog of high-risk actions (reboot, system upgrade, reset, interface disable on WAN, routing/firewall changes, wireless RF changes)

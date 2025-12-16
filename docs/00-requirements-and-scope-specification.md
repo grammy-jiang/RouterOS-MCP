@@ -28,7 +28,7 @@ This service leverages the three core MCP primitives to provide safe, ergonomic 
 
 - **Tools** (Model-controlled, dynamic queries and operations):
 
-  - Fundamental tier: Read-only queries (`device/list-devices`, `dns/get-status`; network diagnostics such as ping/traceroute are deferred to Phase 3)
+  - Fundamental tier: Read-only queries (`device/list-devices`, `dns/get-status`; network diagnostics such as ping/traceroute are deferred to Phase 4)
   - Advanced tier: Single-device low-risk writes (`dns/update-servers`, `system/set-identity`)
   - Professional tier: Multi-device orchestration (`config/plan-dns-ntp-rollout`, `config/apply-dns-ntp-rollout`)
   - Target: 40 tools in Phase 1, organized by category (device, dns, ntp, firewall, logs, system, tool, config, audit)
@@ -48,7 +48,7 @@ This service leverages the three core MCP primitives to provide safe, ergonomic 
   - Security: `security_audit`, `comprehensive_device_review`
   - Introduced in Phase 2 alongside resources
 
-**Phased rollout strategy:**
+**Phased rollout strategy (revised):**
 
 - Phase 1 (COMPLETED): Tools + Resources + Prompts + STDIO transport + OS-level security
   - Full local MCP client support (Claude Desktop, VS Code)
@@ -59,10 +59,9 @@ This service leverages the three core MCP primitives to provide safe, ergonomic 
   - OAuth/OIDC integration for remote access
   - Additional read-only tools (wireless, DHCP, bridge visibility)
   - Resource caching and performance optimization
-- Phase 3+: Advanced write operations and diagnostics
-  - Network diagnostics (ping/traceroute/bandwidth-test)
-  - SSH key authentication
-  - Advanced firewall and routing write operations
+- Phase 3: Admin UI/CLI, single-device advanced writes, Advanced Expert Workflows (lab/staging). Diagnostics and SSH key auth postponed.
+- Phase 4: Coordinated multi-device workflows, automated approval tokens, diagnostics (ping/traceroute/bandwidth-test) and SSH key auth/client compatibility.
+- Phase 5: Multi-user RBAC, approval workflow engine, per-user device scopes, enterprise governance & observability.
 
 This approach ensures local deployments work fully in Phase 1, while Phase 2 enables remote/enterprise deployments and expands read-only visibility.
 
@@ -127,8 +126,8 @@ When an operator uses the `dns_ntp_rollout` prompt to update DNS servers fleet-w
 When an engineer uses the `troubleshoot_dns_ntp` prompt for a device with DNS problems:
 
 1. **Phase 1 - Current State**: Prompt guides AI to call `dns/get-status` + `ntp/get-status` → identifies no DNS servers configured
-2. **Phase 2 - Connectivity**: (Deferred to Phase 3) AI would call `tool/ping` with `address=1.1.1.1` → verifies upstream connectivity works
-3. **Phase 3 - Firewall**: AI calls `firewall/list-filter-rules` → finds no blocking rules
+2. **Phase 2 - Connectivity**: (Deferred to Phase 4) AI would call `tool/ping` with `address=1.1.1.1` → verifies upstream connectivity works
+3. **Phase 4 - Firewall**: AI calls `firewall/list-filter-rules` → finds no blocking rules
 4. **Phase 4 - Logs**: AI calls `logs/get-recent` with `topics=["system", "error"]` → finds "DNS server list empty" warning
 5. **Phase 5 - Resolution**: AI recommends `dns/update-servers` with Cloudflare DNS → operator approves, DNS configured
 6. **Verification**: AI re-runs `dns/get-status` → confirms DNS servers now configured, cache active
@@ -185,10 +184,10 @@ _04 – MCP Tools Interface & JSON Schemas_
 - Complete HTTP/SSE transport with OAuth/OIDC authentication and resource subscriptions (SSE)
 - Add 6 read-only visibility tools (wireless, DHCP, bridge)
 - Extend resources with wireless, DHCP, bridge URIs and caching with TTL + invalidation
-- Keep diagnostics (ping/traceroute/bandwidth-test) deferred to Phase 3
-- Keep SSH key auth and client compatibility modes deferred to Phase 3
+- Keep diagnostics (ping/traceroute/bandwidth-test) deferred to Phase 4
+- Keep SSH key auth and client compatibility modes deferred to Phase 4
 
-**Total Phase 1 tool count: ~39 tools** (14 fundamental + 10 advanced + 8 professional + 6 fallbacks + 1 admin onboarding tool; diagnostics deferred to Phase 3)
+**Total Phase 1 tool count: ~39 tools** (14 fundamental + 10 advanced + 8 professional + 6 fallbacks + 1 admin onboarding tool; diagnostics deferred to Phase 4)
 
 **Design principles for tool count:**
 

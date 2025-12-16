@@ -455,7 +455,7 @@ class MetricsCollector:
 
 **Jitter**: All scheduled jobs include ±10% randomized jitter to avoid thundering herd effects.
 
-**Phase 4 Adjustments** (multi-user, 100+ devices):
+**Phase 4 Adjustments** (multi-device workflows, 50+ devices):
 - Increase intervals for non-critical metrics (e.g., 120s health checks)
 - Implement adaptive polling based on device class/priority
 - Add time-series database for efficient storage
@@ -1489,7 +1489,7 @@ async def list_interfaces(device_id: str, limit: int = 100, offset: int = 0):
 - **Exposure**: MCP tools only (stdio transport)
 - **Retention**: 30 days health checks, 1000 records per device
 
-### Phase 4: Multi-User, Production Scale
+### Phase 5: Multi-User, Production Scale (100+ devices)
 
 - **Storage**: PostgreSQL + TimescaleDB for time-series
 - **Collection**: Distributed job queue (Celery, RQ)
