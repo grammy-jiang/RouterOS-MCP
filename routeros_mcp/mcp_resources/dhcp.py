@@ -1,7 +1,6 @@
 """MCP resources for DHCP data (device://{device_id}/dhcp-* URI scheme)."""
 
 import logging
-from typing import Any
 
 from fastmcp import FastMCP
 
@@ -9,10 +8,7 @@ from routeros_mcp.config import Settings
 from routeros_mcp.domain.services.device import DeviceService
 from routeros_mcp.domain.services.dhcp import DHCPService
 from routeros_mcp.infra.db.session import DatabaseSessionManager
-from routeros_mcp.mcp_resources.utils import (
-    create_resource_metadata,
-    format_resource_content,
-)
+from routeros_mcp.mcp_resources.utils import format_resource_content
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +65,8 @@ def register_dhcp_resources(
                 content = format_resource_content(result, "application/json")
 
                 logger.info(
-                    f"Resource accessed: device://{device_id}/dhcp-server",
+                    "Resource accessed: device://%s/dhcp-server",
+                    device_id,
                     extra={"device_id": device_id, "server_count": result["total_count"]},
                 )
 
@@ -77,7 +74,9 @@ def register_dhcp_resources(
 
             except Exception as e:
                 logger.error(
-                    f"Failed to fetch DHCP server status for device {device_id}: {e}",
+                    "Failed to fetch DHCP server status for device %s: %s",
+                    device_id,
+                    e,
                     exc_info=True,
                 )
                 raise
@@ -123,7 +122,8 @@ def register_dhcp_resources(
                 content = format_resource_content(result, "application/json")
 
                 logger.info(
-                    f"Resource accessed: device://{device_id}/dhcp-leases",
+                    "Resource accessed: device://%s/dhcp-leases",
+                    device_id,
                     extra={"device_id": device_id, "lease_count": result["total_count"]},
                 )
 
@@ -131,7 +131,9 @@ def register_dhcp_resources(
 
             except Exception as e:
                 logger.error(
-                    f"Failed to fetch DHCP leases for device {device_id}: {e}",
+                    "Failed to fetch DHCP leases for device %s: %s",
+                    device_id,
+                    e,
                     exc_info=True,
                 )
                 raise

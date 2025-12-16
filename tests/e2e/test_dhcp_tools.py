@@ -9,8 +9,7 @@ from routeros_mcp.config import Settings
 from routeros_mcp.domain.services.device import DeviceService
 from routeros_mcp.domain.services.dhcp import DHCPService
 from routeros_mcp.infra.db.session import get_session_factory
-from routeros_mcp.mcp_tools.dhcp import register_dhcp_tools
-from tests.e2e.e2e_test_utils import create_test_mcp_server, MockRouterOSDevice
+from tests.e2e.e2e_test_utils import MockRouterOSDevice
 
 
 @pytest.fixture

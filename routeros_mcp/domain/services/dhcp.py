@@ -86,7 +86,8 @@ class DHCPService:
             Exception,
         ) as rest_exc:
             logger.warning(
-                f"REST get_dhcp_server_status failed, attempting SSH fallback: {rest_exc}",
+                "REST get_dhcp_server_status failed, attempting SSH fallback: %s",
+                rest_exc,
                 extra={"device_id": device_id},
             )
             try:
@@ -196,13 +197,13 @@ class DHCPService:
                         idx += 1
                     
                     # Remaining parts: name, interface, lease-time, address-pool
-                    if idx + 2 < len(parts):
+                    if idx + 3 < len(parts):
                         name = parts[idx]
                         interface = parts[idx + 1]
-                        lease_time = parts[idx + 2] if idx + 2 < len(parts) else ""
-                        address_pool = parts[idx + 3] if idx + 3 < len(parts) else ""
+                        lease_time = parts[idx + 2]
+                        address_pool = parts[idx + 3]
                         
-                        disabled = "X" in flags or "D" in flags
+                        disabled = "X" in flags
                         
                         server_data = {
                             "name": name,
@@ -215,7 +216,7 @@ class DHCPService:
                         servers.append(server_data)
                         
                 except (IndexError, ValueError) as e:
-                    logger.debug(f"Failed to parse DHCP server line: {line}", exc_info=e)
+                    logger.debug("Failed to parse DHCP server line: %s", line, exc_info=e)
                     continue
 
             return {
@@ -259,7 +260,8 @@ class DHCPService:
             Exception,
         ) as rest_exc:
             logger.warning(
-                f"REST get_dhcp_leases failed, attempting SSH fallback: {rest_exc}",
+                "REST get_dhcp_leases failed, attempting SSH fallback: %s",
+                rest_exc,
                 extra={"device_id": device_id},
             )
             try:
@@ -396,12 +398,11 @@ class DHCPService:
                         continue
                     
                     # Parse lease fields: address, mac-address, client-id, host-name, server
+                    # Extract up to 5 fields, pad with empty strings if missing
                     if idx < len(parts):
-                        address = parts[idx] if idx < len(parts) else ""
-                        mac_address = parts[idx + 1] if idx + 1 < len(parts) else ""
-                        client_id = parts[idx + 2] if idx + 2 < len(parts) else ""
-                        host_name = parts[idx + 3] if idx + 3 < len(parts) else ""
-                        server = parts[idx + 4] if idx + 4 < len(parts) else ""
+                        address, mac_address, client_id, host_name, server = (
+                            (parts[idx:idx+5] + [""] * 5)[:5]
+                        )
                         
                         lease_data = {
                             "address": address,
@@ -415,7 +416,7 @@ class DHCPService:
                         active_leases.append(lease_data)
                         
                 except (IndexError, ValueError) as e:
-                    logger.debug(f"Failed to parse DHCP lease line: {line}", exc_info=e)
+                    logger.debug("Failed to parse DHCP lease line: %s", line, exc_info=e)
                     continue
 
             return {
