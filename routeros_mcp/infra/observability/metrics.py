@@ -150,6 +150,41 @@ mcp_resource_reads_total = Counter(
     registry=_registry,
 )
 
+# Resource Cache Metrics
+cache_hits_total = Counter(
+    "routeros_mcp_cache_hits_total",
+    "Total number of cache hits",
+    ["resource_uri"],
+    registry=_registry,
+)
+
+cache_misses_total = Counter(
+    "routeros_mcp_cache_misses_total",
+    "Total number of cache misses",
+    ["resource_uri"],
+    registry=_registry,
+)
+
+cache_evictions_total = Counter(
+    "routeros_mcp_cache_evictions_total",
+    "Total number of cache evictions (LRU)",
+    registry=_registry,
+)
+
+cache_fetch_duration_seconds = Histogram(
+    "routeros_mcp_cache_fetch_duration_seconds",
+    "Duration of resource fetch operations (cache + RouterOS)",
+    ["resource_uri", "cache_status"],
+    buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+    registry=_registry,
+)
+
+cache_size_entries = Gauge(
+    "routeros_mcp_cache_size_entries",
+    "Current number of entries in cache",
+    registry=_registry,
+)
+
 # Authentication/Authorization Metrics
 auth_checks_total = Counter(
     "routeros_mcp_auth_checks_total",
@@ -354,6 +389,54 @@ def record_authz_check(tool_tier: str, success: bool) -> None:
     authz_checks_total.labels(tool_tier=tool_tier, status=status).inc()
 
 
+def record_cache_hit(resource_uri: str) -> None:
+    """Record a cache hit.
+
+    Args:
+        resource_uri: Resource URI that was cached
+    """
+    cache_hits_total.labels(resource_uri=resource_uri).inc()
+
+
+def record_cache_miss(resource_uri: str) -> None:
+    """Record a cache miss.
+
+    Args:
+        resource_uri: Resource URI that was not in cache
+    """
+    cache_misses_total.labels(resource_uri=resource_uri).inc()
+
+
+def record_cache_eviction() -> None:
+    """Record a cache eviction (LRU)."""
+    cache_evictions_total.inc()
+
+
+def record_cache_fetch(
+    resource_uri: str, duration: float, cache_hit: bool
+) -> None:
+    """Record resource fetch duration and cache status.
+
+    Args:
+        resource_uri: Resource URI being fetched
+        duration: Fetch duration in seconds
+        cache_hit: Whether the fetch was served from cache
+    """
+    cache_status = "hit" if cache_hit else "miss"
+    cache_fetch_duration_seconds.labels(
+        resource_uri=resource_uri, cache_status=cache_status
+    ).observe(duration)
+
+
+def update_cache_size(size: int) -> None:
+    """Update cache size gauge.
+
+    Args:
+        size: Current number of entries in cache
+    """
+    cache_size_entries.set(size)
+
+
 __all__ = [
     "get_registry",
     "get_metrics_text",
@@ -365,4 +448,9 @@ __all__ = [
     "record_resource_read",
     "record_auth_check",
     "record_authz_check",
+    "record_cache_hit",
+    "record_cache_miss",
+    "record_cache_eviction",
+    "record_cache_fetch",
+    "update_cache_size",
 ]
