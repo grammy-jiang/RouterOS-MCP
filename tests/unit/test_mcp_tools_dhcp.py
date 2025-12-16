@@ -126,10 +126,10 @@ class TestMCPToolsDHCP(unittest.TestCase):
         mock_device_service_cls.return_value = FakeDeviceService()
 
         fake_dhcp_service = FakeDHCPService()
-        
+
         async def empty_server_status(device_id):
             return {"servers": [], "total_count": 0}
-        
+
         fake_dhcp_service.get_dhcp_server_status = empty_server_status
         mock_dhcp_service_cls.return_value = fake_dhcp_service
 
@@ -151,10 +151,10 @@ class TestMCPToolsDHCP(unittest.TestCase):
         mock_device_service_cls.return_value = FakeDeviceService()
 
         fake_dhcp_service = FakeDHCPService()
-        
+
         async def empty_leases(device_id):
             return {"leases": [], "total_count": 0}
-        
+
         fake_dhcp_service.get_dhcp_leases = empty_leases
         mock_dhcp_service_cls.return_value = fake_dhcp_service
 
