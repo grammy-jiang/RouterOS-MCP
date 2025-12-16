@@ -1,0 +1,358 @@
+name: troubleshoot-wireless
+description: Diagnostic procedures for wireless connectivity and performance issues
+
+arguments:
+  - name: device_id
+    description: Device to troubleshoot (optional, shows device selection if omitted)
+    type: string
+    required: false
+  
+  - name: issue_type
+    description: Type of wireless issue being investigated
+    type: string
+    enum: [connectivity, performance, clients, configuration]
+    required: false
+    default: connectivity
+
+messages:
+  - role: user
+    content: |
+      # Wireless Troubleshooting Guide
+      {% if not device_id %}
+      
+      ## Getting Started
+      To get device-specific troubleshooting, provide a `device_id` parameter.
+      
+      ### Find Devices with Wireless
+      **Tool:** `device/list`
+      
+      ```json
+      {
+        "environment": "lab"
+      }
+      ```
+      
+      Review the list and identify devices with wireless interfaces.
+      Once you have a device_id, re-run this prompt with that parameter.
+      
+      ## Common Wireless Issues
+      
+      ### Connectivity Problems
+      - SSID not broadcasting or visible
+      - Clients cannot connect to wireless network
+      - Intermittent disconnections
+      - Authentication failures
+      
+      ### Performance Issues
+      - Slow wireless speeds
+      - Poor signal strength
+      - High interference or noise
+      - Channel congestion
+      
+      {% else %}
+      
+      ## Troubleshooting Wireless: {{ device_name }}
+      
+      **Device ID:** {{ device_id }}
+      **Environment:** {{ device_environment }}
+      **Issue Type:** {{ issue_type }}
+      
+      ---
+      
+      ## Quick Wireless Diagnostics
+      
+      ### Step 1: Check Wireless Interfaces
+      **Tool:** `wireless/get-interfaces`
+      
+      ```json
+      {
+        "device_id": "{{ device_id }}"
+      }
+      ```
+      
+      **Review:**
+      - Are wireless interfaces enabled (disabled=false)?
+      - Are wireless interfaces running (running=true)?
+      - What SSIDs are configured?
+      - What frequency bands are used (2.4GHz, 5GHz)?
+      - What is the TX power setting?
+      - What channel is each interface using?
+      
+      **Expected:** At least one interface should be enabled and running.
+      **If none found:** Device may not have wireless capability.
+      
+      ---
+      
+      ### Step 2: Check Connected Clients
+      **Tool:** `wireless/get-clients`
+      
+      ```json
+      {
+        "device_id": "{{ device_id }}"
+      }
+      ```
+      
+      **Review:**
+      - How many clients are connected?
+      - What are the signal strengths (RSSI in dBm)?
+      - What connection rates are clients using?
+      - Are there clients with poor signal (< -70 dBm)?
+      
+      **Signal Quality Reference:**
+      - Excellent: -30 to -50 dBm
+      - Good: -50 to -60 dBm
+      - Fair: -60 to -70 dBm
+      - Poor: -70 to -80 dBm
+      - Very Poor: < -80 dBm
+      
+      ---
+      
+      ### Step 3: Check Device Connectivity
+      **Tool:** `device/check-connectivity`
+      
+      ```json
+      {
+        "device_id": "{{ device_id }}"
+      }
+      ```
+      
+      **Expected:** Device should respond within 2-5 seconds.
+      **If fails:** Device may be unreachable - check network connectivity first.
+      
+      ---
+      
+      ## Issue-Specific Diagnostics
+      
+      {% if issue_type == 'connectivity' %}
+      ### Wireless Connectivity Issues
+      
+      **Symptom:** Clients cannot connect or SSID not visible
+      
+      **Step 1: Verify SSID Configuration**
+      - Check wireless interface is NOT disabled
+      - Verify SSID name is configured
+      - Check if SSID is hidden (broadcast setting)
+      - Verify wireless mode (ap, station, etc.)
+      
+      **Step 2: Check Security Settings**
+      - Verify security profile is configured
+      - Check authentication method (WPA2, WPA3, etc.)
+      - Ensure pre-shared key is set correctly
+      - Verify encryption type matches client capabilities
+      
+      **Step 3: Check Interface Status**
+      - Interface should be running=true
+      - Verify frequency and channel are valid
+      - Check TX power is appropriate
+      - Ensure no regulatory restrictions
+      
+      **Common Resolutions:**
+      - Enable disabled wireless interface
+      - Verify SSID broadcast is enabled
+      - Check security settings match client expectations
+      - Ensure frequency band supported by clients
+      - Verify channel is allowed in your region
+      
+      {% elif issue_type == 'performance' %}
+      ### Wireless Performance Issues
+      
+      **Symptom:** Slow speeds or poor connection quality
+      
+      **Step 1: Check Signal Strength**
+      Use `wireless/get-clients` to review signal strength:
+      - Clients with signal < -70 dBm will have poor performance
+      - Multiple clients with poor signal indicate AP placement issue
+      - Check for physical obstructions or distance
+      
+      **Step 2: Check Channel Utilization**
+      Review wireless interface configuration:
+      - Is the channel congested?
+      - Are there overlapping channels nearby?
+      - Consider using 5GHz band if available
+      - Use channel width appropriate for environment
+      
+      **Step 3: Check Client Connection Rates**
+      Review TX/RX rates from `wireless/get-clients`:
+      - Low rates indicate poor signal or interference
+      - Legacy clients (802.11b/g) can slow down entire network
+      - Consider minimum rate enforcement
+      
+      **Step 4: Check for Interference**
+      - Review signal-to-noise ratio from client stats
+      - High noise floor indicates interference
+      - Common sources: microwaves, Bluetooth, other WiFi
+      
+      **Common Resolutions:**
+      - Relocate AP for better coverage
+      - Change to less congested channel
+      - Reduce TX power if causing interference
+      - Upgrade to 5GHz band to avoid 2.4GHz congestion
+      - Enable band steering if available
+      - Set minimum connection rate to prevent legacy clients
+      
+      {% elif issue_type == 'clients' %}
+      ### Wireless Client Issues
+      
+      **Symptom:** Specific clients having problems
+      
+      **Step 1: Identify Problem Clients**
+      Use `wireless/get-clients` to review:
+      - Which clients have poor signal strength?
+      - Which clients have low connection rates?
+      - Are there clients with high uptime (stuck connections)?
+      
+      **Step 2: Check Client MAC Address**
+      - Verify client is not in access list (if used)
+      - Check for MAC address filtering
+      - Ensure client limit not reached
+      
+      **Step 3: Review Client Statistics**
+      - Check TX/RX packet counts for errors
+      - Review retransmission rates
+      - Check for packet loss indicators
+      
+      **Common Resolutions:**
+      - Move client closer to AP
+      - Remove client from deny list if applicable
+      - Disconnect and reconnect stuck clients
+      - Update client wireless drivers
+      - Check client device wireless capabilities
+      
+      {% elif issue_type == 'configuration' %}
+      ### Wireless Configuration Issues
+      
+      **Symptom:** Configuration doesn't match expectations
+      
+      **Step 1: Review Wireless Interface Config**
+      Use `wireless/get-interfaces` to verify:
+      - SSID names are correct
+      - Frequency bands are as expected
+      - Channel selection (auto or manual)
+      - TX power levels are appropriate
+      - Operating modes are correct
+      
+      **Step 2: Compare with Standards**
+      - Check regulatory domain settings
+      - Verify channel width (20MHz, 40MHz, 80MHz)
+      - Review security profile settings
+      - Check VLAN configuration if applicable
+      
+      **Step 3: Review Audit Logs**
+      **Resource:** `audit://events/by-device/{{ device_id }}`
+      - Check for recent wireless configuration changes
+      - Identify who made changes and when
+      
+      **Common Resolutions:**
+      - Update SSID to match naming convention
+      - Set appropriate channel and width
+      - Adjust TX power based on coverage needs
+      - Enable/disable interfaces as needed
+      - Update security settings to match policy
+      
+      {% endif %}
+      
+      ---
+      
+      ## Additional Diagnostic Tools
+      
+      ### Check System Health
+      **Tool:** `system/get-overview`
+      
+      ```json
+      {
+        "device_id": "{{ device_id }}"
+      }
+      ```
+      
+      **Review:**
+      - CPU usage (high load can affect wireless performance)
+      - Memory usage
+      - Temperature (overheating can cause issues)
+      
+      ---
+      
+      ### Check Interface Status
+      **Tool:** `interface/list`
+      
+      ```json
+      {
+        "device_id": "{{ device_id }}"
+      }
+      ```
+      
+      **Review:**
+      - Verify wireless interfaces are UP
+      - Check for errors or drops
+      - Review traffic statistics
+      
+      ---
+      
+      ## Common Wireless Issues and Solutions
+      
+      ### SSID Not Broadcasting
+      - **Cause:** Interface disabled or SSID not configured
+      - **Resolution:** Enable interface and verify SSID name
+      
+      ### Clients Cannot Connect
+      - **Cause:** Security mismatch or wrong password
+      - **Resolution:** Verify security profile and pre-shared key
+      
+      ### Poor Signal Strength
+      - **Cause:** Distance, obstructions, or interference
+      - **Resolution:** Relocate AP, adjust TX power, change channel
+      
+      ### Intermittent Disconnections
+      - **Cause:** Interference, roaming issues, or congestion
+      - **Resolution:** Change channel, reduce client count, check for interference
+      
+      ### Slow Performance
+      - **Cause:** Channel congestion, poor signal, legacy clients
+      - **Resolution:** Use 5GHz band, optimize channel selection, set minimum rates
+      
+      ### No Clients Showing
+      - **Cause:** No active connections or MAC filtering
+      - **Resolution:** Verify clients are connecting, check access lists
+      
+      ---
+      
+      ## Next Steps
+      
+      After resolving wireless issues:
+      
+      1. **Verify Resolution:**
+         - Re-run wireless interface and client checks
+         - Monitor signal strength and connection rates
+         - Test client connectivity from multiple locations
+      
+      2. **Monitor Performance:**
+         - Check wireless clients periodically
+         - Watch for signal degradation
+         - Monitor client count and capacity
+      
+      3. **Document Findings:**
+         - Record root cause and resolution
+         - Update wireless network documentation
+         - Note any configuration changes made
+      
+      4. **Preventive Measures:**
+         - Set up wireless performance monitoring
+         - Create alerts for client count thresholds
+         - Schedule regular wireless audits
+      
+      ## Related Resources
+      - `device://{{ device_id }}/health` - Device health monitoring
+      - `device://{{ device_id }}/logs` - System logs for errors
+      - `audit://events/by-device/{{ device_id }}` - Configuration change history
+      - `troubleshoot-device` prompt - General device diagnostics
+      
+      {% endif %}
+
+template_vars:
+  device_name: "Unknown Device"
+  device_environment: "unknown"
+
+metadata:
+  category: troubleshooting
+  tier: fundamental
+  environments: [lab, staging, prod]
+  requires_approval: false
