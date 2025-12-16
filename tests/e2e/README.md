@@ -73,8 +73,7 @@ docker-compose -f tests/e2e/docker-compose.yml down
 ```bash
 docker-compose -f tests/e2e/docker-compose.yml up -d && \
   sleep 15 && \
-  pytest tests/e2e/test_http_transport_clients.py -v ; \
-  docker-compose -f tests/e2e/docker-compose.yml down
+  (pytest tests/e2e/test_http_transport_clients.py -v; EXIT_CODE=$?; docker-compose -f tests/e2e/docker-compose.yml down; exit $EXIT_CODE)
 ```
 
 ## Test Coverage

@@ -73,14 +73,6 @@ jobs:
           timeout 60 bash -c 'until nc -z localhost 18765 2>/dev/null; do sleep 2; done'
           echo "RouterOS-MCP HTTP server is ready"
       
-      - name: Display service logs (for debugging)
-        if: always()
-        run: |
-          echo "=== Mock OIDC logs ==="
-          docker-compose -f tests/e2e/docker-compose.yml logs mock-oidc
-          echo "=== RouterOS-MCP logs ==="
-          docker-compose -f tests/e2e/docker-compose.yml logs routeros-mcp
-      
       - name: Run E2E tests
         run: |
           pytest tests/e2e/test_http_transport_clients.py -v --tb=short --maxfail=3
@@ -88,6 +80,14 @@ jobs:
         env:
           ROUTEROS_MCP_DEBUG: "false"
           ROUTEROS_MCP_LOG_LEVEL: "INFO"
+      
+      - name: Display service logs (for debugging)
+        if: always()
+        run: |
+          echo "=== Mock OIDC logs ==="
+          docker-compose -f tests/e2e/docker-compose.yml logs mock-oidc
+          echo "=== RouterOS-MCP logs ==="
+          docker-compose -f tests/e2e/docker-compose.yml logs routeros-mcp
       
       - name: Stop Docker Compose services
         if: always()

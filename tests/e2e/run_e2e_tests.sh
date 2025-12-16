@@ -77,7 +77,7 @@ fi
 
 # Clean up
 echo ""
-read -p "Stop Docker Compose services? (y/N) " -n 1 -r
+read -p "Stop Docker Compose services? (y/N) " -r
 echo ""
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     echo "Stopping services..."
