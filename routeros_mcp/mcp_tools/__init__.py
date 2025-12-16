@@ -4,6 +4,7 @@ This package contains all MCP tool implementations organized by topic:
 - device: Device management and connectivity
 - system: System information and configuration
 - interface: Network interface operations
+- bridge: Bridge topology and port management
 - ip: IP address configuration
 - dns_ntp: DNS and NTP configuration
 - dhcp: DHCP server and lease management
@@ -13,6 +14,7 @@ This package contains all MCP tool implementations organized by topic:
 - config: Multi-device configuration workflows (plan/apply)
 """
 
+from routeros_mcp.mcp_tools.bridge import register_bridge_tools
 from routeros_mcp.mcp_tools.config import register_config_tools
 from routeros_mcp.mcp_tools.device import register_device_tools
 from routeros_mcp.mcp_tools.dhcp import register_dhcp_tools
@@ -27,6 +29,7 @@ from routeros_mcp.mcp_tools.system import register_system_tools
 from routeros_mcp.mcp_tools.wireless import register_wireless_tools
 
 __all__ = [
+    "register_bridge_tools",
     "register_config_tools",
     "register_device_tools",
     "register_dhcp_tools",

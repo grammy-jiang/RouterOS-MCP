@@ -5,6 +5,7 @@ plan://, and audit:// URI schemes.
 """
 
 from routeros_mcp.mcp_resources.audit import register_audit_resources
+from routeros_mcp.mcp_resources.bridge import register_bridge_resources
 from routeros_mcp.mcp_resources.device import register_device_resources
 from routeros_mcp.mcp_resources.dhcp import register_dhcp_resources
 from routeros_mcp.mcp_resources.fleet import register_fleet_resources
@@ -13,6 +14,7 @@ from routeros_mcp.mcp_resources.wireless import register_wireless_resources
 
 __all__ = [
     "register_device_resources",
+    "register_bridge_resources",
     "register_dhcp_resources",
     "register_fleet_resources",
     "register_plan_resources",
