@@ -128,6 +128,7 @@ asyncio_mode = "auto"
 markers = [
     "e2e: End-to-end integration tests",
     "lab: Tests that require lab RouterOS devices",
+    "smoke: Fast smoke tests for critical wiring and startup paths",
 ]
 
 [tool.coverage.run]

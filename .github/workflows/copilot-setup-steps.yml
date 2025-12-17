@@ -64,9 +64,9 @@ jobs:
           echo "ROUTEROS_MCP_LOG_LEVEL=WARNING" >> .env
 
       # Run fast smoke tests to validate environment setup
-      - name: Run unit tests (smoke test)
+      - name: Run smoke tests
         run: |
-          pytest tests/unit -q --maxfail=5
+          pytest tests/smoke -q --maxfail=5
         env:
           # Ensure test mode with minimal logging
           ROUTEROS_MCP_DEBUG: "false"
@@ -90,10 +90,10 @@ jobs:
           mypy routeros_mcp || echo "::warning::Type checking issues detected - see mypy output for details"
         continue-on-error: true
 
-      # Generate coverage report for reference
-      - name: Generate coverage report
+      # Generate coverage report for reference (smoke-only)
+      - name: Generate smoke coverage report
         run: |
-          pytest tests/unit --cov=routeros_mcp --cov-report=term-missing:skip-covered -q
+          pytest tests/smoke --cov=routeros_mcp --cov-report=term-missing:skip-covered -q
         continue-on-error: true
 
       # Display environment information for debugging
