@@ -348,6 +348,49 @@ tests/
 └── conftest.py                # Pytest configuration
 ```
 
+### Smoke Tests Suite
+
+To provide a fast, deterministic safety check, the project includes a dedicated smoke suite that exercises critical wiring without external dependencies.
+
+- Location: `tests/smoke/`
+- Marker: `@pytest.mark.smoke` (registered in `pyproject.toml`)
+- Design principles:
+  - Must run in seconds (≤5s typical on a laptop)
+  - Must be offline: no real DB, network, or RouterOS devices
+  - Assert public surfaces and schemas, not internals
+  - Prefer fakes/stubs (e.g., `FakeSessionFactory`, `DummyMCP`) over heavy mocks
+
+#### Coverage overview
+
+- MCP server startup and tool discovery/invocation shape (echo, `service_health`)
+- JSON-RPC helpers (request validation, success response, argument extraction)
+- Resource cache behavior and `format_resource_content` pathways
+- Settings validators (OIDC required fields, environment-specific warnings)
+- Prompt registration and simple render (async handler invocation)
+- Tool registrar registration for:
+  - Device, System, Interface, IP
+  - Routing, Diagnostics
+  - Firewall/Logs, DNS/NTP (read and write tool names)
+
+All registrar tests patch `get_session_factory(...)` in the module under test to return `FakeSessionFactory()` to avoid DB initialization.
+
+#### How to run
+
+```bash
+# Run entire smoke suite (fast)
+pytest tests/smoke -q --maxfail=1
+
+# Or via marker
+pytest -m smoke -q --maxfail=1
+
+# Smoke coverage snapshot
+pytest tests/smoke --cov=routeros_mcp --cov-report=term-missing:skip-covered -q
+```
+
+#### CI integration
+
+The reusable workflow `.github/workflows/copilot-setup-steps.yml` runs the smoke suite and generates a coverage snapshot as part of environment validation. This provides a quick gate before longer test jobs.
+
 ### Test Fixtures and Factories
 
 **Use pytest fixtures for reusable setup:**
@@ -527,6 +570,7 @@ async def test_update_device_tags_for_nonexistent_device_raises_error():
 **Purpose**: Test pure business logic in isolation
 
 **Scope:**
+
 - Input validation
 - Domain model behavior
 - Authorization decisions (based on roles, scopes, environment, capability flags)
@@ -535,6 +579,7 @@ async def test_update_device_tags_for_nonexistent_device_raises_error():
 - Pure functions and utility methods
 
 **Characteristics:**
+
 - Fast execution (milliseconds)
 - No external dependencies (no DB, no network, no file I/O)
 - Use mocks/stubs for dependencies
@@ -566,12 +611,14 @@ def test_calculate_memory_usage_percentage():
 In addition to the general guidance above, Phase 1 has concrete, enforced testing standards:
 
 - **Test style**
+
   - Use `unittest.TestCase` classes for both unit and e2e tests where practical.
   - Inside `TestCase` methods, use `self.assert*` helpers instead of bare `assert`.
   - For async code in `TestCase` methods, wrap the async body in an inner `_run()` coroutine and
     execute it via `asyncio.run(_run())` to keep tests framework-neutral.
 
 - **Shared helpers and duplication**
+
   - Common fakes and helpers (e.g. dummy MCP implementations and fake session factories) must live
     in shared modules such as:
     - `tests/unit/mcp_tools_test_utils.py`
@@ -580,12 +627,14 @@ In addition to the general guidance above, Phase 1 has concrete, enforced testin
     `_FakeSessionFactory`, etc. in multiple files.
 
 - **E2E tests**
+
   - E2E tests live under `tests/e2e/` and:
     - Start from APIs/endpoints (HTTP handlers, MCP tools, MCP resources).
     - Mock the database layer and RouterOS responses (REST/SSH) only, not the business logic under test.
     - Verify the full response contract: `content`, `_meta`, `isError`, and any important fields.
 
 - **Unit tests for MCP tools**
+
   - Unit tests live under `tests/unit/` and, for MCP tools, should:
     - Patch `get_session_factory`, domain services, and `check_tool_authorization` per test using
       `unittest.mock.patch` (or helper functions returning patchers).
@@ -595,6 +644,7 @@ In addition to the general guidance above, Phase 1 has concrete, enforced testin
       - Generic exceptions mapped via `map_exception_to_error`.
 
 - **Coverage expectations**
+
   - For core MCP tools and domain services implemented in Phase 1:
     - Target **≥95% line coverage** on reachable code paths (with 100% as the ideal).
     - Never allow coverage on these modules to fall below the global baseline (**85%**).
@@ -615,6 +665,7 @@ In addition to the general guidance above, Phase 1 has concrete, enforced testin
 **Purpose**: Test how components work together
 
 **Scope:**
+
 - Domain services and RouterOS integration using mocked clients
 - Database operations with test database
 - Error mapping (RouterOS → MCP error codes)
@@ -622,6 +673,7 @@ In addition to the general guidance above, Phase 1 has concrete, enforced testin
 - Multi-component workflows
 
 **Characteristics:**
+
 - Slower than unit tests (seconds)
 - May use in-memory/test databases
 - Use mocked external APIs (RouterOS, OAuth)
@@ -655,6 +707,7 @@ async def test_health_check_creates_database_record(db_session):
 **Purpose**: Test against real RouterOS devices
 
 **Scope:**
+
 - Use small number of real RouterOS devices in `lab` environment
 - End-to-end flows: MCP → RouterOS and back
 - Validate tools against real RouterOS behavior and quirks
@@ -662,6 +715,7 @@ async def test_health_check_creates_database_record(db_session):
 - Verify actual configuration changes (safe environment)
 
 **Characteristics:**
+
 - Slowest tests (seconds to minutes)
 - Require lab RouterOS devices
 - May modify device state (safe to do in lab)
@@ -705,6 +759,7 @@ async def test_dns_update_on_real_device(lab_device):
 **Purpose**: Test complete MCP workflows
 
 **Scope:**
+
 - Full MCP protocol flows (initialize, tools/list, tools/call)
 - OAuth authentication (in test IdP environment)
 - MCP client → MCP server → Domain → RouterOS
@@ -715,6 +770,7 @@ async def test_dns_update_on_real_device(lab_device):
 - MCP schema validation
 
 **Characteristics:**
+
 - Test MCP compliance
 - Verify JSON-RPC 2.0 messages
 - Test authorization at MCP layer
@@ -1240,6 +1296,7 @@ class MockRouterOSClient:
 ### Environment Taxonomy
 
 **`lab` Environment:**
+
 - Fully sandboxed RouterOS devices
 - Safe for testing high-risk operations
 - May be virtualized (CHR) or physical hardware
@@ -1248,6 +1305,7 @@ class MockRouterOSClient:
 - State changes expected and acceptable
 
 **`staging` Environment:**
+
 - Mirrors production topology
 - Close to production configuration
 - Higher-risk than lab but lower than prod
@@ -1255,6 +1313,7 @@ class MockRouterOSClient:
 - Limited write operations (requires approval)
 
 **`prod` Environment:**
+
 - Production devices
 - Minimal direct testing
 - Canary rollout only
@@ -1670,7 +1729,7 @@ if error_rate > 0.10:  # 10% error rate
 
 ```markdown
 | MCP Version | RouterOS 7.10 | RouterOS 7.11 | RouterOS 7.12 | RouterOS 7.13 | RouterOS 7.14 | RouterOS 7.15 |
-|-------------|---------------|---------------|---------------|---------------|---------------|---------------|
+| ----------- | ------------- | ------------- | ------------- | ------------- | ------------- | ------------- |
 | 1.0.0       | ✅ Tested     | ✅ Tested     | ✅ Tested     | ✅ Tested     | ✅ Tested     | ⚠️ Not tested |
 | 1.1.0       | ✅ Tested     | ✅ Tested     | ✅ Tested     | ✅ Tested     | ✅ Tested     | ✅ Tested     |
 ```
@@ -2007,11 +2066,11 @@ async def test_tool_execution_timeout(mcp_client):
 **Client Compatibility Matrix:**
 
 ```markdown
-| MCP Client | Protocol Version | Tools | Resources | Prompts | Tested |
-|------------|-----------------|-------|-----------|---------|--------|
-| Claude Desktop | 2024-11-05 | ✅ | ✅ | ✅ | ✅ |
-| MCP Inspector | 2024-11-05 | ✅ | ✅ | ✅ | ✅ |
-| Custom Client | 2024-11-05 | ✅ | ⚠️ Phase 2 | ⚠️ Phase 2 | ✅ |
+| MCP Client     | Protocol Version | Tools | Resources  | Prompts    | Tested |
+| -------------- | ---------------- | ----- | ---------- | ---------- | ------ |
+| Claude Desktop | 2024-11-05       | ✅    | ✅         | ✅         | ✅     |
+| MCP Inspector  | 2024-11-05       | ✅    | ✅         | ✅         | ✅     |
+| Custom Client  | 2024-11-05       | ✅    | ⚠️ Phase 2 | ⚠️ Phase 2 | ✅     |
 ```
 
 **Client Compatibility Tests:**
@@ -2465,6 +2524,7 @@ class LLMSimulator:
 ### MCP-Specific Testing Highlights
 
 **MCP Protocol Compliance:**
+
 - JSON-RPC 2.0 message format validation
 - Initialize handshake sequencing
 - Capability negotiation (tools, resources, prompts)
@@ -2472,6 +2532,7 @@ class LLMSimulator:
 - Tool schema validation (JSON Schema Draft 7)
 
 **MCP Tool Testing:**
+
 - Schema validation for all tools
 - Token estimation accuracy
 - Tool tier enforcement (free, basic, professional)
@@ -2479,12 +2540,14 @@ class LLMSimulator:
 - Input validation and error responses
 
 **MCP Transport Testing:**
+
 - Stdio transport (process lifecycle, stdio buffering)
 - HTTP/SSE transport (concurrent connections, session management)
 - Transport mode switching
 - Graceful degradation
 
 **MCP Safety Nets:**
+
 - Rate limiting (per-tier limits)
 - Concurrent execution limits (prevent resource exhaustion)
 - Tool execution timeouts (prevent hanging)
@@ -2492,6 +2555,7 @@ class LLMSimulator:
 - Token budget warnings (prevent LLM context overflow)
 
 **Cross-references:**
+
 - See [Doc 04 (MCP Tools Interface)](04-mcp-tools-interface-and-json-schema-specification.md) for tool JSON schemas
 - See [Doc 08 (Observability)](08-observability-logging-metrics-and-diagnostics.md) for test metrics and monitoring
 - See [Doc 09 (Operations)](09-operations-deployment-self-update-and-runbook.md) for CI/CD testing integration

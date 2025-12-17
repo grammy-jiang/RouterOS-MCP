@@ -373,6 +373,21 @@ uv run pytest
 uv run pytest --cov=routeros_mcp
 ```
 
+#### Smoke tests (fast)
+
+Use the smoke suite for quick wiring validation during development:
+
+```bash
+# Run smoke suite
+uv run pytest tests/smoke -q --maxfail=1
+
+# Or by marker
+uv run pytest -m smoke -q --maxfail=1
+
+# Smoke coverage
+uv run pytest tests/smoke --cov=routeros_mcp --cov-report=term-missing:skip-covered -q
+```
+
 Using `tox` to orchestrate environments (once `tox` is configured):
 
 ```bash

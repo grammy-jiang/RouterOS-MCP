@@ -371,7 +371,7 @@ oidc_enabled: true
 oidc_provider_url: https://your-provider.com
 oidc_client_id: your-client-id
 oidc_audience: https://mcp.example.com
-oidc_skip_verification: false  # NEVER true in production
+oidc_skip_verification: false # NEVER true in production
 ```
 
 #### Set Encryption Key
@@ -471,6 +471,41 @@ ruff check routeros_mcp
 black routeros_mcp
 ```
 
+#### Smoke tests (fast, offline)
+
+The repository includes a lightweight smoke suite designed to validate core wiring quickly without touching live devices or a real database.
+
+- Location: `tests/smoke/`
+- Marker: `@pytest.mark.smoke` (registered in `pyproject.toml`)
+- Covers:
+  - MCP server startup and basic tool invocation (echo, service_health)
+  - JSON-RPC helpers and response formatting
+  - Resource cache behavior and content formatting
+  - Settings validators and common warnings
+  - Prompt registration and simple render
+  - Tool registrar coverage: device, system, interface, IP, routing, diagnostics, firewall/logs, DNS/NTP
+  - Registrar tests patch the session factory to a fake to remain offline
+
+Run the smoke suite locally:
+
+```bash
+pytest tests/smoke -q --maxfail=1
+```
+
+Or by marker:
+
+```bash
+pytest -m smoke -q --maxfail=1
+```
+
+Generate smoke-only coverage:
+
+```bash
+pytest tests/smoke --cov=routeros_mcp --cov-report=term-missing:skip-covered -q
+```
+
+CI note: the reusable workflow `.github/workflows/copilot-setup-steps.yml` runs the smoke suite and a smoke coverage snapshot as part of environment validation.
+
 ### Performance Testing
 
 Phase 2 introduces performance benchmarks and load tests to validate caching improvements:
@@ -491,6 +526,7 @@ pytest tests/e2e/load_test.py::test_load_test_quick -v
 ```
 
 **Acceptance Criteria:**
+
 - Load test runs 5 minutes without errors
 - Cache hit rate >70%
 - Resource fetch latency <1s (95th percentile)
@@ -512,6 +548,7 @@ pytest tests/e2e/benchmark_test.py::test_benchmark_resource_fetch_latency -v
 ```
 
 **Benchmarks include:**
+
 - Resource fetch latency (with/without cache)
 - Cache hit rate validation
 - Memory leak detection
@@ -541,6 +578,7 @@ python scripts/benchmark_report.py \
 ```
 
 **Report includes:**
+
 - Latency graphs (p50, p95, p99)
 - Cache hit rate visualization
 - Memory usage tracking
@@ -558,11 +596,13 @@ python scripts/benchmark_report.py \
 ### E2E Testing with HTTP Transport
 
 End-to-end tests for HTTP/SSE transport use Docker Compose to orchestrate a complete test environment including:
+
 - RouterOS-MCP HTTP server
 - Mock OIDC provider for authentication testing
 - PostgreSQL database (optional, can use SQLite)
 
 **Prerequisites:**
+
 - Docker and Docker Compose installed
 - Python dependencies installed (`pip install -e .[dev]`)
 
@@ -605,8 +645,9 @@ docker-compose -f tests/e2e/docker-compose.yml logs mock-oidc
 **Test coverage:**
 
 The E2E test suite covers:
+
 - ✅ Direct HTTP JSON-RPC request handling
-- ✅ Connection timeout handling  
+- ✅ Connection timeout handling
 - ✅ Correlation ID propagation
 - ✅ Concurrent request handling
 - ✅ Malformed JSON error handling
@@ -620,6 +661,7 @@ The E2E test suite covers:
 **CI Integration:**
 
 E2E tests run automatically in GitHub Actions on:
+
 - Push to `main` or `develop` branches
 - Pull requests that modify transport or E2E test files
 - Manual workflow dispatch
