@@ -12,7 +12,7 @@ from routeros_mcp.mcp_tools import firewall_write as firewall_write_tools
 from routeros_mcp.mcp_tools import interface as interface_tools
 from routeros_mcp.mcp_tools import routing as routing_tools
 from routeros_mcp.mcp_tools import system as system_tools
-from unit.mcp_tools_test_utils import DummyMCP, FakeSessionFactory
+from tests.unit.mcp_tools_test_utils import DummyMCP, FakeSessionFactory
 
 
 class _FakeDeviceService:

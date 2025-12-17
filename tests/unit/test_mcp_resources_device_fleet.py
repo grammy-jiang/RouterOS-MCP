@@ -16,17 +16,7 @@ from routeros_mcp.mcp.errors import MCPError
 from routeros_mcp.mcp_resources import device as device_resources
 from routeros_mcp.mcp_resources import fleet as fleet_resources
 
-
-class _DummyMCP:
-    def __init__(self) -> None:
-        self.resources: dict[str, object] = {}
-
-    def resource(self, uri: str):  # type: ignore[override]
-        def decorator(func):
-            self.resources[uri] = func
-            return func
-
-        return decorator
+from tests.unit.mcp_tools_test_utils import DummyMCP
 
 
 class _FakeSystemService:
@@ -155,7 +145,7 @@ async def _setup_device_resources(
         device_resources, "HealthService", lambda *args, **kwargs: _FakeHealthService()
     )
 
-    mcp = _DummyMCP()
+    mcp = DummyMCP()
     device_resources.register_device_resources(mcp, session_factory, settings)
     return mcp
 
@@ -182,7 +172,7 @@ async def test_device_overview_health_fallback(
         lambda *args, **kwargs: _FakeHealthService(raise_error=True),
     )
 
-    mcp = _DummyMCP()
+    mcp = DummyMCP()
     device_resources.register_device_resources(mcp, session_factory, settings)
 
     overview_func = mcp.resources["device://{device_id}/overview"]
@@ -217,7 +207,7 @@ async def test_device_config_and_logs(_setup_device_resources):
 
 @pytest.mark.asyncio
 async def test_device_resource_not_found(session_factory, settings):
-    mcp = _DummyMCP()
+    mcp = DummyMCP()
     device_resources.register_device_resources(mcp, session_factory, settings)
 
     overview_func = mcp.resources["device://{device_id}/overview"]
@@ -227,7 +217,7 @@ async def test_device_resource_not_found(session_factory, settings):
 
 @pytest.mark.asyncio
 async def test_device_health_not_found(session_factory, settings):
-    mcp = _DummyMCP()
+    mcp = DummyMCP()
     device_resources.register_device_resources(mcp, session_factory, settings)
 
     health_func = mcp.resources["device://{device_id}/health"]
@@ -253,7 +243,7 @@ async def test_device_overview_generic_error(
         device_resources, "HealthService", lambda *args, **kwargs: _FakeHealthService()
     )
 
-    mcp = _DummyMCP()
+    mcp = DummyMCP()
     device_resources.register_device_resources(mcp, session_factory, settings)
 
     overview_func = mcp.resources["device://{device_id}/overview"]
@@ -280,7 +270,7 @@ async def _setup_fleet_resources(
         fleet_resources, "HealthService", lambda *args, **kwargs: _HealthServiceWithUnreachable()
     )
 
-    mcp = _DummyMCP()
+    mcp = DummyMCP()
     fleet_resources.register_fleet_resources(mcp, session_factory, settings)
     return mcp
 
@@ -296,7 +286,7 @@ async def test_fleet_health_summary(_setup_fleet_resources):
 
 @pytest.mark.asyncio
 async def test_fleet_devices_filter(session_factory, settings, seed_devices):
-    mcp = _DummyMCP()
+    mcp = DummyMCP()
     fleet_resources.register_fleet_resources(mcp, session_factory, settings)
 
     devices_func = mcp.resources["fleet://devices/{environment}"]
@@ -317,7 +307,7 @@ async def test_fleet_health_summary_error(
     monkeypatch.setattr(
         fleet_resources, "DeviceService", lambda *args, **kwargs: BoomDeviceService(*args, **kwargs)
     )
-    mcp = _DummyMCP()
+    mcp = DummyMCP()
     fleet_resources.register_fleet_resources(mcp, session_factory, settings)
 
     summary_func = mcp.resources["fleet://health-summary"]
@@ -334,7 +324,7 @@ async def test_fleet_devices_error(monkeypatch: pytest.MonkeyPatch, session_fact
     monkeypatch.setattr(
         fleet_resources, "DeviceService", lambda *args, **kwargs: BoomDeviceService(*args, **kwargs)
     )
-    mcp = _DummyMCP()
+    mcp = DummyMCP()
     fleet_resources.register_fleet_resources(mcp, session_factory, settings)
 
     devices_func = mcp.resources["fleet://devices/{environment}"]

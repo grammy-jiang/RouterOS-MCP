@@ -6,10 +6,9 @@ import asyncio
 import unittest
 from unittest.mock import patch
 
-from routeros_mcp.config import Settings
 from routeros_mcp.mcp_tools import wireless as wireless_tools
 
-from .e2e_test_utils import DummyMCP, FakeSessionFactory
+from .e2e_test_utils import DummyMCP, FakeSessionFactory, make_test_settings
 
 
 class _FakeDeviceService:
@@ -106,7 +105,7 @@ class TestWirelessTools(unittest.TestCase):
     def _register_wireless_tools(self) -> DummyMCP:
         """Register wireless tools with mocked dependencies."""
         mcp = DummyMCP()
-        settings = Settings(environment="lab")
+        settings = make_test_settings()
         wireless_tools.register_wireless_tools(mcp, settings)
         return mcp
 

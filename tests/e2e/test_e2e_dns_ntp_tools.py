@@ -4,10 +4,9 @@ import asyncio
 import unittest
 from unittest.mock import patch
 
-from routeros_mcp.config import Settings
 from routeros_mcp.mcp_tools import dns_ntp as dns_ntp_tools
 
-from .e2e_test_utils import DummyMCP, FakeSessionFactory
+from .e2e_test_utils import DummyMCP, FakeSessionFactory, make_test_settings
 
 
 class _FakeDeviceService:
@@ -102,7 +101,7 @@ class _FakeDNSNTPService:
 class TestE2EDNSNTPTools(unittest.TestCase):
     def _register_tools(self) -> DummyMCP:
         mcp = DummyMCP()
-        settings = Settings()
+        settings = make_test_settings()
         dns_ntp_tools.register_dns_ntp_tools(mcp, settings)
         return mcp
 

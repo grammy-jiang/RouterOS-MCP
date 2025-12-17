@@ -3,17 +3,40 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
+
+from routeros_mcp.config import Settings
+
+
+# Deterministic, valid Fernet key (base64 urlsafe, 32-byte key).
+# Using a stable key avoids test flakiness and reduces warning noise.
+TEST_ENCRYPTION_KEY = "F5N_V5vuw-uQLORwbDd5UBO5ckjh-STww5EHdmNbi0E="
+
+
+def make_test_settings(**overrides: Any) -> Settings:
+    """Create Settings for e2e tests with safe defaults.
+
+    Defaults to a lab environment with a deterministic valid encryption key.
+    Callers may override any Settings field via keyword args.
+    """
+
+    base: dict[str, Any] = {
+        "environment": "lab",
+        "encryption_key": TEST_ENCRYPTION_KEY,
+    }
+    base.update(overrides)
+    return Settings(**base)
 
 
 class DummyMCP:
     """Minimal MCP stub capturing registered tools."""
 
     def __init__(self) -> None:
-        self.tools: dict[str, object] = {}
+        # Store callables as Any to avoid static type-checker false-positives in tests.
+        self.tools: dict[str, Any] = {}
 
-    def tool(self):  # type: ignore[override]
-        def decorator(func: Any) -> Any:
+    def tool(self) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             self.tools[func.__name__] = func
             return func
 
@@ -29,7 +52,7 @@ class FakeSessionFactory:
     async def __aenter__(self) -> FakeSessionFactory:
         return self
 
-    async def __aexit__(self, exc_type, exc, tb) -> None:  # type: ignore[override]
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         return None
 
 

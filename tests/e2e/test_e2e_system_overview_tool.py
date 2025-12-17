@@ -4,11 +4,9 @@ import asyncio
 import unittest
 from unittest.mock import patch
 
-from routeros_mcp.config import Settings
-from routeros_mcp.domain.services import system as system_module
 from routeros_mcp.mcp_tools import system as system_tools
 
-from .e2e_test_utils import DummyMCP, FakeSessionFactory
+from .e2e_test_utils import DummyMCP, FakeSessionFactory, make_test_settings
 
 
 class _FakeRestClient:
@@ -79,11 +77,13 @@ class TestE2ESystemOverviewTool(unittest.TestCase):
                     system_tools, "get_session_factory", return_value=FakeSessionFactory()
                 ),
                 patch.object(system_tools, "DeviceService", _FakeDeviceService),
-                patch.object(system_tools, "check_tool_authorization", lambda **_kwargs: None),
-                patch.object(system_module, "DeviceService", _FakeDeviceService),
+                patch(
+                    "routeros_mcp.domain.services.system.DeviceService",
+                    _FakeDeviceService,
+                ),
             ):
                 mcp = DummyMCP()
-                settings = Settings()
+                settings = make_test_settings()
                 system_tools.register_system_tools(mcp, settings)
 
                 fn = mcp.tools["get_system_overview"]

@@ -5,55 +5,12 @@ from routeros_mcp.mcp import server as server_module
 from routeros_mcp.mcp.errors import MCPError
 from routeros_mcp.mcp.server import RouterOSMCPServer, create_mcp_server
 
-
-class FakeSessionContext:
-    async def __aenter__(self):
-        return None
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return None
-
-
-class FakeSessionFactory:
-    def session(self):  # pragma: no cover - used in async context
-        return FakeSessionContext()
-
-
-class FakeMCP:
-    def __init__(self, *args, **kwargs):
-        self.tools = {}
-        self.resources = {}
-        self.prompts = {}
-
-    def tool(self, *args, **kwargs):
-        def decorator(fn):
-            self.tools[fn.__name__] = fn
-            return fn
-
-        return decorator
-
-    def resource(self, uri: str):
-        def decorator(fn):
-            self.resources[uri] = fn
-            return fn
-
-        return decorator
-
-    def prompt(self, *args, **kwargs):
-        def decorator(fn):
-            name = kwargs.get("name") or fn.__name__
-            self.prompts[name] = fn
-            return fn
-
-        return decorator
-
-    async def run(self):  # pragma: no cover - not invoked in tests
-        return None
+from tests.unit.mcp_tools_test_utils import DummyMCP, FakeSessionFactory
 
 
 @pytest.fixture(autouse=True)
 def patch_fastmcp(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(server_module, "FastMCP", FakeMCP)
+    monkeypatch.setattr(server_module, "FastMCP", DummyMCP)
     yield
 
 

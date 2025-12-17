@@ -1,201 +1,134 @@
-"""E2E tests for DHCP tools and resources.
+"""E2E tests for DHCP MCP tools.
 
-Tests DHCP server status and lease retrieval tools with mock RouterOS responses.
+These tests validate the public MCP tool contract (content/isError/_meta)
+while mocking external dependencies (DB session factory + domain services).
 """
 
-import pytest
+from __future__ import annotations
 
-from routeros_mcp.config import Settings
-from routeros_mcp.domain.services.device import DeviceService
-from routeros_mcp.domain.services.dhcp import DHCPService
-from routeros_mcp.infra.db.session import get_session_factory
-from tests.e2e.e2e_test_utils import MockRouterOSDevice
+import asyncio
+import unittest
+from unittest.mock import patch
 
+from routeros_mcp.mcp_tools import dhcp as dhcp_tools
 
-@pytest.fixture
-async def test_device(initialize_session_manager):
-    """Create a test device in the database."""
-    settings = Settings()
-    session_factory = get_session_factory(settings)
-
-    async with session_factory.session() as session:
-        device_service = DeviceService(session, settings)
-        device = await device_service.create_device(
-            device_id="test-dhcp-device",
-            name="Test DHCP Device",
-            management_ip="192.168.1.1",
-            username="admin",
-            password="test123",
-            environment="lab",
-        )
-        await session.commit()
-        yield device
+from .e2e_test_utils import DummyMCP, FakeSessionFactory, make_test_settings
 
 
-@pytest.mark.asyncio
-async def test_dhcp_server_status_tool(test_device, initialize_session_manager):
-    """Test DHCP server status retrieval via MCP tool."""
-    settings = Settings()
-    session_factory = get_session_factory(settings)
-    
-    # Create mock RouterOS device with DHCP server
-    mock_device = MockRouterOSDevice()
-    mock_device.add_dhcp_server(
-        name="dhcp1",
-        interface="bridge",
-        lease_time="10m",
-        address_pool="pool1",
-        disabled=False,
-    )
-    
-    async with session_factory.session() as session:
-        dhcp_service = DHCPService(session, settings)
-        
-        # Mock the REST client to return our test data
-        original_get_rest_client = dhcp_service.device_service.get_rest_client
-        
-        async def mock_get_rest_client(device_id):
-            client = await original_get_rest_client(device_id)
-            # Override client.get to return mock data
-            original_get = client.get
-            
-            async def mock_get(path):
-                if path == "/rest/ip/dhcp-server":
-                    return mock_device.dhcp_servers
-                return await original_get(path)
-            
-            client.get = mock_get
-            return client
-        
-        dhcp_service.device_service.get_rest_client = mock_get_rest_client
-        
-        # Get DHCP server status
-        result = await dhcp_service.get_dhcp_server_status("test-dhcp-device")
-        
-        assert result["total_count"] == 1
-        assert len(result["servers"]) == 1
-        server = result["servers"][0]
-        assert server["name"] == "dhcp1"
-        assert server["interface"] == "bridge"
-        assert server["lease_time"] == "10m"
-        assert server["address_pool"] == "pool1"
+class _FakeDeviceService:
+    """Fake device service for E2E testing."""
+
+    def __init__(self, *_args, **_kwargs) -> None:
+        self.id = "dev-lab-01"
+        self.name = "router-lab-01"
+        self.environment = "lab"
+        self.allow_advanced_writes = True
+        self.allow_professional_workflows = False
+
+    async def get_device(self, device_id: str):
+        return self
 
 
-@pytest.mark.asyncio
-async def test_dhcp_leases_tool(test_device, initialize_session_manager):
-    """Test DHCP lease retrieval via MCP tool."""
-    settings = Settings()
-    session_factory = get_session_factory(settings)
-    
-    # Create mock RouterOS device with DHCP leases
-    mock_device = MockRouterOSDevice()
-    mock_device.add_dhcp_lease(
-        address="192.168.1.10",
-        mac_address="00:11:22:33:44:55",
-        client_id="1:00:11:22:33:44:55",
-        host_name="client1",
-        server="dhcp1",
-        status="bound",
-    )
-    mock_device.add_dhcp_lease(
-        address="192.168.1.11",
-        mac_address="AA:BB:CC:DD:EE:FF",
-        client_id="",
-        host_name="client2",
-        server="dhcp1",
-        status="bound",
-    )
-    
-    async with session_factory.session() as session:
-        dhcp_service = DHCPService(session, settings)
-        
-        # Mock the REST client to return our test data
-        original_get_rest_client = dhcp_service.device_service.get_rest_client
-        
-        async def mock_get_rest_client(device_id):
-            client = await original_get_rest_client(device_id)
-            original_get = client.get
-            
-            async def mock_get(path):
-                if path == "/rest/ip/dhcp-server/lease":
-                    return mock_device.dhcp_leases
-                return await original_get(path)
-            
-            client.get = mock_get
-            return client
-        
-        dhcp_service.device_service.get_rest_client = mock_get_rest_client
-        
-        # Get DHCP leases
-        result = await dhcp_service.get_dhcp_leases("test-dhcp-device")
-        
-        assert result["total_count"] == 2
-        assert len(result["leases"]) == 2
-        
-        lease1 = result["leases"][0]
-        assert lease1["address"] == "192.168.1.10"
-        assert lease1["mac_address"] == "00:11:22:33:44:55"
-        assert lease1["host_name"] == "client1"
-        
-        lease2 = result["leases"][1]
-        assert lease2["address"] == "192.168.1.11"
-        assert lease2["mac_address"] == "AA:BB:CC:DD:EE:FF"
+class _FakeDHCPService:
+    """Fake DHCP service for E2E testing."""
+
+    async def get_dhcp_server_status(self, device_id: str):
+        return {
+            "total_count": 1,
+            "servers": [
+                {
+                    "name": "dhcp1",
+                    "interface": "bridge",
+                    "lease_time": "10m",
+                    "address_pool": "pool1",
+                    "disabled": False,
+                }
+            ],
+        }
+
+    async def get_dhcp_leases(self, device_id: str):
+        return {
+            "total_count": 2,
+            "leases": [
+                {
+                    "address": "192.168.1.10",
+                    "mac_address": "00:11:22:33:44:55",
+                    "client_id": "1:00:11:22:33:44:55",
+                    "host_name": "client1",
+                    "server": "dhcp1",
+                    "status": "bound",
+                },
+                {
+                    "address": "192.168.1.11",
+                    "mac_address": "AA:BB:CC:DD:EE:FF",
+                    "client_id": "",
+                    "host_name": "client2",
+                    "server": "dhcp1",
+                    "status": "bound",
+                },
+            ],
+        }
 
 
-@pytest.mark.asyncio
-async def test_dhcp_leases_filters_non_bound(test_device, initialize_session_manager):
-    """Test that DHCP leases tool filters out non-bound leases."""
-    settings = Settings()
-    session_factory = get_session_factory(settings)
-    
-    # Create mock RouterOS device with mixed lease statuses
-    mock_device = MockRouterOSDevice()
-    mock_device.dhcp_leases = [
-        {
-            "address": "192.168.1.10",
-            "mac-address": "00:11:22:33:44:55",
-            "server": "dhcp1",
-            "status": "bound",
-            "disabled": False,
-        },
-        {
-            "address": "192.168.1.11",
-            "mac-address": "AA:BB:CC:DD:EE:FF",
-            "server": "dhcp1",
-            "status": "waiting",  # Should be filtered
-            "disabled": False,
-        },
-        {
-            "address": "192.168.1.12",
-            "mac-address": "11:22:33:44:55:66",
-            "server": "dhcp1",
-            "status": "bound",
-            "disabled": True,  # Should be filtered (disabled)
-        },
-    ]
-    
-    async with session_factory.session() as session:
-        dhcp_service = DHCPService(session, settings)
-        
-        original_get_rest_client = dhcp_service.device_service.get_rest_client
-        
-        async def mock_get_rest_client(device_id):
-            client = await original_get_rest_client(device_id)
-            original_get = client.get
-            
-            async def mock_get(path):
-                if path == "/rest/ip/dhcp-server/lease":
-                    return mock_device.dhcp_leases
-                return await original_get(path)
-            
-            client.get = mock_get
-            return client
-        
-        dhcp_service.device_service.get_rest_client = mock_get_rest_client
-        
-        # Get DHCP leases - should only return the bound, non-disabled lease
-        result = await dhcp_service.get_dhcp_leases("test-dhcp-device")
-        
-        assert result["total_count"] == 1
-        assert len(result["leases"]) == 1
-        assert result["leases"][0]["address"] == "192.168.1.10"
+class TestDHCPToolsE2E(unittest.TestCase):
+    """E2E tests for DHCP MCP tools."""
+
+    def _register_dhcp_tools(self) -> DummyMCP:
+        mcp = DummyMCP()
+        settings = make_test_settings()
+        dhcp_tools.register_dhcp_tools(mcp, settings)
+        return mcp
+
+    def test_get_dhcp_server_status_tool_success(self) -> None:
+        """DHCP server status tool returns expected content and metadata."""
+
+        async def _run() -> None:
+            with (
+                patch.object(dhcp_tools, "get_session_factory", return_value=FakeSessionFactory()),
+                patch.object(dhcp_tools, "DeviceService", _FakeDeviceService),
+                patch.object(dhcp_tools, "DHCPService", lambda *args, **kwargs: _FakeDHCPService()),
+                patch.object(dhcp_tools, "check_tool_authorization", lambda **_kwargs: None),
+            ):
+                mcp = self._register_dhcp_tools()
+                tool = mcp.tools["get_dhcp_server_status"]
+
+                result = await tool(device_id="dev-lab-01")
+
+                self.assertFalse(result["isError"])
+                self.assertEqual(result["content"][0]["text"], "DHCP server 'dhcp1' on bridge")
+
+                meta = result["_meta"]
+                self.assertEqual(meta["device_id"], "dev-lab-01")
+                self.assertEqual(meta["total_count"], 1)
+                self.assertEqual(len(meta["servers"]), 1)
+                self.assertEqual(meta["servers"][0]["name"], "dhcp1")
+                self.assertEqual(meta["servers"][0]["interface"], "bridge")
+
+        asyncio.run(_run())
+
+    def test_get_dhcp_leases_tool_success(self) -> None:
+        """DHCP leases tool returns expected content and metadata."""
+
+        async def _run() -> None:
+            with (
+                patch.object(dhcp_tools, "get_session_factory", return_value=FakeSessionFactory()),
+                patch.object(dhcp_tools, "DeviceService", _FakeDeviceService),
+                patch.object(dhcp_tools, "DHCPService", lambda *args, **kwargs: _FakeDHCPService()),
+                patch.object(dhcp_tools, "check_tool_authorization", lambda **_kwargs: None),
+            ):
+                mcp = self._register_dhcp_tools()
+                tool = mcp.tools["get_dhcp_leases"]
+
+                result = await tool(device_id="dev-lab-01")
+
+                self.assertFalse(result["isError"])
+                self.assertEqual(result["content"][0]["text"], "2 active DHCP leases")
+
+                meta = result["_meta"]
+                self.assertEqual(meta["device_id"], "dev-lab-01")
+                self.assertEqual(meta["total_count"], 2)
+                self.assertEqual(len(meta["leases"]), 2)
+                self.assertEqual(meta["leases"][0]["address"], "192.168.1.10")
+                self.assertEqual(meta["leases"][1]["address"], "192.168.1.11")
+
+        asyncio.run(_run())

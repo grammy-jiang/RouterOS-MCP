@@ -1,10 +1,18 @@
-# E2E Tests for HTTP Transport
+# E2E Tests
 
-This directory contains end-to-end (E2E) tests for the RouterOS-MCP HTTP/SSE transport, validating integration with real MCP clients like Claude Desktop and VS Code.
+This directory contains end-to-end (E2E) tests for RouterOS-MCP.
+
+It currently includes two flavors of tests:
+
+1. **Tool-level E2E tests** (fast): validate MCP tool registration and the public MCP tool contract
+   (`content`, `isError`, `_meta`) while mocking external dependencies.
+2. **HTTP/SSE transport E2E tests** (slower): validate JSON-RPC over HTTP, SSE streaming, and OIDC behavior
+   using Docker Compose.
 
 ## Overview
 
 The E2E test suite tests the complete HTTP/SSE transport stack:
+
 - MCP JSON-RPC protocol over HTTP
 - Server-Sent Events (SSE) for streaming
 - OIDC authentication and authorization
@@ -13,16 +21,28 @@ The E2E test suite tests the complete HTTP/SSE transport stack:
 
 ## Test Environment
 
+### Tool-level E2E tests
+
+Tool-level tests should create Settings via the shared helper:
+
+- `tests/e2e/e2e_test_utils.py::make_test_settings()`
+
+This ensures consistent defaults (`environment="lab"` + deterministic valid Fernet key) and reduces warning noise.
+
+### HTTP/SSE transport E2E tests
+
 The E2E tests use Docker Compose to orchestrate a complete test environment:
 
 ### Services
 
 1. **routeros-mcp** - RouterOS-MCP HTTP server
+
    - Runs on port 18765
    - Uses SQLite database (in-memory or file-based)
    - Exposes MCP protocol over HTTP/SSE
 
 2. **mock-oidc** - Mock OAuth2/OIDC provider
+
    - Runs on port 18080
    - Provides OpenID Connect discovery and token validation
    - Based on [navikt/mock-oauth2-server](https://github.com/navikt/mock-oauth2-server)
@@ -81,6 +101,7 @@ docker-compose -f tests/e2e/docker-compose.yml up -d && \
 ### Current Tests (Phase 2)
 
 ✅ **Passing Tests** (5 tests)
+
 - Direct HTTP JSON-RPC request handling
 - Connection timeout handling
 - Correlation ID propagation
@@ -88,6 +109,7 @@ docker-compose -f tests/e2e/docker-compose.yml up -d && \
 - Malformed JSON error handling
 
 ⏭️ **Skipped Tests** (6 tests - awaiting Phase 3)
+
 - MCP client tool invocation (`device_list`)
 - Tool with parameters (`device_get`)
 - Resource fetching (`device://` URIs)
@@ -98,16 +120,19 @@ docker-compose -f tests/e2e/docker-compose.yml up -d && \
 ### Test Scenarios
 
 1. **Tool Invocation**
+
    - Simple tools without parameters
    - Tools with required parameters
    - Tools with optional parameters
 
 2. **Resource Fetching**
+
    - Device resources (`device://...`)
    - Fleet resources (`fleet://...`)
    - Plan resources (`plan://...`)
 
 3. **Error Handling**
+
    - Invalid device IDs
    - Malformed JSON requests
    - Invalid JSON-RPC structure
@@ -115,6 +140,7 @@ docker-compose -f tests/e2e/docker-compose.yml up -d && \
    - Server unavailable
 
 4. **Authentication** (Phase 3)
+
    - Valid OIDC tokens
    - Invalid/expired tokens
    - Missing authorization headers
@@ -170,6 +196,7 @@ docker exec -it routeros-mcp-postgres-test /bin/bash
 The E2E tests run automatically in GitHub Actions:
 
 **Triggers:**
+
 - Push to `main` or `develop` branches
 - Pull requests modifying transport or E2E test files
 - Manual workflow dispatch
@@ -204,6 +231,7 @@ docker-compose -f tests/e2e/docker-compose.yml logs
 ```
 
 Common issues:
+
 - Database migration failures (check `routeros-mcp` logs)
 - OIDC provider misconfiguration (check `mock-oidc` logs)
 - Insufficient Docker resources (increase Docker Desktop limits)
@@ -246,7 +274,7 @@ Example:
 @pytest.mark.skip(reason="Feature not yet implemented")
 async def test_resource_subscription_sse() -> None:
     """Test SSE subscription to resource updates.
-    
+
     Verifies that clients can subscribe to device resources
     and receive real-time updates via Server-Sent Events.
     """
@@ -257,6 +285,7 @@ async def test_resource_subscription_sse() -> None:
 ### Modifying Docker Environment
 
 Edit `docker-compose.yml` to:
+
 - Change port mappings
 - Add new services
 - Modify environment variables

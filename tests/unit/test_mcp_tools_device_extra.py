@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from routeros_mcp.config import Settings
 from routeros_mcp.mcp_tools import device as device_module
-from unit.mcp_tools_test_utils import DummyMCP, FakeSessionFactory
+from tests.unit.mcp_tools_test_utils import DummyMCP, FakeSessionFactory
 
 
 class FakeDevice:

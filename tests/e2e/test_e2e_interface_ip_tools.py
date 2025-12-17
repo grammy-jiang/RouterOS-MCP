@@ -4,11 +4,10 @@ import asyncio
 import unittest
 from unittest.mock import patch
 
-from routeros_mcp.config import Settings
 from routeros_mcp.mcp_tools import interface as interface_tools
 from routeros_mcp.mcp_tools import ip as ip_tools
 
-from .e2e_test_utils import DummyMCP, FakeSessionFactory
+from .e2e_test_utils import DummyMCP, FakeSessionFactory, make_test_settings
 
 
 class _FakeDeviceService:
@@ -125,13 +124,13 @@ class _FakeIPService:
 class TestE2EInterfaceIPTools(unittest.TestCase):
     def _register_interface_tools(self) -> DummyMCP:
         mcp = DummyMCP()
-        settings = Settings()
+        settings = make_test_settings()
         interface_tools.register_interface_tools(mcp, settings)
         return mcp
 
     def _register_ip_tools(self) -> DummyMCP:
         mcp = DummyMCP()
-        settings = Settings()
+        settings = make_test_settings()
         ip_tools.register_ip_tools(mcp, settings)
         return mcp
 

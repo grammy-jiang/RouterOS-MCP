@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import unittest
 from unittest.mock import patch
 
-from routeros_mcp.config import Settings
 from routeros_mcp.mcp_tools import bridge as bridge_tools
 
-from .e2e_test_utils import DummyMCP, FakeSessionFactory
+from .e2e_test_utils import DummyMCP, FakeSessionFactory, make_test_settings
 
 
 class _FakeDeviceService:
@@ -132,165 +132,139 @@ class _FakeBridgeService:
 class TestBridgeToolsE2E(unittest.TestCase):
     """E2E tests for bridge tools."""
 
-    def setUp(self):
-        """Set up test fixtures."""
-        self.mcp = DummyMCP()
-        self.session_factory = FakeSessionFactory()
-        self.settings = Settings(environment="lab")
+    def _register_bridge_tools(self) -> DummyMCP:
+        """Register bridge tools with mocked dependencies."""
+        mcp = DummyMCP()
+        settings = make_test_settings()
+        bridge_tools.register_bridge_tools(mcp, settings)
+        return mcp
 
-    @patch("routeros_mcp.mcp_tools.bridge.get_session_factory")
-    @patch("routeros_mcp.mcp_tools.bridge.BridgeService")
-    @patch("routeros_mcp.mcp_tools.bridge.DeviceService")
-    async def test_list_bridges_e2e(self, mock_device_service, mock_bridge_service, mock_get_session_factory):
-        """Test end-to-end bridge listing workflow."""
-        # Set up mocks
-        mock_get_session_factory.return_value = self.session_factory
-        mock_device_service.return_value = _FakeDeviceService()
-        mock_bridge_service.return_value = _FakeBridgeService()
+    def test_list_bridges_e2e(self) -> None:
+        """Test end-to-end bridge listing workflow (MCP tool contract)."""
 
-        # Register tools
-        bridge_tools.register_bridge_tools(self.mcp, self.settings)
+        async def _run() -> None:
+            with (
+                patch.object(bridge_tools, "get_session_factory", return_value=FakeSessionFactory()),
+                patch.object(bridge_tools, "DeviceService", _FakeDeviceService),
+                patch.object(
+                    bridge_tools,
+                    "BridgeService",
+                    lambda *args, **kwargs: _FakeBridgeService(),
+                ),
+                patch.object(bridge_tools, "check_tool_authorization", lambda **_kwargs: None),
+            ):
+                mcp = self._register_bridge_tools()
 
-        # Find the list_bridges tool
-        list_bridges_tool = None
-        for tool in self.mcp.tools:
-            if tool.name == "list_bridges":
-                list_bridges_tool = tool
-                break
+                tool = mcp.tools["list_bridges"]
+                result = await tool(device_id="dev-lab-01")
 
-        self.assertIsNotNone(list_bridges_tool, "list_bridges tool should be registered")
+                self.assertFalse(result["isError"], "Tool execution should not error")
+                self.assertEqual(result["content"][0]["text"], "Found 2 bridge(s) on router-lab-01")
 
-        # Execute the tool
-        result = await list_bridges_tool.fn(device_id="dev-lab-01")
+                meta = result["_meta"]
+                self.assertEqual(meta["device_id"], "dev-lab-01")
+                self.assertEqual(meta["total_count"], 2)
+                self.assertEqual(len(meta["bridges"]), 2)
 
-        # Verify result structure
-        self.assertFalse(result["is_error"], "Tool execution should not error")
-        self.assertEqual(result["content"], "Found 2 bridge(s) on router-lab-01")
+                bridges = meta["bridges"]
+                self.assertEqual(bridges[0]["name"], "bridge1")
+                self.assertEqual(bridges[0]["protocol_mode"], "rstp")
+                self.assertFalse(bridges[0]["vlan_filtering"])
+                self.assertEqual(bridges[0]["comment"], "Main LAN bridge")
 
-        # Verify metadata
-        meta = result["meta"]
-        self.assertEqual(meta["device_id"], "dev-lab-01")
-        self.assertEqual(meta["total_count"], 2)
-        self.assertEqual(len(meta["bridges"]), 2)
+                self.assertEqual(bridges[1]["name"], "bridge-vlan")
+                self.assertTrue(bridges[1]["vlan_filtering"])
+                self.assertEqual(bridges[1]["comment"], "VLAN bridge")
 
-        # Verify bridge details
-        bridges = meta["bridges"]
-        self.assertEqual(bridges[0]["name"], "bridge1")
-        self.assertEqual(bridges[0]["protocol_mode"], "rstp")
-        self.assertFalse(bridges[0]["vlan_filtering"])
-        self.assertEqual(bridges[0]["comment"], "Main LAN bridge")
+        asyncio.run(_run())
 
-        self.assertEqual(bridges[1]["name"], "bridge-vlan")
-        self.assertTrue(bridges[1]["vlan_filtering"])
-        self.assertEqual(bridges[1]["comment"], "VLAN bridge")
+    def test_list_bridge_ports_e2e(self) -> None:
+        """Test end-to-end bridge port listing workflow (MCP tool contract)."""
 
-    @patch("routeros_mcp.mcp_tools.bridge.get_session_factory")
-    @patch("routeros_mcp.mcp_tools.bridge.BridgeService")
-    @patch("routeros_mcp.mcp_tools.bridge.DeviceService")
-    async def test_list_bridge_ports_e2e(
-        self, mock_device_service, mock_bridge_service, mock_get_session_factory
-    ):
-        """Test end-to-end bridge port listing workflow."""
-        # Set up mocks
-        mock_get_session_factory.return_value = self.session_factory
-        mock_device_service.return_value = _FakeDeviceService()
-        mock_bridge_service.return_value = _FakeBridgeService()
+        async def _run() -> None:
+            with (
+                patch.object(bridge_tools, "get_session_factory", return_value=FakeSessionFactory()),
+                patch.object(bridge_tools, "DeviceService", _FakeDeviceService),
+                patch.object(
+                    bridge_tools,
+                    "BridgeService",
+                    lambda *args, **kwargs: _FakeBridgeService(),
+                ),
+                patch.object(bridge_tools, "check_tool_authorization", lambda **_kwargs: None),
+            ):
+                mcp = self._register_bridge_tools()
 
-        # Register tools
-        bridge_tools.register_bridge_tools(self.mcp, self.settings)
+                tool = mcp.tools["list_bridge_ports"]
+                result = await tool(device_id="dev-lab-01")
 
-        # Find the list_bridge_ports tool
-        list_ports_tool = None
-        for tool in self.mcp.tools:
-            if tool.name == "list_bridge_ports":
-                list_ports_tool = tool
-                break
+                self.assertFalse(result["isError"], "Tool execution should not error")
+                self.assertEqual(result["content"][0]["text"], "Found 3 bridge port(s) on router-lab-01")
 
-        self.assertIsNotNone(list_ports_tool, "list_bridge_ports tool should be registered")
+                meta = result["_meta"]
+                self.assertEqual(meta["device_id"], "dev-lab-01")
+                self.assertEqual(meta["total_count"], 3)
+                self.assertEqual(len(meta["bridge_ports"]), 3)
 
-        # Execute the tool
-        result = await list_ports_tool.fn(device_id="dev-lab-01")
+                ports = meta["bridge_ports"]
+                self.assertEqual(ports[0]["interface"], "ether2")
+                self.assertEqual(ports[0]["bridge"], "bridge1")
+                self.assertEqual(ports[0]["pvid"], 1)
+                self.assertTrue(ports[0]["hw"])
+                self.assertEqual(ports[0]["comment"], "LAN port 1")
 
-        # Verify result structure
-        self.assertFalse(result["is_error"], "Tool execution should not error")
-        self.assertEqual(result["content"], "Found 3 bridge port(s) on router-lab-01")
+                self.assertEqual(ports[1]["interface"], "ether3")
+                self.assertEqual(ports[1]["bridge"], "bridge1")
+                self.assertEqual(ports[1]["pvid"], 1)
 
-        # Verify metadata
-        meta = result["meta"]
-        self.assertEqual(meta["device_id"], "dev-lab-01")
-        self.assertEqual(meta["total_count"], 3)
-        self.assertEqual(len(meta["bridge_ports"]), 3)
+                # VLAN trunk port
+                self.assertEqual(ports[2]["interface"], "ether4")
+                self.assertEqual(ports[2]["bridge"], "bridge-vlan")
+                self.assertEqual(ports[2]["pvid"], 10)
+                self.assertEqual(ports[2]["frame_types"], "admit-only-vlan-tagged")
+                self.assertTrue(ports[2]["ingress_filtering"])
 
-        # Verify port details
-        ports = meta["bridge_ports"]
-        self.assertEqual(ports[0]["interface"], "ether2")
-        self.assertEqual(ports[0]["bridge"], "bridge1")
-        self.assertEqual(ports[0]["pvid"], 1)
-        self.assertTrue(ports[0]["hw"])
-        self.assertEqual(ports[0]["comment"], "LAN port 1")
+        asyncio.run(_run())
 
-        self.assertEqual(ports[1]["interface"], "ether3")
-        self.assertEqual(ports[1]["bridge"], "bridge1")
-        self.assertEqual(ports[1]["pvid"], 1)
-
-        # VLAN trunk port
-        self.assertEqual(ports[2]["interface"], "ether4")
-        self.assertEqual(ports[2]["bridge"], "bridge-vlan")
-        self.assertEqual(ports[2]["pvid"], 10)
-        self.assertEqual(ports[2]["frame_types"], "admit-only-vlan-tagged")
-        self.assertTrue(ports[2]["ingress_filtering"])
-
-    @patch("routeros_mcp.mcp_tools.bridge.get_session_factory")
-    @patch("routeros_mcp.mcp_tools.bridge.BridgeService")
-    @patch("routeros_mcp.mcp_tools.bridge.DeviceService")
-    async def test_bridge_tools_combined_workflow(
-        self, mock_device_service, mock_bridge_service, mock_get_session_factory
-    ):
+    def test_bridge_tools_combined_workflow(self) -> None:
         """Test combined workflow: list bridges then list ports."""
-        # Set up mocks
-        mock_get_session_factory.return_value = self.session_factory
-        mock_device_service.return_value = _FakeDeviceService()
-        mock_bridge_service.return_value = _FakeBridgeService()
 
-        # Register tools
-        bridge_tools.register_bridge_tools(self.mcp, self.settings)
+        async def _run() -> None:
+            with (
+                patch.object(bridge_tools, "get_session_factory", return_value=FakeSessionFactory()),
+                patch.object(bridge_tools, "DeviceService", _FakeDeviceService),
+                patch.object(
+                    bridge_tools,
+                    "BridgeService",
+                    lambda *args, **kwargs: _FakeBridgeService(),
+                ),
+                patch.object(bridge_tools, "check_tool_authorization", lambda **_kwargs: None),
+            ):
+                mcp = self._register_bridge_tools()
 
-        # Find tools
-        list_bridges_tool = None
-        list_ports_tool = None
-        for tool in self.mcp.tools:
-            if tool.name == "list_bridges":
-                list_bridges_tool = tool
-            elif tool.name == "list_bridge_ports":
-                list_ports_tool = tool
+                list_bridges_tool = mcp.tools["list_bridges"]
+                list_ports_tool = mcp.tools["list_bridge_ports"]
 
-        self.assertIsNotNone(list_bridges_tool)
-        self.assertIsNotNone(list_ports_tool)
+                bridges_result = await list_bridges_tool(device_id="dev-lab-01")
+                self.assertFalse(bridges_result["isError"])
+                bridges = bridges_result["_meta"]["bridges"]
 
-        # First, list bridges
-        bridges_result = await list_bridges_tool.fn(device_id="dev-lab-01")
-        self.assertFalse(bridges_result["is_error"])
-        bridges = bridges_result["meta"]["bridges"]
+                ports_result = await list_ports_tool(device_id="dev-lab-01")
+                self.assertFalse(ports_result["isError"])
+                ports = ports_result["_meta"]["bridge_ports"]
 
-        # Then, list ports
-        ports_result = await list_ports_tool.fn(device_id="dev-lab-01")
-        self.assertFalse(ports_result["is_error"])
-        ports = ports_result["meta"]["bridge_ports"]
+                bridge_names = {b["name"] for b in bridges}
+                self.assertEqual(bridge_names, {"bridge1", "bridge-vlan"})
 
-        # Verify we can correlate bridges and ports
-        bridge_names = {b["name"] for b in bridges}
-        self.assertEqual(bridge_names, {"bridge1", "bridge-vlan"})
+                for port in ports:
+                    self.assertIn(port["bridge"], bridge_names)
 
-        # All ports should belong to one of the bridges
-        for port in ports:
-            self.assertIn(port["bridge"], bridge_names)
+                bridge1_ports = [p for p in ports if p["bridge"] == "bridge1"]
+                bridge_vlan_ports = [p for p in ports if p["bridge"] == "bridge-vlan"]
 
-        # Verify port distribution
-        bridge1_ports = [p for p in ports if p["bridge"] == "bridge1"]
-        bridge_vlan_ports = [p for p in ports if p["bridge"] == "bridge-vlan"]
+                self.assertEqual(len(bridge1_ports), 2)
+                self.assertEqual(len(bridge_vlan_ports), 1)
 
-        self.assertEqual(len(bridge1_ports), 2)
-        self.assertEqual(len(bridge_vlan_ports), 1)
+        asyncio.run(_run())
 
 
 if __name__ == "__main__":

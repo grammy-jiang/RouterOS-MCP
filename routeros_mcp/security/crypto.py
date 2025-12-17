@@ -28,6 +28,11 @@ logger = logging.getLogger(__name__)
 # Sentinel value for insecure default key (lab only)
 _INSECURE_LAB_KEY: Final[str] = "INSECURE_LAB_KEY_DO_NOT_USE_IN_PRODUCTION"
 
+# In lab mode, if the insecure sentinel key is used we generate a per-process
+# Fernet key once and reuse it. Generating a new key per call would make it
+# impossible to decrypt previously stored secrets.
+_LAB_EPHEMERAL_FERNET_KEY: str | None = None
+
 
 class EncryptionError(Exception):
     """Base exception for encryption/decryption errors."""
@@ -100,8 +105,11 @@ class CredentialEncryption:
                     "Generate production key with: "
                     "python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
                 )
-                # Generate a temporary key for lab use
-                encryption_key = Fernet.generate_key().decode()
+                # Generate (once) a temporary key for lab use.
+                global _LAB_EPHEMERAL_FERNET_KEY
+                if _LAB_EPHEMERAL_FERNET_KEY is None:
+                    _LAB_EPHEMERAL_FERNET_KEY = Fernet.generate_key().decode("utf-8")
+                encryption_key = _LAB_EPHEMERAL_FERNET_KEY
 
         # Validate key format
         try:

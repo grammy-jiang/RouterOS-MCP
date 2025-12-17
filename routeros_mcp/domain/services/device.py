@@ -167,6 +167,55 @@ class DeviceService:
 
         return DeviceDomain.model_validate(device_orm)
 
+    async def create_device(
+        self,
+        device_id: str,
+        name: str,
+        management_ip: str,
+        username: str,
+        password: str,
+        environment: str = "lab",
+        management_port: int = 443,
+    ) -> DeviceDomain:
+        """Convenience wrapper to create a device with REST credentials.
+
+        This method exists primarily for backwards compatibility with earlier
+        tests and examples that created a device and its primary credentials in
+        one call.
+
+        Args:
+            device_id: Unique device identifier
+            name: Human-friendly device name
+            management_ip: Management IP address
+            username: REST username
+            password: REST password
+            environment: Environment name (lab/staging/prod)
+            management_port: Management port (default: 443)
+
+        Returns:
+            Created device domain model
+        """
+        device = await self.register_device(
+            DeviceCreate(
+                id=device_id,
+                name=name,
+                management_ip=management_ip,
+                management_port=management_port,
+                environment=environment,
+            )
+        )
+
+        await self.add_credential(
+            CredentialCreate(
+                device_id=device_id,
+                credential_type=REST_KIND,
+                username=username,
+                password=password,
+            )
+        )
+
+        return device
+
     async def get_device(
         self,
         device_id: str,

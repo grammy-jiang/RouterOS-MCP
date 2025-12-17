@@ -4,11 +4,10 @@ import asyncio
 import unittest
 from unittest.mock import patch
 
-from routeros_mcp.config import Settings
 from routeros_mcp.mcp_tools import firewall_logs as firewall_logs_tools
 from routeros_mcp.mcp_tools import routing as routing_tools
 
-from .e2e_test_utils import DummyMCP, FakeSessionFactory
+from .e2e_test_utils import DummyMCP, FakeSessionFactory, make_test_settings
 
 
 class _FakeDeviceService:
@@ -138,13 +137,13 @@ class _FakeFirewallLogsService:
 class TestE2ERoutingFirewallLogsTools(unittest.TestCase):
     def _register_routing_tools(self) -> DummyMCP:
         mcp = DummyMCP()
-        settings = Settings()
+        settings = make_test_settings()
         routing_tools.register_routing_tools(mcp, settings)
         return mcp
 
     def _register_firewall_logs_tools(self) -> DummyMCP:
         mcp = DummyMCP()
-        settings = Settings()
+        settings = make_test_settings()
         firewall_logs_tools.register_firewall_logs_tools(mcp, settings)
         return mcp
 

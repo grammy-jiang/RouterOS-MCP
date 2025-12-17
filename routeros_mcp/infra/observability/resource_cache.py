@@ -329,6 +329,17 @@ class ResourceCache:
 _cache_instance: Optional[ResourceCache] = None
 
 
+def reset_cache() -> None:
+    """Reset the global cache instance (primarily for testing).
+
+    The caching layer uses a module-level singleton. Tests that call
+    `initialize_cache()` can unintentionally leak state into later tests.
+    This helper allows fixtures to ensure isolation.
+    """
+    global _cache_instance
+    _cache_instance = None
+
+
 def get_cache() -> ResourceCache:
     """Get global cache instance.
 
@@ -468,5 +479,6 @@ __all__ = [
     "CacheEntry",
     "get_cache",
     "initialize_cache",
+    "reset_cache",
     "with_cache",
 ]

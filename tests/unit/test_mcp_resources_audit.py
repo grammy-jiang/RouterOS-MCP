@@ -12,17 +12,7 @@ from routeros_mcp.config import Settings
 from routeros_mcp.infra.db.models import AuditEvent, Base
 from routeros_mcp.mcp_resources import audit as audit_resources
 
-
-class _DummyMCP:
-    def __init__(self) -> None:
-        self.resources: dict[str, object] = {}
-
-    def resource(self, uri: str):  # type: ignore[override]
-        def decorator(func):
-            self.resources[uri] = func
-            return func
-
-        return decorator
+from tests.unit.mcp_tools_test_utils import DummyMCP
 
 
 @pytest.fixture
@@ -107,7 +97,7 @@ async def seed_audit_events(session_factory):
 
 @pytest.fixture
 async def mcp_resources(session_factory, settings, seed_audit_events):
-    mcp = _DummyMCP()
+    mcp = DummyMCP()
     audit_resources.register_audit_resources(mcp, session_factory, settings)
     return mcp
 

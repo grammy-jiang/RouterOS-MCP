@@ -11,40 +11,7 @@ from routeros_mcp.config import Settings
 from routeros_mcp.mcp_resources import plan as plan_resources
 from routeros_mcp.mcp_tools import device as device_tools
 
-
-class _DummyMCP:
-    """Minimal MCP stub capturing registered tools/resources."""
-
-    def __init__(self) -> None:
-        self.resources: dict[str, Any] = {}
-        self.tools: dict[str, Any] = {}
-
-    def resource(self, uri: str):  # type: ignore[override]
-        def decorator(func: Any) -> Any:
-            self.resources[uri] = func
-            return func
-
-        return decorator
-
-    def tool(self):  # type: ignore[override]
-        def decorator(func: Any) -> Any:
-            self.tools[func.__name__] = func
-            return func
-
-        return decorator
-
-
-class _FakeSessionFactory:
-    """Async context manager that mimics DatabaseSessionManager.session()."""
-
-    def session(self):  # pragma: no cover - used via async with
-        return self
-
-    async def __aenter__(self) -> _FakeSessionFactory:
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb) -> None:
-        return None
+from tests.unit.mcp_tools_test_utils import DummyMCP, FakeSessionFactory
 
 
 @pytest.mark.asyncio
@@ -84,9 +51,9 @@ async def test_plan_resources_render_json(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(plan_resources, "PlanService", _FakePlanService)
     monkeypatch.setattr(plan_resources, "JobService", _FakeJobService)
 
-    mcp = _DummyMCP()
+    mcp = DummyMCP()
     settings = Settings()
-    plan_resources.register_plan_resources(mcp, _FakeSessionFactory(), settings)
+    plan_resources.register_plan_resources(mcp, FakeSessionFactory(), settings)
 
     # Call the resource implementations directly
     summary_func = mcp.resources["plan://{plan_id}/summary"]
@@ -106,9 +73,9 @@ async def test_plan_resources_render_json(monkeypatch: pytest.MonkeyPatch) -> No
 def test_device_tools_register_without_db(monkeypatch: pytest.MonkeyPatch) -> None:
     """Registering device tools should succeed when session factory is patched."""
 
-    monkeypatch.setattr(device_tools, "get_session_factory", lambda _url: _FakeSessionFactory())
+    monkeypatch.setattr(device_tools, "get_session_factory", lambda _url: FakeSessionFactory())
 
-    mcp = _DummyMCP()
+    mcp = DummyMCP()
     settings = Settings()
 
     device_tools.register_device_tools(mcp, settings)

@@ -7,7 +7,7 @@ from unittest.mock import patch
 from routeros_mcp.config import Settings
 from routeros_mcp.mcp_tools import device as device_tools
 
-from .e2e_test_utils import DummyMCP, FakeSessionFactory
+from .e2e_test_utils import DummyMCP, FakeSessionFactory, make_test_settings
 
 
 class _FakeDevice:
@@ -72,7 +72,7 @@ class _FakeDeviceService:
 class TestE2EDeviceTools(unittest.TestCase):
     def _register_tools(self) -> tuple[DummyMCP, Settings]:
         mcp = DummyMCP()
-        settings = Settings()
+        settings = make_test_settings()
         device_tools.register_device_tools(mcp, settings)
         return mcp, settings
 
