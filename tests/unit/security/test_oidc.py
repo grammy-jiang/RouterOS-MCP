@@ -230,9 +230,7 @@ class TestOIDCValidator:
         """Test fetching JWKS from OIDC provider."""
         # Mock discovery endpoint response
         discovery_response = Mock()
-        discovery_response.json.return_value = {
-            "jwks_uri": "https://auth.example.com/jwks"
-        }
+        discovery_response.json.return_value = {"jwks_uri": "https://auth.example.com/jwks"}
         discovery_response.raise_for_status = Mock()
 
         # Mock JWKS endpoint response
@@ -250,9 +248,7 @@ class TestOIDCValidator:
         }
         jwks_response.raise_for_status = Mock()
 
-        mock_http_client.get = AsyncMock(
-            side_effect=[discovery_response, jwks_response]
-        )
+        mock_http_client.get = AsyncMock(side_effect=[discovery_response, jwks_response])
 
         jwks = await validator._get_jwks()
 
@@ -267,9 +263,7 @@ class TestOIDCValidator:
     async def test_get_jwks_cache_hit(self, validator):
         """Test JWKS cache hit."""
         # Populate cache
-        cached_jwks = CachedJWKS(
-            keys={"key-1": "mock-key"}, expires_at=time.time() + 3600
-        )
+        cached_jwks = CachedJWKS(keys={"key-1": "mock-key"}, expires_at=time.time() + 3600)
         validator._jwks_cache = cached_jwks
 
         jwks = await validator._get_jwks()
@@ -287,9 +281,7 @@ class TestOIDCValidator:
 
         # Mock responses
         discovery_response = Mock()
-        discovery_response.json.return_value = {
-            "jwks_uri": "https://auth.example.com/jwks"
-        }
+        discovery_response.json.return_value = {"jwks_uri": "https://auth.example.com/jwks"}
         discovery_response.raise_for_status = Mock()
 
         jwks_response = Mock()
@@ -298,9 +290,7 @@ class TestOIDCValidator:
         }
         jwks_response.raise_for_status = Mock()
 
-        mock_http_client.get = AsyncMock(
-            side_effect=[discovery_response, jwks_response]
-        )
+        mock_http_client.get = AsyncMock(side_effect=[discovery_response, jwks_response])
 
         jwks = await validator._get_jwks()
 
@@ -309,14 +299,10 @@ class TestOIDCValidator:
         assert "old-key" not in jwks.keys
 
     @pytest.mark.asyncio
-    async def test_get_jwks_fetch_failure_uses_stale_cache(
-        self, validator, mock_http_client
-    ):
+    async def test_get_jwks_fetch_failure_uses_stale_cache(self, validator, mock_http_client):
         """Test JWKS fetch failure falls back to stale cache."""
         # Populate stale cache
-        stale_jwks = CachedJWKS(
-            keys={"stale-key": "stale-value"}, expires_at=time.time() - 100
-        )
+        stale_jwks = CachedJWKS(keys={"stale-key": "stale-value"}, expires_at=time.time() - 100)
         validator._jwks_cache = stale_jwks
 
         # Mock HTTP error
@@ -371,9 +357,7 @@ class TestOIDCValidator:
     async def test_validate_token_cache_hit(self, validator):
         """Test token validation cache hit."""
         token = "test-token-123"
-        cached_user = User(
-            sub="cached-user", email="cached@example.com", role="admin"
-        )
+        cached_user = User(sub="cached-user", email="cached@example.com", role="admin")
         token_hash = validator._hash_token(token)
 
         # Populate cache
@@ -423,9 +407,7 @@ class TestOIDCValidator:
                 await validator_skip_verification.validate_token(token)
 
     @pytest.mark.asyncio
-    async def test_validate_token_clock_skew_tolerance(
-        self, validator_skip_verification
-    ):
+    async def test_validate_token_clock_skew_tolerance(self, validator_skip_verification):
         """Test token validation allows clock skew."""
         # Token expired 10 seconds ago (within CLOCK_SKEW_SECONDS tolerance)
         claims = {
@@ -445,9 +427,7 @@ class TestOIDCValidator:
             assert user.sub == "user-123"
 
     @pytest.mark.asyncio
-    async def test_validate_token_clock_skew_exceeded(
-        self, validator_skip_verification
-    ):
+    async def test_validate_token_clock_skew_exceeded(self, validator_skip_verification):
         """Test token validation fails if clock skew exceeded."""
         # Token expired beyond CLOCK_SKEW_SECONDS tolerance
         claims = {
@@ -472,53 +452,45 @@ class TestOIDCValidator:
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.backends import default_backend
         from authlib.jose import JsonWebKey
-        
+
         # Generate RSA key pair
         private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-            backend=default_backend()
+            public_exponent=65537, key_size=2048, backend=default_backend()
         )
-        
+
         # Serialize keys to PEM format
         private_pem = private_key.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption()
+            encryption_algorithm=serialization.NoEncryption(),
         )
-        
+
         public_pem = private_key.public_key().public_bytes(
             encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
-        
+
         # Import keys with authlib
         private_jwk = JsonWebKey.import_key(private_pem)
         public_jwk = JsonWebKey.import_key(public_pem)
-        
+
         # Create public JWK dict for JWKS response
         public_jwk_dict = public_jwk.as_dict()
-        public_jwk_dict['kid'] = 'test-key-1'
-        public_jwk_dict['use'] = 'sig'
-        public_jwk_dict['alg'] = 'RS256'
-        
+        public_jwk_dict["kid"] = "test-key-1"
+        public_jwk_dict["use"] = "sig"
+        public_jwk_dict["alg"] = "RS256"
+
         # Mock OIDC discovery and JWKS responses
         discovery_response = Mock()
-        discovery_response.json.return_value = {
-            "jwks_uri": "https://auth.example.com/jwks"
-        }
+        discovery_response.json.return_value = {"jwks_uri": "https://auth.example.com/jwks"}
         discovery_response.raise_for_status = Mock()
-        
+
         jwks_response = Mock()
-        jwks_response.json.return_value = {
-            "keys": [public_jwk_dict]
-        }
+        jwks_response.json.return_value = {"keys": [public_jwk_dict]}
         jwks_response.raise_for_status = Mock()
-        
-        mock_http_client.get = AsyncMock(
-            side_effect=[discovery_response, jwks_response]
-        )
-        
+
+        mock_http_client.get = AsyncMock(side_effect=[discovery_response, jwks_response])
+
         # Create validator WITHOUT skip_verification
         validator = OIDCValidator(
             provider_url="https://auth.example.com",
@@ -527,9 +499,9 @@ class TestOIDCValidator:
             skip_verification=False,
             http_client=mock_http_client,
         )
-        
+
         # Create signed JWT token
-        header = {'alg': 'RS256', 'typ': 'JWT', 'kid': 'test-key-1'}
+        header = {"alg": "RS256", "typ": "JWT", "kid": "test-key-1"}
         claims = {
             "sub": "user-123",
             "email": "test@example.com",
@@ -538,16 +510,16 @@ class TestOIDCValidator:
             "iss": "https://auth.example.com",
             "aud": "test-audience",
         }
-        
+
         token = jwt.encode(header, claims, private_jwk)
-        
+
         # Validate token with signature verification
         user = await validator.validate_token(token)
-        
+
         assert user.sub == "user-123"
         assert user.email == "test@example.com"
         assert user.role == "admin"
-    
+
     @pytest.mark.asyncio
     async def test_validate_token_invalid_signature(self, mock_http_client):
         """Test that invalid signatures are rejected."""
@@ -555,77 +527,67 @@ class TestOIDCValidator:
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.backends import default_backend
         from authlib.jose import JsonWebKey
-        
+
         # Generate two different RSA key pairs
         private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-            backend=default_backend()
+            public_exponent=65537, key_size=2048, backend=default_backend()
         )
-        
+
         wrong_private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-            backend=default_backend()
+            public_exponent=65537, key_size=2048, backend=default_backend()
         )
-        
+
         # Serialize keys
         wrong_private_pem = wrong_private_key.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption()
+            encryption_algorithm=serialization.NoEncryption(),
         )
-        
+
         public_pem = private_key.public_key().public_bytes(
             encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
-        
+
         # Import with authlib
         wrong_private_jwk = JsonWebKey.import_key(wrong_private_pem)
         public_jwk = JsonWebKey.import_key(public_pem)
-        
+
         # Create public JWK dict from FIRST key for JWKS response
         public_jwk_dict = public_jwk.as_dict()
-        public_jwk_dict['kid'] = 'test-key-1'
-        public_jwk_dict['use'] = 'sig'
-        public_jwk_dict['alg'] = 'RS256'
-        
+        public_jwk_dict["kid"] = "test-key-1"
+        public_jwk_dict["use"] = "sig"
+        public_jwk_dict["alg"] = "RS256"
+
         # Mock OIDC discovery and JWKS responses
         discovery_response = Mock()
-        discovery_response.json.return_value = {
-            "jwks_uri": "https://auth.example.com/jwks"
-        }
+        discovery_response.json.return_value = {"jwks_uri": "https://auth.example.com/jwks"}
         discovery_response.raise_for_status = Mock()
-        
+
         jwks_response = Mock()
-        jwks_response.json.return_value = {
-            "keys": [public_jwk_dict]
-        }
+        jwks_response.json.return_value = {"keys": [public_jwk_dict]}
         jwks_response.raise_for_status = Mock()
-        
-        mock_http_client.get = AsyncMock(
-            side_effect=[discovery_response, jwks_response]
-        )
-        
+
+        mock_http_client.get = AsyncMock(side_effect=[discovery_response, jwks_response])
+
         validator = OIDCValidator(
             provider_url="https://auth.example.com",
             client_id="test-client-id",
             skip_verification=False,
             http_client=mock_http_client,
         )
-        
+
         # Sign token with WRONG key
-        header = {'alg': 'RS256', 'typ': 'JWT', 'kid': 'test-key-1'}
+        header = {"alg": "RS256", "typ": "JWT", "kid": "test-key-1"}
         claims = {
             "sub": "user-123",
             "exp": time.time() + 3600,
             "iss": "https://auth.example.com",
             "aud": "test-client-id",
         }
-        
+
         token = jwt.encode(header, claims, wrong_private_jwk)
-        
+
         # Should fail signature verification
         with pytest.raises(InvalidTokenError, match="Invalid JWT token"):
             await validator.validate_token(token)

@@ -123,13 +123,15 @@ class TestMCPToolsIPExtra(unittest.TestCase):
 
     def test_get_ip_address_empty_response(self) -> None:
         """Test get_ip_address tool with empty dict response (defensive check)."""
+
         async def _run() -> None:
             fake_device_service = FakeDeviceService()
+
             # Create a fake service that returns empty dict
             class EmptyIPService(FakeIPService):
                 async def get_address(self, device_id, address_id):
                     return {}  # Empty dict - simulates the old bug
-            
+
             fake_ip_service = EmptyIPService()
             with (
                 patch.object(ip_module, "get_session_factory", return_value=FakeSessionFactory()),
@@ -150,13 +152,15 @@ class TestMCPToolsIPExtra(unittest.TestCase):
 
     def test_get_ip_address_missing_address_key(self) -> None:
         """Test get_ip_address tool when response is missing 'address' key."""
+
         async def _run() -> None:
             fake_device_service = FakeDeviceService()
+
             # Create a fake service that returns dict without 'address' key
             class PartialIPService(FakeIPService):
                 async def get_address(self, device_id, address_id):
                     return {"interface": "eth1"}  # Missing 'address' key
-            
+
             fake_ip_service = PartialIPService()
             with (
                 patch.object(ip_module, "get_session_factory", return_value=FakeSessionFactory()),

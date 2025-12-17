@@ -6,7 +6,10 @@ registration functions.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class DummyMCP:
@@ -44,7 +47,9 @@ class DummyMCP:
 
         return decorator
 
-    def prompt(self, *args: Any, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def prompt(
+        self, *args: Any, **kwargs: Any
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """Decorator for registering a prompt.
 
         Supports FastMCP-like usage:

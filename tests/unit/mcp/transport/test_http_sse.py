@@ -5,10 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from starlette.requests import Request
-from starlette.testclient import TestClient
 
 from routeros_mcp.config import Settings
-from routeros_mcp.mcp.errors import InvalidRequestError, ParseError
 from routeros_mcp.mcp.transport.http_sse import HTTPSSETransport
 
 
@@ -135,7 +133,10 @@ async def test_http_sse_transport_run_with_middleware() -> None:
     assert len(call_kwargs["middleware"]) > 0
     # Verify correlation ID middleware is included
     middleware_list = call_kwargs["middleware"]
-    assert any(getattr(m, "cls", None) and getattr(m.cls, "__name__", "") == "CorrelationIDMiddleware" for m in middleware_list)
+    assert any(
+        getattr(m, "cls", None) and getattr(m.cls, "__name__", "") == "CorrelationIDMiddleware"
+        for m in middleware_list
+    )
 
 
 @pytest.mark.asyncio
@@ -290,7 +291,9 @@ async def test_handle_request_correlation_id_propagation() -> None:
     test_correlation_id = "test-correlation-id-12345"
 
     # Call handle_request with specific correlation ID
-    with patch("routeros_mcp.mcp.transport.http_sse.get_correlation_id", return_value=test_correlation_id):
+    with patch(
+        "routeros_mcp.mcp.transport.http_sse.get_correlation_id", return_value=test_correlation_id
+    ):
         response = await transport.handle_request(mock_request)
 
     # Verify correlation ID in response headers

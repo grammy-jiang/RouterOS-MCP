@@ -37,7 +37,14 @@ class _FakeRestClient:
         self.closed = False
 
     async def get(self, _path: str):
-        return {"time": "12:00:00", "date": "2025-12-13", "time-zone-name": "UTC", "time-zone-autodetect": True, "gmt-offset": "+00:00", "dst-active": False}
+        return {
+            "time": "12:00:00",
+            "date": "2025-12-13",
+            "time-zone-name": "UTC",
+            "time-zone-autodetect": True,
+            "gmt-offset": "+00:00",
+            "dst-active": False,
+        }
 
     async def close(self):
         self.closed = True

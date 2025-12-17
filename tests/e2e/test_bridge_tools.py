@@ -144,7 +144,9 @@ class TestBridgeToolsE2E(unittest.TestCase):
 
         async def _run() -> None:
             with (
-                patch.object(bridge_tools, "get_session_factory", return_value=FakeSessionFactory()),
+                patch.object(
+                    bridge_tools, "get_session_factory", return_value=FakeSessionFactory()
+                ),
                 patch.object(bridge_tools, "DeviceService", _FakeDeviceService),
                 patch.object(
                     bridge_tools,
@@ -183,7 +185,9 @@ class TestBridgeToolsE2E(unittest.TestCase):
 
         async def _run() -> None:
             with (
-                patch.object(bridge_tools, "get_session_factory", return_value=FakeSessionFactory()),
+                patch.object(
+                    bridge_tools, "get_session_factory", return_value=FakeSessionFactory()
+                ),
                 patch.object(bridge_tools, "DeviceService", _FakeDeviceService),
                 patch.object(
                     bridge_tools,
@@ -198,7 +202,9 @@ class TestBridgeToolsE2E(unittest.TestCase):
                 result = await tool(device_id="dev-lab-01")
 
                 self.assertFalse(result["isError"], "Tool execution should not error")
-                self.assertEqual(result["content"][0]["text"], "Found 3 bridge port(s) on router-lab-01")
+                self.assertEqual(
+                    result["content"][0]["text"], "Found 3 bridge port(s) on router-lab-01"
+                )
 
                 meta = result["_meta"]
                 self.assertEqual(meta["device_id"], "dev-lab-01")
@@ -230,7 +236,9 @@ class TestBridgeToolsE2E(unittest.TestCase):
 
         async def _run() -> None:
             with (
-                patch.object(bridge_tools, "get_session_factory", return_value=FakeSessionFactory()),
+                patch.object(
+                    bridge_tools, "get_session_factory", return_value=FakeSessionFactory()
+                ),
                 patch.object(bridge_tools, "DeviceService", _FakeDeviceService),
                 patch.object(
                     bridge_tools,

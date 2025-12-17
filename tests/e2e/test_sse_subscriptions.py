@@ -5,6 +5,7 @@ and receiving events via SSE streams.
 """
 
 import asyncio
+import contextlib
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -214,18 +215,12 @@ async def test_client_disconnect_cleanup(sse_manager: SSEManager) -> None:
     stream_gen = sse_manager.stream_events(subscription)
 
     # Get first event
-    try:
+    with contextlib.suppress(StopAsyncIteration):
         await stream_gen.__anext__()
-    except StopAsyncIteration:
-        # Stream may be exhausted; safe to ignore in test context
-        pass
 
     # Close stream (simulates disconnect)
-    try:
+    with contextlib.suppress(Exception):  # noqa: S110
         await stream_gen.aclose()
-    except Exception:  # noqa: S110
-        # Ignore any exceptions during cleanup
-        pass
 
     await asyncio.sleep(0.1)
 

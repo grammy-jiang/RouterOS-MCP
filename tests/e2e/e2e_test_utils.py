@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from routeros_mcp.config import Settings
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 # Deterministic, valid Fernet key (base64 urlsafe, 32-byte key).
@@ -123,4 +126,3 @@ def create_test_mcp_server() -> Any:
     """Create a test MCP server instance."""
     # Placeholder - implement as needed for full E2E tests
     pass
-

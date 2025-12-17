@@ -513,4 +513,3 @@ class TestWithCacheDecorator:
         result2 = await fetch_fleet()
         assert result2 == "fleet_summary"
         assert call_count == 1  # Not incremented
-

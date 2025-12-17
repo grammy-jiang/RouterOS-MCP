@@ -144,7 +144,7 @@ class TestDatabaseSessionManager:
                 id="session-test-2",
                 name="test-router-session-rollback",
                 management_ip="198.51.100.101",
-            management_port=443,
+                management_port=443,
                 environment="lab",
                 status="healthy",
                 tags={},

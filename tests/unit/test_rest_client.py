@@ -519,9 +519,7 @@ class TestRouterOSRestClientSSLVerification:
         assert client.verify_ssl is True
 
     @pytest.mark.asyncio
-    async def test_get_client_passes_verify_ssl_true(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_get_client_passes_verify_ssl_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """_get_client should pass verify=True to httpx.AsyncClient when enabled."""
         created_clients: list[tuple[object, dict]] = []
 

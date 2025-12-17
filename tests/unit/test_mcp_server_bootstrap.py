@@ -1,4 +1,3 @@
-
 import pytest
 
 from routeros_mcp.config import Settings

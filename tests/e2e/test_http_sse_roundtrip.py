@@ -4,6 +4,7 @@ Tests the complete flow: HTTP request → JSON-RPC processing → tool execution
 """
 
 import asyncio
+import contextlib
 import json
 from typing import Any
 
@@ -18,7 +19,7 @@ from routeros_mcp.mcp.server import RouterOSMCPServer
 @pytest.mark.skip(reason="Full server roundtrip not yet implemented - endpoint not exposed")
 async def test_http_sse_echo_tool_roundtrip() -> None:
     """Test complete roundtrip: HTTP POST → echo tool → JSON-RPC response.
-    
+
     Note: This test is skipped because the full HTTP server integration is not
     yet complete in Phase 2. The endpoint will be properly exposed in Phase 3
     when FastMCP integration is finalized.
@@ -37,10 +38,8 @@ async def test_http_sse_echo_tool_roundtrip() -> None:
 
     # Start server in background task
     async def run_server():
-        try:
+        with contextlib.suppress(Exception):
             await server.start()
-        except Exception:
-            pass  # Server will be cancelled
 
     server_task = asyncio.create_task(run_server())
 
@@ -72,21 +71,19 @@ async def test_http_sse_echo_tool_roundtrip() -> None:
             # Verify response
             assert response.status_code == 200
             assert "X-Correlation-ID" in response.headers
-            
+
             body = response.json()
             assert body["jsonrpc"] == "2.0"
             assert body["id"] == "e2e-test-001"
-            
+
             # Should have either result or error
             assert "result" in body or "error" in body
 
     finally:
         # Stop server
         server_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await server_task
-        except asyncio.CancelledError:
-            pass
 
 
 @pytest.mark.asyncio
@@ -94,22 +91,22 @@ async def test_http_sse_correlation_id_propagation() -> None:
     """Test correlation ID is propagated through the request/response cycle."""
     # This test verifies that X-Correlation-ID header is properly handled
     # even when the full server isn't running
-    
+
     from routeros_mcp.mcp.transport.http_sse import HTTPSSETransport
     from fastmcp import FastMCP
     from unittest.mock import MagicMock, AsyncMock
     from starlette.requests import Request
 
     settings = Settings(mcp_transport="http")
-    
+
     # Create a minimal FastMCP instance for testing
     mcp = FastMCP("test-server")
-    
+
     @mcp.tool()
     def test_tool(message: str) -> dict[str, Any]:
         """Test tool for e2e testing."""
         return {"content": [{"type": "text", "text": f"Processed: {message}"}]}
-    
+
     transport = HTTPSSETransport(settings, mcp)
 
     # Create mock request
@@ -128,8 +125,11 @@ async def test_http_sse_correlation_id_propagation() -> None:
 
     # Patch correlation ID
     from unittest.mock import patch
-    
-    with patch("routeros_mcp.mcp.transport.http_sse.get_correlation_id", return_value="e2e-test-correlation"):
+
+    with patch(
+        "routeros_mcp.mcp.transport.http_sse.get_correlation_id",
+        return_value="e2e-test-correlation",
+    ):
         response = await transport.handle_request(mock_request)
 
     # Verify correlation ID in response
@@ -162,7 +162,9 @@ async def test_http_sse_invalid_json_error_handling() -> None:
     # Make it raise JSONDecodeError
     mock_request.json = AsyncMock(side_effect=json.JSONDecodeError("Invalid JSON", "doc", 0))
 
-    with patch("routeros_mcp.mcp.transport.http_sse.get_correlation_id", return_value="e2e-error-test"):
+    with patch(
+        "routeros_mcp.mcp.transport.http_sse.get_correlation_id", return_value="e2e-error-test"
+    ):
         response = await transport.handle_request(mock_request)
 
     # Verify error response
@@ -198,7 +200,9 @@ async def test_http_sse_invalid_jsonrpc_structure() -> None:
     )
     mock_request.state.user = None
 
-    with patch("routeros_mcp.mcp.transport.http_sse.get_correlation_id", return_value="e2e-invalid-test"):
+    with patch(
+        "routeros_mcp.mcp.transport.http_sse.get_correlation_id", return_value="e2e-invalid-test"
+    ):
         response = await transport.handle_request(mock_request)
 
     # Verify error response
@@ -231,7 +235,7 @@ async def test_http_sse_user_context_propagation() -> None:
             "params": {"name": "echo", "arguments": {"message": "test"}},
         }
     )
-    
+
     # Mock authenticated user
     mock_request.state.user = {
         "user_id": "user-e2e-123",

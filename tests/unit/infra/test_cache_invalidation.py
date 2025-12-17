@@ -373,7 +373,7 @@ class TestDomainServiceInvalidation:
     @pytest.mark.asyncio
     async def test_dns_service_invalidates_on_update(self) -> None:
         """DNS service should invalidate cache when DNS servers are updated."""
-        from unittest.mock import AsyncMock, MagicMock, patch
+        from unittest.mock import AsyncMock, MagicMock
         from routeros_mcp.domain.services.dns_ntp import DNSNTPService
         from routeros_mcp.config import Settings
 

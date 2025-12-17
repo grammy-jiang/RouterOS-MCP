@@ -514,7 +514,9 @@ Columns: NAME, VERSION, BUILD-TIME, SIZE
     assert len(available) == 1
 
     installed_names = {p["name"] for p in installed}
-    assert {"routeros", "wireless", "container", "rose-storage", "zerotier"}.issubset(installed_names)
+    assert {"routeros", "wireless", "container", "rose-storage", "zerotier"}.issubset(
+        installed_names
+    )
     assert all(p["version"] == "7.20.6" for p in installed)
     assert all(p["build_time"] == "2025-12-04 12:00:39" for p in installed)
     assert all(p.get("size") for p in installed)
@@ -603,7 +605,13 @@ async def test_system_service_clock_rest_fallback(fake_env, monkeypatch: pytest.
         AsyncMock(side_effect=RouterOSTimeoutError("rest timeout")),
     )
 
-    ssh_clock = {"time": "12:00:00", "date": "2025-12-13", "time-zone-name": "UTC", "gmt-offset": "+00:00", "dst-active": False}
+    ssh_clock = {
+        "time": "12:00:00",
+        "date": "2025-12-13",
+        "time-zone-name": "UTC",
+        "gmt-offset": "+00:00",
+        "dst-active": False,
+    }
 
     monkeypatch.setattr(
         service,

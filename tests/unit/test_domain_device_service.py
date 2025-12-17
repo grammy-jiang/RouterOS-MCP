@@ -366,7 +366,9 @@ class TestDeviceServiceSSLVerification:
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ):
         """Test that get_rest_client passes verify_ssl=True when setting is True."""
-        settings = Settings(environment="lab", encryption_key="secret-key", routeros_verify_ssl=True)
+        settings = Settings(
+            environment="lab", encryption_key="secret-key", routeros_verify_ssl=True
+        )
         service = DeviceService(db_session, settings)
 
         # Register device and credential
@@ -407,7 +409,9 @@ class TestDeviceServiceSSLVerification:
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ):
         """Test that get_rest_client passes verify_ssl=False when setting is False."""
-        settings = Settings(environment="lab", encryption_key="secret-key", routeros_verify_ssl=False)
+        settings = Settings(
+            environment="lab", encryption_key="secret-key", routeros_verify_ssl=False
+        )
         service = DeviceService(db_session, settings)
 
         # Register device and credential

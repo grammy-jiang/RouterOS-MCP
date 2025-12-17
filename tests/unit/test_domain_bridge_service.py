@@ -120,7 +120,9 @@ class _FakeSSHClient:
 class _FakeDeviceService:
     """Fake device service for testing."""
 
-    def __init__(self, rest_client: _FakeRestClient, ssh_client: _FakeSSHClient | None = None) -> None:
+    def __init__(
+        self, rest_client: _FakeRestClient, ssh_client: _FakeSSHClient | None = None
+    ) -> None:
         self.rest_client = rest_client
         self.ssh_client = ssh_client
         self.device = SimpleNamespace(
@@ -224,7 +226,9 @@ async def test_list_bridge_ports_via_rest(fake_env):
     assert ports[2]["hw"] is False
 
     # Verify REST client was called
-    assert any(call[0] == "get" and call[1] == "/rest/interface/bridge/port" for call in client.calls)
+    assert any(
+        call[0] == "get" and call[1] == "/rest/interface/bridge/port" for call in client.calls
+    )
     assert any(call[0] == "close" for call in client.calls)
 
 

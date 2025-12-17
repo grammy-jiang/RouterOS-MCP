@@ -52,7 +52,7 @@ async def test_emit_device_online() -> None:
 
     try:
         await asyncio.wait_for(stream_task, timeout=1.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         stream_task.cancel()
 
     assert len(events) >= 2
@@ -88,7 +88,7 @@ async def test_emit_device_offline() -> None:
 
     try:
         await asyncio.wait_for(stream_task, timeout=1.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         stream_task.cancel()
 
     assert len(events) >= 2
@@ -131,7 +131,7 @@ async def test_emit_health_check_complete() -> None:
 
     try:
         await asyncio.wait_for(stream_task, timeout=1.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         stream_task.cancel()
 
     assert len(events) >= 2
@@ -170,7 +170,7 @@ async def test_emit_config_change() -> None:
 
     try:
         await asyncio.wait_for(stream_task, timeout=1.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         stream_task.cancel()
 
     assert len(events) >= 2
@@ -213,7 +213,7 @@ async def test_emit_plan_execution_complete() -> None:
 
     try:
         await asyncio.wait_for(stream_task, timeout=1.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         stream_task.cancel()
 
     assert len(events) >= 2
@@ -248,16 +248,14 @@ async def test_multiple_events_to_same_resource() -> None:
     await emitter.emit_device_online("dev-001", {"ip": "192.168.1.1"})
     await asyncio.sleep(0.1)  # Wait for debounce
 
-    await emitter.emit_health_check_complete(
-        "dev-001", {"status": "healthy", "cpu_usage": 30.0}
-    )
+    await emitter.emit_health_check_complete("dev-001", {"status": "healthy", "cpu_usage": 30.0})
     await asyncio.sleep(0.1)
 
     await emitter.emit_device_offline("dev-001", "manual_shutdown")
 
     try:
         await asyncio.wait_for(stream_task, timeout=2.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         stream_task.cancel()
 
     assert len(events) >= 4

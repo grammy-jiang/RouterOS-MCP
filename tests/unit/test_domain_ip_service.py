@@ -71,7 +71,7 @@ class FakeSSHClient:
         elif command == "/ip/arp/print":
             return """Flags: D - DYNAMIC; C - COMPLETE
 Columns: ADDRESS, MAC-ADDRESS, INTERFACE, STATUS
-#    ADDRESS         MAC-ADDRESS        INTERFACE    STATUS   
+    #    ADDRESS         MAC-ADDRESS        INTERFACE    STATUS
 0 DC 10.0.0.3        00:11:22:33:44:55  ether1       reachable"""
         return ""
 
@@ -150,10 +150,10 @@ async def test_get_address(service):
 async def test_get_address_not_found_raises_error(service):
     """Test that get_address raises ValueError when address ID is not found via SSH."""
     svc, dev_svc = service
-    
+
     # Make REST fail to trigger SSH fallback
     dev_svc.rest_fails = True
-    
+
     # The fake SSH client only has *1 and *2 in its output, so *999 should raise ValueError
     # which then gets wrapped in RuntimeError by get_address
     with pytest.raises(RuntimeError, match="Get address failed via REST and SSH"):
@@ -229,10 +229,10 @@ async def test_parse_arp_table_print_output():
     """Test parsing of /ip/arp/print output with actual RouterOS format."""
     output = """Flags: D - DYNAMIC; C - COMPLETE
 Columns: ADDRESS, MAC-ADDRESS, INTERFACE, STATUS
-#    ADDRESS         MAC-ADDRESS        INTERFACE    STATUS   
-0 DC 192.168.20.251  18:FD:74:7C:7B:4F  vlan20-mgmt  stale    
+#    ADDRESS         MAC-ADDRESS        INTERFACE    STATUS
+0 DC 192.168.20.251  18:FD:74:7C:7B:4F  vlan20-mgmt  stale
 1 DC 192.168.20.248  00:E0:4C:34:5D:51  vlan20-mgmt  reachable
-2 DC 192.168.1.1     98:03:8E:D0:38:9F  ether1       delay    
+2 DC 192.168.1.1     98:03:8E:D0:38:9F  ether1       delay
 3 DC 192.168.30.242  0A:AF:A0:8D:C9:82  vlan30-home  reachable"""
 
     result = ip_module.IPService._parse_arp_table_print_output(output)

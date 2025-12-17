@@ -6,7 +6,7 @@ and basic success flows without relying on external RouterOS connectivity.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -150,4 +150,3 @@ async def test_check_connectivity_failure_marks_unreachable(
     updated = kwargs.get("updates") or (args[1] if len(args) > 1 else None)
     assert updated is not None
     assert updated.status == "unreachable"
-

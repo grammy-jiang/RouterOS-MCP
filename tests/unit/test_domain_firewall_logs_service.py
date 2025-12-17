@@ -76,25 +76,22 @@ class _FakeSSHClient:
 
     async def execute(self, command: str) -> str:
         self.calls.append(("execute", command))
-        if command == "/ip/firewall/filter/print":
-            return """ #   CHAIN      ACTION    PROTOCOL  DST-PORT  COMMENT
- *1  input      accept    tcp       22        ssh"""
-        elif command == "/ip/firewall/nat/print":
-            return """ #    CHAIN     ACTION     IN-INTERFACE  OUT-INTERFACE  TO-ADDRESSES  COMMENT
- *a   dstnat    dst-nat    ether2        ether1         192.0.2.10    http"""
-        elif command == "/ip/firewall/address-list/print":
-            return """ #    LIST         ADDRESS       COMMENT  TIMEOUT
+        outputs = {
+            "/ip/firewall/filter/print": """ #   CHAIN      ACTION    PROTOCOL  DST-PORT  COMMENT
+ *1  input      accept    tcp       22        ssh""",
+            "/ip/firewall/nat/print": """ #    CHAIN     ACTION     IN-INTERFACE  OUT-INTERFACE  TO-ADDRESSES  COMMENT
+ *a   dstnat    dst-nat    ether2        ether1         192.0.2.10    http""",
+            "/ip/firewall/address-list/print": """ #    LIST         ADDRESS       COMMENT  TIMEOUT
  *x   mcp-managed  192.0.2.1     seed     1d
- *y   other        198.51.100.2  other    """
-        elif command == "/log/print":
-            return """ #   TIME      TOPICS          MESSAGE
+ *y   other        198.51.100.2  other    """,
+            "/log/print": """ #   TIME      TOPICS          MESSAGE
  *l1 00:00:01  info,system     started
- *l2 00:00:02  warning,firewall drop"""
-        elif command == "/system/logging/print":
-            return """ #  TOPICS           ACTION    PREFIX
+ *l2 00:00:02  warning,firewall drop""",
+            "/system/logging/print": """ #  TOPICS           ACTION    PREFIX
  0  info,warning     memory    sys
- 1  firewall         disk      fw"""
-        return ""
+ 1  firewall         disk      fw""",
+        }
+        return outputs.get(command, "")
 
     async def close(self):
         self.calls.append(("close", None))
@@ -272,18 +269,18 @@ async def test_get_logging_config_via_ssh_fallback(fake_env):
 async def test_list_address_lists_ssh_fallback_empty(fake_env):
     """Test list_address_lists via SSH when list is empty."""
     client, device_service = fake_env
-    
+
     old_execute = device_service.ssh_client.execute
-    
+
     async def execute_empty(command):
         if command == "/ip/firewall/address-list/print":
             return """ #    LIST         ADDRESS       COMMENT  TIMEOUT"""
         return await old_execute(command)
-    
+
     device_service.ssh_client.execute = execute_empty
     device_service.rest_fails = True
     service = firewall_logs_module.FirewallLogsService(session=None, settings=Settings())
-    
+
     lists = await service.list_address_lists("dev-1")
     assert len(lists) == 0
 
@@ -293,9 +290,9 @@ async def test_get_recent_logs_with_topic_filter(fake_env):
     """Test get_recent_logs with topic filtering."""
     client, device_service = fake_env
     service = firewall_logs_module.FirewallLogsService(session=None, settings=Settings())
-    
+
     logs, total = await service.get_recent_logs("dev-1", limit=10, topics=["firewall"])
-    
+
     assert isinstance(logs, list)
     assert isinstance(total, int)
 

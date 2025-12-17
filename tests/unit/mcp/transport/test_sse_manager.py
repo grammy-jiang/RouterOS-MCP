@@ -1,6 +1,7 @@
 """Tests for SSE subscription manager."""
 
 import asyncio
+import contextlib
 
 import pytest
 
@@ -291,18 +292,12 @@ async def test_subscription_cleanup_on_stream_cancel() -> None:
     stream_gen = manager.stream_events(sub)
 
     # Get first event (connected)
-    try:
+    with contextlib.suppress(StopAsyncIteration):
         await stream_gen.__anext__()
-    except StopAsyncIteration:
-        # Stream may be exhausted; safe to ignore in test context
-        pass
 
     # Close the generator which triggers cleanup
-    try:
+    with contextlib.suppress(Exception):  # noqa: S110
         await stream_gen.aclose()
-    except Exception:  # noqa: S110
-        # Ignore any exceptions during cleanup
-        pass
 
     # Give cleanup time to run
     await asyncio.sleep(0.05)

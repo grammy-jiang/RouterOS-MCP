@@ -26,7 +26,14 @@ class FakeDeviceService:
     async def get_rest_client(self, device_id):
         class Client:
             async def get(self, path):
-                return {"time": "12:00:00", "date": "2025-12-13", "time-zone-name": "UTC", "time-zone-autodetect": True, "gmt-offset": "+00:00", "dst-active": False}
+                return {
+                    "time": "12:00:00",
+                    "date": "2025-12-13",
+                    "time-zone-name": "UTC",
+                    "time-zone-autodetect": True,
+                    "gmt-offset": "+00:00",
+                    "dst-active": False,
+                }
 
             async def close(self):
                 return None
@@ -228,7 +235,9 @@ class TestMCPToolsSystemExtra(unittest.TestCase):
                 fn = mcp.tools["get_system_overview"]
                 result = await fn("dev1")
 
-                self.assertIn("Transport: ssh (REST fallback: timeout)", result["content"][0]["text"])
+                self.assertIn(
+                    "Transport: ssh (REST fallback: timeout)", result["content"][0]["text"]
+                )
                 self.assertTrue(result["_meta"].get("fallback_used"))
                 self.assertEqual("ssh", result["_meta"].get("transport"))
 

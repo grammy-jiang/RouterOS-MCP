@@ -73,37 +73,36 @@ class FakeSSHClient:
 
     async def execute(self, command):
         self.calls.append(("execute", command))
-        if command == "/ip/dns/print":
-            # Simulate actual RouterOS v7 multi-line output format with all fields
-            return """                      servers: 1.1.1.1
+        # Simulate actual RouterOS v7 multi-line output format with all fields
+        outputs = {
+            "/ip/dns/print": """                      servers: 1.1.1.1
                                1.0.0.1
-              dynamic-servers:        
-               use-doh-server:        
-              verify-doh-cert: no     
-   doh-max-server-connections: 5      
-   doh-max-concurrent-queries: 50     
-                  doh-timeout: 5s     
-        allow-remote-requests: yes    
-          max-udp-packet-size: 4096   
-         query-server-timeout: 2s     
-          query-total-timeout: 10s    
-       max-concurrent-queries: 100    
-  max-concurrent-tcp-sessions: 20     
+              dynamic-servers:
+               use-doh-server:
+              verify-doh-cert: no
+   doh-max-server-connections: 5
+   doh-max-concurrent-queries: 50
+                  doh-timeout: 5s
+        allow-remote-requests: yes
+          max-udp-packet-size: 4096
+         query-server-timeout: 2s
+          query-total-timeout: 10s
+       max-concurrent-queries: 100
+  max-concurrent-tcp-sessions: 20
                    cache-size: 4096KiB
-                cache-max-ttl: 1w     
-      address-list-extra-time: 0s     
-                          vrf: main   
-           mdns-repeat-ifaces:        
-                   cache-used: 115KiB """
-        elif command == "/system/ntp/client/print":
-            return """        servers: 0.pool.ntp.org,1.pool.ntp.org
+                cache-max-ttl: 1w
+      address-list-extra-time: 0s
+                          vrf: main
+           mdns-repeat-ifaces:
+                   cache-used: 115KiB""",
+            "/system/ntp/client/print": """        servers: 0.pool.ntp.org,1.pool.ntp.org
         enabled: yes
-           mode: unicast"""
-        elif command == "/ip/dns/cache/print":
-            return """ #  NAME          TYPE  DATA             TTL
+           mode: unicast""",
+            "/ip/dns/cache/print": """ #  NAME          TYPE  DATA             TTL
  0  example.com   A     93.184.216.34    60
- 1  google.com    A     142.250.80.46    300"""
-        return ""
+ 1  google.com    A     142.250.80.46    300""",
+        }
+        return outputs.get(command, "")
 
     async def close(self):
         self.calls.append(("close", None))
@@ -208,9 +207,9 @@ async def test_get_dns_status_via_ssh_fallback(service):
     """Test get_dns_status via SSH fallback when REST fails."""
     svc, dev = service
     dev.rest_fails = True
-    
+
     result = await svc.get_dns_status("dev1")
-    
+
     assert result["dns_servers"] == ["1.1.1.1", "1.0.0.1"]
     assert result["allow_remote_requests"] is True
     assert result["cache_size_kb"] == 4096
@@ -225,9 +224,9 @@ async def test_get_dns_cache_via_ssh_fallback(service):
     """Test get_dns_cache via SSH fallback when REST fails."""
     svc, dev = service
     dev.rest_fails = True
-    
+
     entries, total = await svc.get_dns_cache("dev1", limit=10)
-    
+
     assert len(entries) == 2
     assert entries[0]["name"] == "example.com"
     assert entries[0]["type"] == "A"
@@ -240,9 +239,9 @@ async def test_get_ntp_status_via_ssh_fallback(service):
     """Test get_ntp_status via SSH fallback when REST fails."""
     svc, dev = service
     dev.rest_fails = True
-    
+
     result = await svc.get_ntp_status("dev1")
-    
+
     assert result["enabled"] is True
     assert result["ntp_servers"] == ["0.pool.ntp.org", "1.pool.ntp.org"]
     assert result["mode"] == "unicast"
@@ -281,6 +280,6 @@ async def test_update_ntp_servers_with_enable_false(service):
     """Test update_ntp_servers with enabled=False."""
     svc, device_service = service
     result = await svc.update_ntp_servers("dev1", ["time.google.com"], enabled=False)
-    
+
     assert result["changed"] is True
     assert any(call[0] == "patch" for call in device_service.rest_client.calls)

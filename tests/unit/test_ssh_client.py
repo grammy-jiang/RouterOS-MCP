@@ -126,7 +126,7 @@ class TestRouterOSSSHClient:
     @pytest.mark.asyncio
     async def test_validate_command_parameterized_monitor_traffic(self) -> None:
         """Test that parameterized monitor-traffic commands are allowed.
-        
+
         /interface/monitor-traffic is a one-off command that requires
         an interface name and 'once' parameter to return a single snapshot
         instead of continuous output.
@@ -253,11 +253,14 @@ class TestRouterOSSSHClient:
         mock_connection.run = slow_run
         mock_connection.is_closed.return_value = False
 
-        with patch.object(
-            client,
-            "_get_connection",
-            return_value=mock_connection,
-        ), pytest.raises(RouterOSSSHTimeoutError, match="SSH command timeout"):
+        with (
+            patch.object(
+                client,
+                "_get_connection",
+                return_value=mock_connection,
+            ),
+            pytest.raises(RouterOSSSHTimeoutError, match="SSH command timeout"),
+        ):
             await client.execute("/export compact")
 
     @pytest.mark.asyncio
@@ -283,11 +286,14 @@ class TestRouterOSSSHClient:
         mock_connection.run.side_effect = error
         mock_connection.is_closed.return_value = False
 
-        with patch.object(
-            client,
-            "_get_connection",
-            return_value=mock_connection,
-        ), pytest.raises(RouterOSSSHError, match="SSH command failed.*exit code 1"):
+        with (
+            patch.object(
+                client,
+                "_get_connection",
+                return_value=mock_connection,
+            ),
+            pytest.raises(RouterOSSSHError, match="SSH command failed.*exit code 1"),
+        ):
             await client.execute("/export compact")
 
     @pytest.mark.asyncio

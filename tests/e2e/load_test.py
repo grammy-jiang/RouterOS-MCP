@@ -22,11 +22,10 @@ import random
 import statistics
 import time
 from collections import defaultdict
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any
 
 import pytest
 
@@ -37,7 +36,6 @@ from routeros_mcp.infra.observability.resource_cache import (
     initialize_cache,
     get_cache,
 )
-from routeros_mcp.mcp_resources import device as device_resources
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -64,10 +62,10 @@ class LoadTestMetrics:
     failed_requests: int = 0
     cache_hits: int = 0
     cache_misses: int = 0
-    latencies: List[float] = field(default_factory=list)
-    error_types: Dict[str, int] = field(default_factory=lambda: defaultdict(int))
-    start_time: Optional[float] = None
-    end_time: Optional[float] = None
+    latencies: list[float] = field(default_factory=list)
+    error_types: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    start_time: float | None = None
+    end_time: float | None = None
 
     @property
     def duration_seconds(self) -> float:
@@ -113,7 +111,7 @@ class LoadTestMetrics:
             max=max(sorted_latencies),
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert metrics to dictionary for serialization."""
         latency = self.get_latency_metrics()
         return {
@@ -154,7 +152,7 @@ class MockDeviceFactory:
             num_devices: Number of mock devices to create
         """
         self.num_devices = num_devices
-        self.devices: List[Device] = []
+        self.devices: list[Device] = []
         self._create_devices()
 
     def _create_devices(self) -> None:
@@ -175,7 +173,7 @@ class MockDeviceFactory:
             )
             self.devices.append(device)
 
-    def get_device(self, device_id: str) -> Optional[Device]:
+    def get_device(self, device_id: str) -> Device | None:
         """Get device by ID."""
         for device in self.devices:
             if device.id == device_id:
@@ -186,7 +184,7 @@ class MockDeviceFactory:
         """Get a random device."""
         return random.choice(self.devices)
 
-    def create_system_overview_response(self, device: Device) -> Dict[str, Any]:
+    def create_system_overview_response(self, device: Device) -> dict[str, Any]:
         """Create mock system overview response."""
         return {
             "routeros_version": "7.15 (stable)",
@@ -202,7 +200,7 @@ class MockDeviceFactory:
             "identity": device.name,
         }
 
-    def create_health_response(self, device: Device) -> Dict[str, Any]:
+    def create_health_response(self, device: Device) -> dict[str, Any]:
         """Create mock health check response."""
         return {
             "status": "healthy",
@@ -260,9 +258,7 @@ class ConcurrentClient:
                 self.metrics.cache_misses += 1
                 # Simulate fetching from RouterOS
                 await asyncio.sleep(0.01)  # Simulate network latency
-                response = json.dumps(
-                    self.device_factory.create_system_overview_response(device)
-                )
+                response = json.dumps(self.device_factory.create_system_overview_response(device))
                 await cache.set(resource_uri, response, device.id)
 
             self.metrics.successful_requests += 1
@@ -277,7 +273,7 @@ class ConcurrentClient:
 
     async def _make_tool_call(self) -> None:
         """Make a tool call request (20% of workload)."""
-        device = self.device_factory.get_random_device()
+        self.device_factory.get_random_device()
 
         start_time = time.time()
         try:
@@ -295,7 +291,7 @@ class ConcurrentClient:
 
     async def _make_subscription(self) -> None:
         """Make a subscription request (10% of workload)."""
-        device = self.device_factory.get_random_device()
+        self.device_factory.get_random_device()
 
         start_time = time.time()
         try:
@@ -350,7 +346,7 @@ async def run_load_test(
     num_devices: int = 100,
     num_clients: int = 10,
     duration_seconds: int = 300,
-    output_file: Optional[Path] = None,
+    output_file: Path | None = None,
 ) -> LoadTestMetrics:
     """Run load test with concurrent clients.
 
@@ -393,7 +389,7 @@ async def run_load_test(
     metrics.start_time = time.time()
 
     # Create concurrent clients
-    clients: List[ConcurrentClient] = []
+    clients: list[ConcurrentClient] = []
     for i in range(num_clients):
         client = ConcurrentClient(
             client_id=i,
@@ -470,9 +466,7 @@ async def test_load_test_5_minutes():
     assert metrics.error_rate < 5.0, f"Error rate {metrics.error_rate:.2f}% exceeds 5%"
 
     # Cache hit rate should be >70% (Phase 2 target)
-    assert (
-        metrics.cache_hit_rate > 70.0
-    ), f"Cache hit rate {metrics.cache_hit_rate:.2f}% below 70%"
+    assert metrics.cache_hit_rate > 70.0, f"Cache hit rate {metrics.cache_hit_rate:.2f}% below 70%"
 
     # Latency p95 should be <1s (Phase 2 target)
     latency = metrics.get_latency_metrics()

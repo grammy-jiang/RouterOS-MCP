@@ -115,9 +115,7 @@ class TestAuthMiddleware:
     def test_protected_path_invalid_token(self, test_app, mock_validator):
         """Test protected path with invalid token returns 401."""
         # Mock validation failure
-        mock_validator.validate_token.side_effect = InvalidTokenError(
-            "Invalid JWT token"
-        )
+        mock_validator.validate_token.side_effect = InvalidTokenError("Invalid JWT token")
 
         client = TestClient(test_app)
         response = client.get(

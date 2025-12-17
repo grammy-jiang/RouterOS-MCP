@@ -4,10 +4,14 @@ import asyncio
 import unittest
 from unittest.mock import patch
 
-from routeros_mcp.config import Settings
 from routeros_mcp.mcp_tools import device as device_tools
 
+from typing import TYPE_CHECKING
+
 from .e2e_test_utils import DummyMCP, FakeSessionFactory, make_test_settings
+
+if TYPE_CHECKING:
+    from routeros_mcp.config import Settings
 
 
 class _FakeDevice:

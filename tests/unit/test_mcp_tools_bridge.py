@@ -113,15 +113,24 @@ class TestBridgeTools(unittest.TestCase):
 
     def test_list_bridges_tool(self):
         """Test list_bridges tool."""
+
         async def _run():
             fake_device_service = _FakeDeviceService()
             fake_bridge_service = _FakeBridgeService()
 
             with (
-                patch.object(bridge_tools, "get_session_factory", return_value=FakeSessionFactory()),
-                patch.object(bridge_tools, "DeviceService", lambda *args, **kwargs: fake_device_service),
-                patch.object(bridge_tools, "BridgeService", lambda *args, **kwargs: fake_bridge_service),
-                patch.object(bridge_tools, "check_tool_authorization", lambda *args, **kwargs: None),
+                patch.object(
+                    bridge_tools, "get_session_factory", return_value=FakeSessionFactory()
+                ),
+                patch.object(
+                    bridge_tools, "DeviceService", lambda *args, **kwargs: fake_device_service
+                ),
+                patch.object(
+                    bridge_tools, "BridgeService", lambda *args, **kwargs: fake_bridge_service
+                ),
+                patch.object(
+                    bridge_tools, "check_tool_authorization", lambda *args, **kwargs: None
+                ),
             ):
                 mcp = DummyMCP()
                 settings = Settings(environment="lab")
@@ -154,15 +163,24 @@ class TestBridgeTools(unittest.TestCase):
 
     def test_list_bridge_ports_tool(self):
         """Test list_bridge_ports tool."""
+
         async def _run():
             fake_device_service = _FakeDeviceService()
             fake_bridge_service = _FakeBridgeService()
 
             with (
-                patch.object(bridge_tools, "get_session_factory", return_value=FakeSessionFactory()),
-                patch.object(bridge_tools, "DeviceService", lambda *args, **kwargs: fake_device_service),
-                patch.object(bridge_tools, "BridgeService", lambda *args, **kwargs: fake_bridge_service),
-                patch.object(bridge_tools, "check_tool_authorization", lambda *args, **kwargs: None),
+                patch.object(
+                    bridge_tools, "get_session_factory", return_value=FakeSessionFactory()
+                ),
+                patch.object(
+                    bridge_tools, "DeviceService", lambda *args, **kwargs: fake_device_service
+                ),
+                patch.object(
+                    bridge_tools, "BridgeService", lambda *args, **kwargs: fake_bridge_service
+                ),
+                patch.object(
+                    bridge_tools, "check_tool_authorization", lambda *args, **kwargs: None
+                ),
             ):
                 mcp = DummyMCP()
                 settings = Settings(environment="lab")
@@ -205,6 +223,7 @@ class TestBridgeTools(unittest.TestCase):
 
     def test_list_bridges_error_handling(self):
         """Test list_bridges tool error handling."""
+
         async def _run():
             fake_device_service = _FakeDeviceService()
 
@@ -215,10 +234,18 @@ class TestBridgeTools(unittest.TestCase):
             fake_bridge_service = FailingBridgeService()
 
             with (
-                patch.object(bridge_tools, "get_session_factory", return_value=FakeSessionFactory()),
-                patch.object(bridge_tools, "DeviceService", lambda *args, **kwargs: fake_device_service),
-                patch.object(bridge_tools, "BridgeService", lambda *args, **kwargs: fake_bridge_service),
-                patch.object(bridge_tools, "check_tool_authorization", lambda *args, **kwargs: None),
+                patch.object(
+                    bridge_tools, "get_session_factory", return_value=FakeSessionFactory()
+                ),
+                patch.object(
+                    bridge_tools, "DeviceService", lambda *args, **kwargs: fake_device_service
+                ),
+                patch.object(
+                    bridge_tools, "BridgeService", lambda *args, **kwargs: fake_bridge_service
+                ),
+                patch.object(
+                    bridge_tools, "check_tool_authorization", lambda *args, **kwargs: None
+                ),
             ):
                 mcp = DummyMCP()
                 settings = Settings(environment="lab")
@@ -240,4 +267,3 @@ class TestBridgeTools(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

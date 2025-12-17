@@ -23,8 +23,7 @@ import tracemalloc
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any
 
 import pytest
 
@@ -46,7 +45,7 @@ class BenchmarkResults:
 
     name: str
     iterations: int
-    latencies: List[float] = field(default_factory=list)
+    latencies: list[float] = field(default_factory=list)
     cache_hits: int = 0
     cache_misses: int = 0
     memory_start_bytes: int = 0
@@ -95,7 +94,7 @@ class BenchmarkResults:
         """Memory increase during benchmark."""
         return self.memory_end_bytes - self.memory_start_bytes
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
             "name": self.name,
@@ -132,9 +131,7 @@ class BenchmarkResults:
         logger.info(f"P95 latency: {self.p95_latency * 1000:.2f}ms")
         logger.info(f"P99 latency: {self.p99_latency * 1000:.2f}ms")
         logger.info(f"Cache hit rate: {self.cache_hit_rate:.2f}%")
-        logger.info(
-            f"Memory increase: {self.memory_increase_bytes / (1024 * 1024):.2f}MB"
-        )
+        logger.info(f"Memory increase: {self.memory_increase_bytes / (1024 * 1024):.2f}MB")
         logger.info("=" * 80)
 
 
@@ -148,7 +145,7 @@ class BenchmarkRunner:
             settings: Application settings
         """
         self.settings = settings
-        self.session_factory: Optional[DatabaseSessionManager] = None
+        self.session_factory: DatabaseSessionManager | None = None
         self.cache = None
 
     async def setup(self) -> None:
@@ -178,9 +175,7 @@ class BenchmarkRunner:
 
         gc.collect()
 
-    async def run_resource_fetch_without_cache(
-        self, iterations: int = 1000
-    ) -> BenchmarkResults:
+    async def run_resource_fetch_without_cache(self, iterations: int = 1000) -> BenchmarkResults:
         """Benchmark resource fetch without caching.
 
         Args:
@@ -224,7 +219,7 @@ class BenchmarkRunner:
 
                 # Simulate resource fetch (without cache)
                 await asyncio.sleep(0.001)  # Simulate minimal network latency
-                response = {
+                _ = {
                     "device_id": device.id,
                     "routeros_version": "7.15 (stable)",
                     "cpu_usage_percent": 15.5,
@@ -244,17 +239,13 @@ class BenchmarkRunner:
             cache._enabled = original_enabled
 
             # End memory tracking
-            results.memory_end_bytes, results.memory_peak_bytes = (
-                tracemalloc.get_traced_memory()
-            )
+            results.memory_end_bytes, results.memory_peak_bytes = tracemalloc.get_traced_memory()
             tracemalloc.stop()
 
         results.print_summary()
         return results
 
-    async def run_resource_fetch_with_cache(
-        self, iterations: int = 1000
-    ) -> BenchmarkResults:
+    async def run_resource_fetch_with_cache(self, iterations: int = 1000) -> BenchmarkResults:
         """Benchmark resource fetch with caching.
 
         Args:
@@ -322,9 +313,7 @@ class BenchmarkRunner:
 
         finally:
             # End memory tracking
-            results.memory_end_bytes, results.memory_peak_bytes = (
-                tracemalloc.get_traced_memory()
-            )
+            results.memory_end_bytes, results.memory_peak_bytes = tracemalloc.get_traced_memory()
             tracemalloc.stop()
 
         results.print_summary()
@@ -405,9 +394,7 @@ class BenchmarkRunner:
 
         finally:
             # End memory tracking
-            results.memory_end_bytes, results.memory_peak_bytes = (
-                tracemalloc.get_traced_memory()
-            )
+            results.memory_end_bytes, results.memory_peak_bytes = tracemalloc.get_traced_memory()
             tracemalloc.stop()
 
         results.print_summary()
@@ -415,8 +402,8 @@ class BenchmarkRunner:
 
 
 async def run_all_benchmarks(
-    iterations: int = 1000, output_file: Optional[Path] = None
-) -> Dict[str, BenchmarkResults]:
+    iterations: int = 1000, output_file: Path | None = None
+) -> dict[str, BenchmarkResults]:
     """Run all benchmark tests.
 
     Args:
@@ -443,9 +430,7 @@ async def run_all_benchmarks(
     try:
         # Benchmark 1: Resource fetch without cache
         logger.info("Running benchmark: resource_fetch_without_cache")
-        results["without_cache"] = await runner.run_resource_fetch_without_cache(
-            iterations
-        )
+        results["without_cache"] = await runner.run_resource_fetch_without_cache(iterations)
 
         # Clear cache between benchmarks
         await runner.cache.clear()
@@ -470,23 +455,15 @@ async def run_all_benchmarks(
     logger.info("\n" + "=" * 80)
     logger.info("BENCHMARK COMPARISON")
     logger.info("=" * 80)
-    logger.info(
-        f"Without cache P95: {results['without_cache'].p95_latency * 1000:.2f}ms"
-    )
+    logger.info(f"Without cache P95: {results['without_cache'].p95_latency * 1000:.2f}ms")
     logger.info(f"With cache P95: {results['with_cache'].p95_latency * 1000:.2f}ms")
-    logger.info(
-        f"Cache hit rate: {results['with_cache'].cache_hit_rate:.2f}%"
-    )
+    logger.info(f"Cache hit rate: {results['with_cache'].cache_hit_rate:.2f}%")
     logger.info(f"Mixed workload P95: {results['mixed_workload'].p95_latency * 1000:.2f}ms")
-    logger.info(
-        f"Mixed cache hit rate: {results['mixed_workload'].cache_hit_rate:.2f}%"
-    )
+    logger.info(f"Mixed cache hit rate: {results['mixed_workload'].cache_hit_rate:.2f}%")
 
     # Calculate speedup
     if results["without_cache"].p95_latency > 0:
-        speedup = (
-            results["without_cache"].p95_latency / results["with_cache"].p95_latency
-        )
+        speedup = results["without_cache"].p95_latency / results["with_cache"].p95_latency
         logger.info(f"Cache speedup: {speedup:.2f}x")
 
     logger.info("=" * 80)
@@ -494,9 +471,7 @@ async def run_all_benchmarks(
     # Save results
     if output_file:
         output_file.parent.mkdir(parents=True, exist_ok=True)
-        output_data = {
-            name: result.to_dict() for name, result in results.items()
-        }
+        output_data = {name: result.to_dict() for name, result in results.items()}
         with open(output_file, "w") as f:
             json.dump(output_data, f, indent=2)
         logger.info(f"Results saved to {output_file}")
@@ -606,7 +581,5 @@ async def test_benchmark_no_memory_leak():
 if __name__ == "__main__":
     # Run standalone benchmarks
     asyncio.run(
-        run_all_benchmarks(
-            iterations=1000, output_file=Path("reports/benchmark_results.json")
-        )
+        run_all_benchmarks(iterations=1000, output_file=Path("reports/benchmark_results.json"))
     )
