@@ -1,13 +1,16 @@
 """Tests for HTTP/SSE transport implementation."""
 
 import json
+from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sse_starlette import EventSourceResponse
 from starlette.requests import Request
 
 from routeros_mcp.config import Settings
-from routeros_mcp.mcp.transport.http_sse import HTTPSSETransport
+from routeros_mcp.mcp.errors import InvalidRequestError
+from routeros_mcp.mcp.transport.http_sse import CorrelationIDMiddleware, HTTPSSETransport
 
 
 @pytest.mark.asyncio
@@ -369,3 +372,237 @@ async def test_default_settings() -> None:
     assert call_kwargs["host"] == "127.0.0.1"  # Default from config
     assert call_kwargs["port"] == 8080  # Default from config
     assert call_kwargs["path"] == "/mcp"  # Default from config
+
+
+@pytest.mark.asyncio
+async def test_correlation_id_middleware_adds_header_from_request() -> None:
+    """CorrelationIDMiddleware should use incoming header and attach it to response."""
+
+    messages: list[dict] = []
+
+    async def app(scope, receive, send) -> None:
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    middleware = CorrelationIDMiddleware(app)
+
+    scope = {
+        "type": "http",
+        "headers": [(b"x-correlation-id", b"corr-abc")],
+    }
+
+    async def receive() -> dict:
+        return {"type": "http.request", "body": b""}
+
+    async def send(message: dict) -> None:
+        messages.append(message)
+
+    with patch("routeros_mcp.mcp.transport.http_sse.set_correlation_id") as set_id:
+        await middleware(scope, receive, send)
+
+    assert messages and messages[0]["type"] == "http.response.start"
+    headers = dict(messages[0].get("headers", []))
+    assert headers[b"x-correlation-id"] == b"corr-abc"
+    set_id.assert_called_once_with("corr-abc")
+
+
+@pytest.mark.asyncio
+async def test_correlation_id_middleware_generates_when_missing() -> None:
+    """CorrelationIDMiddleware should generate correlation id when not provided."""
+
+    messages: list[dict] = []
+
+    async def app(scope, receive, send) -> None:
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    middleware = CorrelationIDMiddleware(app)
+    scope = {"type": "http", "headers": []}
+
+    async def receive() -> dict:
+        return {"type": "http.request", "body": b""}
+
+    async def send(message: dict) -> None:
+        messages.append(message)
+
+    with (
+        patch("routeros_mcp.mcp.transport.http_sse.get_correlation_id", return_value="corr-gen"),
+        patch("routeros_mcp.mcp.transport.http_sse.set_correlation_id") as set_id,
+    ):
+        await middleware(scope, receive, send)
+
+    headers = dict(messages[0].get("headers", []))
+    assert headers[b"x-correlation-id"] == b"corr-gen"
+    set_id.assert_called_once_with("corr-gen")
+
+
+@pytest.mark.asyncio
+async def test_http_sse_transport_run_with_oidc_adds_auth_middleware(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When OIDC is enabled, the transport should add AuthMiddleware with exempt paths."""
+
+    settings = Settings(
+        mcp_transport="http",
+        mcp_http_host="127.0.0.1",
+        mcp_http_port=9090,
+        mcp_http_base_path="/api/mcp",
+        log_level="INFO",
+        oidc_enabled=True,
+        oidc_provider_url="https://example.invalid",
+        oidc_client_id="client",
+        oidc_audience="aud",
+        oidc_skip_verification=True,
+    )
+
+    class _StubAuthMiddleware:
+        pass
+
+    class _StubOIDCValidator:
+        def __init__(self, **_kwargs) -> None:
+            return None
+
+    import routeros_mcp.mcp.transport.auth_middleware as auth_mod
+    import routeros_mcp.security.oidc as oidc_mod
+
+    monkeypatch.setattr(auth_mod, "AuthMiddleware", _StubAuthMiddleware)
+    monkeypatch.setattr(oidc_mod, "OIDCValidator", _StubOIDCValidator)
+
+    mock_mcp = MagicMock()
+    mock_mcp.run_http_async = AsyncMock()
+
+    transport = HTTPSSETransport(settings, mock_mcp)
+    await transport.run()
+
+    middleware_list = mock_mcp.run_http_async.call_args.kwargs["middleware"]
+    assert any(getattr(m, "cls", None) is _StubAuthMiddleware for m in middleware_list)
+
+    auth_entry = next(m for m in middleware_list if getattr(m, "cls", None) is _StubAuthMiddleware)
+    exempt_paths = auth_entry.kwargs.get("exempt_paths", [])
+    assert "/health" in exempt_paths
+    assert "/health/" in exempt_paths
+    assert "/api/mcp/health" in exempt_paths
+    assert "/api/mcp/health/" in exempt_paths
+
+
+@pytest.mark.asyncio
+async def test_handle_request_when_process_raises_mcp_error_returns_jsonrpc_error() -> None:
+    settings = Settings(mcp_transport="http")
+    transport = HTTPSSETransport(settings, MagicMock())
+
+    mock_request = MagicMock(spec=Request)
+    mock_request.method = "POST"
+    mock_request.url.path = "/mcp/rpc"
+    mock_request.json = AsyncMock(
+        return_value={"jsonrpc": "2.0", "id": "req-err", "method": "tools/call", "params": {}}
+    )
+    mock_request.state.user = None
+
+    transport._process_mcp_request = AsyncMock(side_effect=InvalidRequestError("bad"))
+
+    with patch("routeros_mcp.mcp.transport.http_sse.get_correlation_id", return_value="corr-err"):
+        response = await transport.handle_request(mock_request)
+
+    assert response.status_code == 500
+    body = json.loads(response.body.decode())
+    assert body["id"] == "req-err"
+    assert body["error"]["code"] == InvalidRequestError.code
+
+
+@pytest.mark.asyncio
+async def test_handle_request_when_process_raises_unexpected_error_maps_to_internal_error() -> None:
+    settings = Settings(mcp_transport="http")
+    transport = HTTPSSETransport(settings, MagicMock())
+
+    mock_request = MagicMock(spec=Request)
+    mock_request.method = "POST"
+    mock_request.url.path = "/mcp/rpc"
+    mock_request.json = AsyncMock(
+        return_value={"jsonrpc": "2.0", "id": "req-boom", "method": "tools/call", "params": {}}
+    )
+    mock_request.state.user = None
+
+    transport._process_mcp_request = AsyncMock(side_effect=RuntimeError("boom"))
+
+    with patch("routeros_mcp.mcp.transport.http_sse.get_correlation_id", return_value="corr-boom"):
+        response = await transport.handle_request(mock_request)
+
+    assert response.status_code == 500
+    body = json.loads(response.body.decode())
+    assert body["id"] == "req-boom"
+    assert body["error"]["code"] == -32603
+
+
+@pytest.mark.asyncio
+async def test_process_mcp_request_requires_id() -> None:
+    settings = Settings(mcp_transport="http")
+    transport = HTTPSSETransport(settings, MagicMock())
+
+    request = {"jsonrpc": "2.0", "method": "tools/list", "params": {}}
+
+    with pytest.raises(ValueError, match="Request ID is required"):
+        await transport._process_mcp_request(request)
+
+
+@pytest.mark.asyncio
+async def test_handle_subscribe_missing_resource_uri_returns_400() -> None:
+    settings = Settings(mcp_transport="http")
+    transport = HTTPSSETransport(settings, MagicMock())
+
+    mock_request = MagicMock(spec=Request)
+    mock_request.json = AsyncMock(return_value={})
+    mock_request.state.user = None
+
+    with patch("routeros_mcp.mcp.transport.http_sse.get_correlation_id", return_value="corr-sub"):
+        response = await transport.handle_subscribe(mock_request)
+
+    assert response.status_code == 400
+    body = json.loads(response.body.decode())
+    assert body["code"] == "INVALID_REQUEST"
+
+
+@pytest.mark.asyncio
+async def test_handle_subscribe_subscription_limit_returns_429() -> None:
+    settings = Settings(mcp_transport="http")
+    transport = HTTPSSETransport(settings, MagicMock())
+
+    mock_request = MagicMock(spec=Request)
+    mock_request.json = AsyncMock(return_value={"resource_uri": "device://dev-1/health"})
+    mock_request.state.user = {"sub": "user-1"}
+
+    transport.sse_manager.subscribe = AsyncMock(side_effect=ValueError("Subscription limit exceeded"))
+
+    with patch("routeros_mcp.mcp.transport.http_sse.get_correlation_id", return_value="corr-429"):
+        response = await transport.handle_subscribe(mock_request)
+
+    assert response.status_code == 429
+    body = json.loads(response.body.decode())
+    assert body["code"] == "SUBSCRIPTION_LIMIT_EXCEEDED"
+
+
+@pytest.mark.asyncio
+async def test_handle_subscribe_success_returns_event_source_response() -> None:
+    settings = Settings(mcp_transport="http")
+    transport = HTTPSSETransport(settings, MagicMock())
+
+    mock_request = MagicMock(spec=Request)
+    mock_request.json = AsyncMock(return_value={"resource_uri": "device://dev-1/health"})
+    mock_request.state.user = None
+
+    subscription = MagicMock()
+    subscription.subscription_id = "sub-1"
+    subscription.resource_uri = "device://dev-1/health"
+
+    transport.sse_manager.subscribe = AsyncMock(return_value=subscription)
+
+    async def _stream_events(_sub) -> AsyncIterator[dict]:
+        yield {"event": "connected", "data": {"subscription_id": "sub-1"}}
+
+    transport.sse_manager.stream_events = _stream_events
+
+    with patch("routeros_mcp.mcp.transport.http_sse.get_correlation_id", return_value="corr-sse"):
+        response = await transport.handle_subscribe(mock_request)
+
+    assert isinstance(response, EventSourceResponse)
+    assert response.headers.get("X-Correlation-ID") == "corr-sse"
+    assert response.headers.get("Cache-Control") == "no-cache"

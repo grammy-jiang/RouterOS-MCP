@@ -297,6 +297,21 @@ async def test_get_recent_logs_with_topic_filter(fake_env):
     assert isinstance(total, int)
 
 
+@pytest.mark.asyncio
+async def test_list_filter_rules_when_rest_and_ssh_fail_raises_runtime_error(fake_env):
+    _, device_service = fake_env
+    device_service.rest_fails = True
+
+    async def boom(_command: str) -> str:
+        raise RuntimeError("ssh down")
+
+    device_service.ssh_client.execute = boom
+
+    service = firewall_logs_module.FirewallLogsService(session=None, settings=Settings())
+    with pytest.raises(RuntimeError):
+        await service.list_filter_rules("dev-1")
+
+
 def test_parse_firewall_filter_print_output_multiline_with_comments():
     """Ensure multiline CLI output with comments and flags is parsed richly."""
     sample_output = """
@@ -386,3 +401,18 @@ def test_filter_logs_time_window():
 
     assert len(filtered) == 1
     assert filtered[0]["message"] == "b"
+
+
+def test_parse_firewall_filter_print_output_uses_split_when_shlex_fails() -> None:
+    sample_output = """
+ 0 chain=input action=accept
+     comment=\"unterminated
+"""
+    parsed = firewall_logs_module.FirewallLogsService._parse_firewall_filter_print_output(
+        sample_output
+    )
+
+    assert len(parsed) == 1
+    assert parsed[0]["chain"] == "input"
+    # The continuation line has an unbalanced quote; parser should fall back to line.split()
+    assert parsed[0]["comment"] == '"unterminated'

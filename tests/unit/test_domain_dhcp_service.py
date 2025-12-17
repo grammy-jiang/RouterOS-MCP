@@ -255,3 +255,88 @@ async def test_get_dhcp_leases_filters_expired(service):
     # Should return no active leases (one is waiting, one is disabled)
     assert result["total_count"] == 0
     assert len(result["leases"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_get_dhcp_server_status_rest_normalizes_single_dict_and_includes_optionals(service):
+    svc, device_service = service
+    device_service.rest_client.store["/rest/ip/dhcp-server"] = {
+        "name": "dhcpX",
+        "interface": "ether1",
+        "lease-time": "1h",
+        "address-pool": "poolX",
+        "disabled": True,
+        "bootp-support": "static",
+        "lease-script": "script",
+        ".id": "*9",
+    }
+
+    result = await svc.get_dhcp_server_status("dev1")
+
+    assert result["total_count"] == 1
+    server = result["servers"][0]
+    assert server["name"] == "dhcpX"
+    assert server["disabled"] is True
+    assert server["bootp_support"] == "static"
+    assert server["lease_script"] == "script"
+    assert server["id"] == "*9"
+
+
+@pytest.mark.asyncio
+async def test_get_dhcp_server_status_ssh_parses_flags_and_disabled(service):
+    svc, device_service = service
+    device_service.rest_fails = True
+
+    async def execute_with_flags(command):
+        if command == "/ip/dhcp-server/print":
+            return """ #   NAME   INTERFACE  LEASE-TIME  ADDRESS-POOL
+X 0   dhcp1  bridge     10m         pool1"""
+        return await FakeSSHClient().execute(command)
+
+    device_service.ssh_client.execute = execute_with_flags
+
+    result = await svc.get_dhcp_server_status("dev1")
+    assert result["total_count"] == 1
+    assert result["servers"][0]["disabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_dhcp_leases_rest_includes_optional_fields(service):
+    svc, device_service = service
+    device_service.rest_client.store["/rest/ip/dhcp-server/lease"] = [
+        {
+            "address": "192.168.1.100",
+            "mac-address": "00:aa:bb:cc:dd:ee",
+            "client-id": "1:00:aa:bb:cc:dd:ee",
+            "host-name": "client100",
+            "server": "dhcp1",
+            "status": "bound",
+            "disabled": False,
+            "last-seen": "10s",
+            "active-mac-address": "00:aa:bb:cc:dd:ee",
+            "active-address": "192.168.1.100",
+            ".id": "*99",
+        }
+    ]
+
+    result = await svc.get_dhcp_leases("dev1")
+    assert result["total_count"] == 1
+    lease = result["leases"][0]
+    assert lease["last_seen"] == "10s"
+    assert lease["active_mac_address"] == "00:aa:bb:cc:dd:ee"
+    assert lease["active_address"] == "192.168.1.100"
+    assert lease["id"] == "*99"
+
+
+@pytest.mark.asyncio
+async def test_get_dhcp_server_status_when_rest_and_ssh_fail_raises_runtime_error(service):
+    svc, device_service = service
+    device_service.rest_fails = True
+
+    async def boom(_cmd):
+        raise RuntimeError("ssh down")
+
+    device_service.ssh_client.execute = boom
+
+    with pytest.raises(RuntimeError):
+        await svc.get_dhcp_server_status("dev1")

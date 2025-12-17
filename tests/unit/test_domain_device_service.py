@@ -10,6 +10,7 @@ from routeros_mcp.domain.services.device import DeviceService
 from routeros_mcp.infra.db.models import Base
 from routeros_mcp.infra.db.models import Credential as CredentialORM
 from routeros_mcp.infra.db.models import Device as DeviceORM
+from routeros_mcp.infra.routeros.exceptions import RouterOSClientError, RouterOSSSHTimeoutError
 from routeros_mcp.mcp.errors import (
     AuthenticationError,
     DeviceNotFoundError,
@@ -222,6 +223,215 @@ async def test_get_device_not_found(db_session: AsyncSession, settings: Settings
     service = DeviceService(db_session, settings)
     with pytest.raises(DeviceNotFoundError):
         await service.get_device("missing")
+
+
+@pytest.mark.asyncio
+async def test_create_device_creates_device_and_rest_credential(
+    db_session: AsyncSession, settings: Settings
+) -> None:
+    service = DeviceService(db_session, settings)
+
+    created = await service.create_device(
+        device_id="dev-create",
+        name="router-create",
+        management_ip="192.0.2.9",
+        username="admin",
+        password="pass",
+        environment="lab",
+        management_port=8443,
+    )
+
+    assert created.id == "dev-create"
+    assert created.management_port == 8443
+
+    credential = await db_session.get(CredentialORM, "cred-dev-create-rest")
+    assert credential is not None
+
+
+@pytest.mark.asyncio
+async def test_list_devices_filters_by_environment_and_status(
+    db_session: AsyncSession, settings: Settings
+) -> None:
+    service = DeviceService(db_session, settings)
+
+    await service.register_device(
+        DeviceCreate(
+            id="dev-lab-pending",
+            name="lab-pending",
+            management_ip="192.0.2.20",
+            management_port=443,
+            environment="lab",
+        )
+    )
+    await service.register_device(
+        DeviceCreate(
+            id="dev-lab-healthy",
+            name="lab-healthy",
+            management_ip="192.0.2.21",
+            management_port=443,
+            environment="lab",
+        )
+    )
+    await service.update_device("dev-lab-healthy", DeviceUpdate(status="healthy"))
+
+    # Insert a "prod" device directly to exercise environment filter without hitting register_device safeguards.
+    db_session.add(
+        DeviceORM(
+            id="dev-prod",
+            name="prod",
+            management_ip="192.0.2.22",
+            management_port=443,
+            environment="prod",
+            status="healthy",
+            tags={},
+            allow_advanced_writes=False,
+            allow_professional_workflows=False,
+        )
+    )
+    await db_session.commit()
+
+    lab_only = await service.list_devices(environment="lab")
+    assert {d.id for d in lab_only} == {"dev-lab-pending", "dev-lab-healthy"}
+
+    healthy_only = await service.list_devices(status="healthy")
+    assert {d.id for d in healthy_only} == {"dev-lab-healthy", "dev-prod"}
+
+
+@pytest.mark.asyncio
+async def test_update_device_invalidates_cache_on_status_change(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = Settings(environment="lab", encryption_key="secret-key")
+    settings.mcp_resource_cache_auto_invalidate = True
+    service = DeviceService(db_session, settings)
+
+    await service.register_device(
+        DeviceCreate(
+            id="dev-cache",
+            name="router",
+            management_ip="192.0.2.30",
+            management_port=443,
+            environment="lab",
+        )
+    )
+
+    class _FakeCache:
+        async def invalidate_device(self, _device_id: str) -> int:
+            return 2
+
+    monkeypatch.setattr(
+        "routeros_mcp.infra.observability.resource_cache.get_cache", lambda: _FakeCache()
+    )
+
+    recorded: list[tuple[str, str]] = []
+
+    def _record(component: str, reason: str) -> None:
+        recorded.append((component, reason))
+
+    monkeypatch.setattr(device_module.metrics, "record_cache_invalidation", _record)
+
+    await service.update_device("dev-cache", DeviceUpdate(status="healthy"))
+
+    assert recorded == [("device", "status_change")]
+
+
+@pytest.mark.asyncio
+async def test_get_rest_client_raises_authentication_error_on_decrypt_failure(
+    db_session: AsyncSession, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = DeviceService(db_session, settings)
+    await service.register_device(
+        DeviceCreate(
+            id="dev-decrypt",
+            name="router",
+            management_ip="192.0.2.40",
+            management_port=443,
+            environment="lab",
+        )
+    )
+    await service.add_credential(
+        CredentialCreate(
+            device_id="dev-decrypt",
+            credential_type="rest",
+            username="admin",
+            password="pass",
+        )
+    )
+
+    def _boom(_value: str, _key: str) -> str:
+        raise RuntimeError("decrypt failed")
+
+    monkeypatch.setattr(device_module, "decrypt_string", _boom)
+
+    with pytest.raises(AuthenticationError):
+        await service.get_rest_client("dev-decrypt")
+
+
+@pytest.mark.asyncio
+async def test_check_connectivity_records_status_code_and_classifies_failures(
+    db_session: AsyncSession,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = DeviceService(db_session, settings)
+    await service.register_device(
+        DeviceCreate(
+            id="dev-errors",
+            name="router",
+            management_ip="192.0.2.50",
+            management_port=443,
+            environment="lab",
+        )
+    )
+    await service.add_credential(
+        CredentialCreate(
+            device_id="dev-errors",
+            credential_type="rest",
+            username="admin",
+            password="pass",
+        )
+    )
+    await service.add_credential(
+        CredentialCreate(
+            device_id="dev-errors",
+            credential_type="ssh",
+            username="admin",
+            password="pass",
+        )
+    )
+
+    class _RestBoom:
+        async def get(self, _path: str) -> dict:
+            raise RouterOSClientError("bad", status_code=418)
+
+        async def close(self) -> None:
+            return None
+
+    async def _fake_rest_client(_device_id: str):
+        return _RestBoom()
+
+    class _SSHTimeout:
+        async def execute(self, _cmd: str) -> str:
+            raise RouterOSSSHTimeoutError("ssh timeout")
+
+        async def close(self) -> None:
+            return None
+
+    async def _fake_ssh_client(_device_id: str):
+        return _SSHTimeout()
+
+    monkeypatch.setattr(service, "get_rest_client", _fake_rest_client)
+    monkeypatch.setattr(service, "get_ssh_client", _fake_ssh_client)
+
+    reachable, meta = await service.check_connectivity("dev-errors")
+    assert reachable is False
+    assert meta["attempted_transports"] == ["rest", "ssh"]
+    assert meta["fallback_used"] is True
+    assert meta["status_code"] == 418
+    assert meta["failure_reason"] == "timeout"
+
+    device = await db_session.get(DeviceORM, "dev-errors")
+    assert device.status == "unreachable"
 
 
 @pytest.mark.asyncio

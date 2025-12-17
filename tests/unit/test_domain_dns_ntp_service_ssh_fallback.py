@@ -186,6 +186,39 @@ async def test_get_dns_status_when_rest_times_out_uses_ssh_fallback() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_dns_status_rest_handles_unexpected_server_types_and_extra_optionals() -> None:
+    """Cover REST DNS status branches for non-str/list servers and extra optional fields."""
+    rest = _FakeRestClient(
+        data={
+            "/rest/ip/dns": {
+                "servers": 123,
+                "dynamic-servers": None,
+                "allow-remote-requests": False,
+                "cache-size": 2048,
+                "cache-used": 0,
+                "cache-max-ttl": "1d",
+                "address-list-extra-time": "1h",
+                "vrf": "main",
+                "mdns-repeat-ifaces": "bridge",
+            }
+        }
+    )
+
+    service = DNSNTPService(session=None, settings=Settings(environment="lab"))
+    service.device_service = _FakeDeviceService(rest_client=rest, ssh_client=_FakeSSHClient(outputs={}))
+
+    status = await service.get_dns_status("dev-1")
+
+    assert status["transport"] == "rest"
+    assert status["dns_servers"] == []
+    assert status["dynamic_servers"] == []
+    assert status["cache_max_ttl"] == "1d"
+    assert status["address_list_extra_time"] == "1h"
+    assert status["vrf"] == "main"
+    assert status["mdns_repeat_ifaces"] == "bridge"
+
+
+@pytest.mark.asyncio
 async def test_get_dns_cache_when_rest_times_out_uses_ssh_fallback() -> None:
     rest = _FakeRestClient(get_exc=RouterOSTimeoutError("rest timeout"))
 
@@ -248,6 +281,43 @@ async def test_get_ntp_status_when_rest_times_out_uses_ssh_fallback() -> None:
     assert ntp["stratum"] == 3
     assert ntp["offset_ms"] == pytest.approx(5.945)
     assert "raw_fields" in ntp
+
+
+@pytest.mark.asyncio
+async def test_get_ntp_status_ssh_uses_table_servers_and_parses_offsets_and_dynamic_servers() -> None:
+    rest = _FakeRestClient(get_exc=RouterOSTimeoutError("rest timeout"))
+
+    # No configured servers (empty list), but a table row is present.
+    ssh_output = """
+enabled: yes
+mode: unicast
+servers:
+dynamic-servers:
+         2.pool.ntp.org
+primary-ntp: 0.pool.ntp.org
+synced-stratum: not-an-int
+system-offset: 10ms
+last-offset: 5ms
+
+0   time.cloudflare.com  unicast  false
+    """.strip()
+
+    ssh = _FakeSSHClient(outputs={"/system/ntp/client/print": ssh_output})
+
+    service = DNSNTPService(session=None, settings=Settings(environment="lab"))
+    service.device_service = _FakeDeviceService(rest_client=rest, ssh_client=ssh)
+
+    ntp = await service.get_ntp_status("dev-1")
+
+    assert ntp["transport"] == "ssh"
+    assert ntp["enabled"] is True
+    assert ntp["ntp_servers"] == ["time.cloudflare.com"]
+    assert ntp["dynamic_servers"] == ["2.pool.ntp.org"]
+    assert ntp["synced_server"] == "0.pool.ntp.org"
+    assert ntp["status"] == "enabled"
+    assert ntp["system_offset_ms"] == pytest.approx(10.0)
+    assert ntp["last_offset_ms"] == pytest.approx(5.0)
+    assert ntp["offset_ms"] == pytest.approx(5.0)
 
 
 @pytest.mark.asyncio

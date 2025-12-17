@@ -83,7 +83,8 @@ def register_wireless_resources(
                     extra={"device_id": device_id},
                 )
                 raise DeviceNotFoundError(
-                    f"Failed to fetch wireless config: {e}", {"device_id": device_id}
+                    f"Failed to fetch wireless config: {e}",
+                    data={"device_id": device_id},
                 ) from e
 
     @mcp.resource("device://{device_id}/wireless/clients")
@@ -148,7 +149,8 @@ def register_wireless_resources(
                     extra={"device_id": device_id},
                 )
                 raise DeviceNotFoundError(
-                    f"Failed to fetch wireless clients: {e}", {"device_id": device_id}
+                    f"Failed to fetch wireless clients: {e}",
+                    data={"device_id": device_id},
                 ) from e
 
     logger.info("Registered wireless resources")
