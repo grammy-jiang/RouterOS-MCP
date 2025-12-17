@@ -96,7 +96,14 @@ class DiagnosticsService:
             result["fallback_used"] = False
             result["rest_error"] = None
             return result
-        except (AuthenticationError, RouterOSTimeoutError, RouterOSNetworkError, RouterOSServerError, RouterOSClientError, Exception) as exc:  # noqa: BLE001
+        except (
+            AuthenticationError,
+            RouterOSTimeoutError,
+            RouterOSNetworkError,
+            RouterOSServerError,
+            RouterOSClientError,
+            Exception,
+        ) as exc:  # noqa: BLE001
             rest_error = exc
             logger.warning(
                 "REST ping failed, attempting SSH fallback",
@@ -160,9 +167,7 @@ class DiagnosticsService:
                         rtts.append(rtt_ms)
 
         packet_loss_percent = (
-            ((packets_sent - packets_received) / packets_sent * 100)
-            if packets_sent > 0
-            else 0.0
+            ((packets_sent - packets_received) / packets_sent * 100) if packets_sent > 0 else 0.0
         )
 
         min_rtt_ms = min(rtts) if rtts else 0.0
@@ -248,7 +253,9 @@ class DiagnosticsService:
                 continue
 
             # Some RouterOS outputs omit 'time=' and show e.g. '5ms945us'
-            inline_match = re.search(r"([0-9]+(?:\.[0-9]+)?ms[0-9]*us|[0-9]+(?:\.[0-9]+)?ms|[0-9]+us)", line)
+            inline_match = re.search(
+                r"([0-9]+(?:\.[0-9]+)?ms[0-9]*us|[0-9]+(?:\.[0-9]+)?ms|[0-9]+us)", line
+            )
             if inline_match:
                 packets_sent += 1
                 packets_received += 1
@@ -259,9 +266,7 @@ class DiagnosticsService:
                 packets_sent += 1
 
         packet_loss_percent = (
-            ((packets_sent - packets_received) / packets_sent * 100)
-            if packets_sent > 0
-            else 100.0
+            ((packets_sent - packets_received) / packets_sent * 100) if packets_sent > 0 else 100.0
         )
         min_rtt_ms = min(rtts) if rtts else 0.0
         max_rtt_ms = max(rtts) if rtts else 0.0
@@ -284,7 +289,7 @@ class DiagnosticsService:
         if not value:
             return 0.0
 
-        match = re.match(r"(?:(?P<ms>[0-9]*\.?[0-9]+)ms)?(?P<us>[0-9]+)?us?", value)
+        match = re.match(r"^(?:(?P<ms>[0-9]*\.?[0-9]+)ms)?(?:(?P<us>[0-9]+)us)?$", value)
         if match:
             ms_part = float(match.group("ms")) if match.group("ms") else 0.0
             us_part = float(match.group("us")) / 1000.0 if match.group("us") else 0.0
@@ -329,7 +334,14 @@ class DiagnosticsService:
             result["fallback_used"] = False
             result["rest_error"] = None
             return result
-        except (AuthenticationError, RouterOSTimeoutError, RouterOSNetworkError, RouterOSServerError, RouterOSClientError, Exception) as exc:  # noqa: BLE001
+        except (
+            AuthenticationError,
+            RouterOSTimeoutError,
+            RouterOSNetworkError,
+            RouterOSServerError,
+            RouterOSClientError,
+            Exception,
+        ) as exc:  # noqa: BLE001
             rest_error = exc
             logger.warning(
                 "REST traceroute failed, attempting SSH fallback",
@@ -394,11 +406,13 @@ class DiagnosticsService:
                     else:
                         rtt_ms = 0.0
 
-                    hops.append({
-                        "hop": hop_num,
-                        "address": hop_address,
-                        "rtt_ms": rtt_ms,
-                    })
+                    hops.append(
+                        {
+                            "hop": hop_num,
+                            "address": hop_address,
+                            "rtt_ms": rtt_ms,
+                        }
+                    )
 
         return hops
 
@@ -427,7 +441,7 @@ class DiagnosticsService:
 
         for line in output.splitlines():
             line = line.strip()
-            if not line or line.lower().startswith(('#', 'address', 'host', 'loss', 'sent')):
+            if not line or line.lower().startswith(("#", "address", "host", "loss", "sent")):
                 continue
 
             match = hop_pattern.match(line)
@@ -436,22 +450,28 @@ class DiagnosticsService:
                 hop_address = match.group("addr")
                 rtt_match = re.search(r"([0-9.]+)ms", line)
                 rtt_ms = float(rtt_match.group(1)) if rtt_match else 0.0
-                hops.append({
-                    "hop": hop_num,
-                    "address": hop_address,
-                    "rtt_ms": rtt_ms,
-                })
+                hops.append(
+                    {
+                        "hop": hop_num,
+                        "address": hop_address,
+                        "rtt_ms": rtt_ms,
+                    }
+                )
                 continue
 
             # Handle lines with timeout markers (no RTT)
-            timeout_match = re.match(r"^\s*(?P<hop>\d+)\s+(?P<addr>\S+).*timeout", line, re.IGNORECASE)
+            timeout_match = re.match(
+                r"^\s*(?P<hop>\d+)\s+(?P<addr>\S+).*timeout", line, re.IGNORECASE
+            )
             if timeout_match:
                 hop_num = int(timeout_match.group("hop"))
                 hop_address = timeout_match.group("addr")
-                hops.append({
-                    "hop": hop_num,
-                    "address": hop_address,
-                    "rtt_ms": 0.0,
-                })
+                hops.append(
+                    {
+                        "hop": hop_num,
+                        "address": hop_address,
+                        "rtt_ms": 0.0,
+                    }
+                )
 
         return hops

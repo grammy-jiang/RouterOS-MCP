@@ -249,7 +249,7 @@ class InterfaceService:
                         "max_l2mtu": max_l2mtu,
                         "mac_address": mac_address,
                     })
-            except (IndexError, ValueError) as e:
+            except (IndexError, ValueError) as e:  # pragma: no cover
                 # Skip lines that don't parse properly
                 logger.debug(f"Failed to parse interface line: {line}", exc_info=e)
                 continue

@@ -56,6 +56,20 @@ def _parse_duration_to_ms(value: Any) -> float:
         except ValueError:
             return 0.0
 
+    # Composite durations can appear in RouterOS output, e.g. `5ms945us`.
+    # Support: [<seconds>s][<milliseconds>ms][<microseconds>us]
+    import re
+
+    m = re.match(
+        r"^(?:(?P<s>[0-9]*\.?[0-9]+)s)?(?:(?P<ms>[0-9]*\.?[0-9]+)ms)?(?:(?P<us>[0-9]+)(?:us|µs))?$",
+        text,
+    )
+    if m and (m.group("s") or m.group("ms") or m.group("us")):
+        seconds = _safe_float(m.group("s") or "0")
+        millis = _safe_float(m.group("ms") or "0")
+        micros = _safe_float(m.group("us") or "0")
+        return sign * ((seconds * 1000.0) + millis + (micros / 1000.0))
+
     if text.endswith("ms"):
         return sign * _safe_float(text[:-2])
     if text.endswith("us") or text.endswith("µs"):
@@ -167,13 +181,23 @@ class DNSNTPService:
         try:
             dns_data = await client.get("/rest/ip/dns")
 
-            # Parse DNS servers (comma-separated string to list)
-            servers_str = dns_data.get("servers", "")
-            dns_servers = [s.strip() for s in servers_str.split(",") if s.strip()]
-            
+            # Parse DNS servers (comma-separated string or list to list)
+            servers_val = dns_data.get("servers", "")
+            if isinstance(servers_val, str):
+                dns_servers = [s.strip() for s in servers_val.split(",") if s.strip()]
+            elif isinstance(servers_val, list):
+                dns_servers = [str(s).strip() for s in servers_val if str(s).strip()]
+            else:
+                dns_servers = []
+
             # Parse dynamic servers
-            dynamic_str = dns_data.get("dynamic-servers", "")
-            dynamic_servers = [s.strip() for s in dynamic_str.split(",") if s.strip()]
+            dynamic_val = dns_data.get("dynamic-servers", "")
+            if isinstance(dynamic_val, str):
+                dynamic_servers = [s.strip() for s in dynamic_val.split(",") if s.strip()]
+            elif isinstance(dynamic_val, list):
+                dynamic_servers = [str(s).strip() for s in dynamic_val if str(s).strip()]
+            else:
+                dynamic_servers = []
 
             result = {
                 "dns_servers": dns_servers,

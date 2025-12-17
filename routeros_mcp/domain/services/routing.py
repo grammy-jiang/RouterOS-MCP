@@ -286,7 +286,11 @@ class RoutingService:
                     distance_val = 0
 
                 routing_table = ""
-                if remainder and any(ch.isalpha() for ch in remainder[-1]):
+                # If we have multiple tokens remaining after stripping distance,
+                # RouterOS often prints: <gateway> <routing-table>. When only a
+                # single token remains, treat it as the gateway even if it
+                # contains letters (e.g., gateway=ether1).
+                if len(remainder) >= 2 and any(ch.isalpha() for ch in remainder[-1]):
                     routing_table = remainder[-1]
                     remainder = remainder[:-1]
 
@@ -302,7 +306,7 @@ class RoutingService:
                     "dynamic": "D" in flags or "d" in flags,
                     "connected": "C" in flags or "c" in flags,
                 })
-            except (IndexError, ValueError) as e:
+            except (IndexError, ValueError) as e:  # pragma: no cover
                 logger.debug(f"Failed to parse route line: {line}", exc_info=e)
                 continue
 
