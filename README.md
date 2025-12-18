@@ -45,11 +45,12 @@ All design decisions for the 1.x line are captured in the [`docs/`](docs/) direc
 
 ### Phase 3 (Planned)
 
-- 🔮 **Advanced Expert Workflows (single-device, lab/staging)** – static routes, templated NAT, selective firewall templates, policy-based routing, wireless RF/SSID/security, ACLs, VLAN, protocol tuning (plan/apply; disabled by default in production)
-- 🔮 **Admin UI/CLI** – Device management, plan viewing, credential rotation
-- 🔮 **Advanced Writes** – Single-device DHCP/bridge configuration (lab/staging only)
-- ❌ Diagnostics deferred to Phase 4+
-- ❌ SSH key authentication & client compatibility deferred to Phase 4
+- 🔮 **Admin Interface & Single-Device Writes** – Device management, plan approval UI, credential rotation
+- 🔮 **Single-Device Writes (Lab/Staging)** – System identity, DNS/NTP, secondary IPs, address-lists, DHCP/bridge config (plan/apply framework)
+- 🔮 **Plan/Apply Framework** – Mandatory approvals, dry-run preview, automatic rollback
+- ❌ Firewall filter rule writes, static routes, wireless RF writes deferred to Phase 4+
+- ❌ Diagnostics tools deferred to Phase 4+
+- ❌ SSH key authentication deferred to Phase 4+
 
 ## Current Implementation Status
 
@@ -84,7 +85,7 @@ All design decisions for the 1.x line are captured in the [`docs/`](docs/) direc
 - [ ] `dhcp/get-server-status` + `dhcp/get-leases`
 - [ ] `bridge/list-bridges` + `bridge/list-ports`
 - [ ] Wireless/DHCP troubleshooting prompts
-- ⚠️ Diagnostics tools (ping/traceroute/bandwidth-test) deferred to Phase 3
+- ⚠️ Diagnostics tools (ping/traceroute/bandwidth-test) deferred to Phase 4
 
 **Resource Optimization:**
 
@@ -229,36 +230,50 @@ Implementation is organized into phases that reflect increasing capability and r
 - Metrics & health check collection
 - Secured admin HTTP API for device onboarding
 
-### Phase 2 – Low-Risk Single-Device Writes
+### Phase 2 – Read-Only Expansion & HTTP/SSE Transport
+
+- HTTP/SSE transport for remote MCP clients
+- OAuth/OIDC integration for authentication
+- Resource URIs and Prompts (guided workflows)
+- Additional read-only tools (wireless, DHCP, bridge)
+- Resource caching and performance optimization
+
+### Phase 2.1 – Resource Management & Real-Time Updates (Extending Phase 2)
+
+- Resource subscriptions (SSE for real-time health monitoring)
+- Configuration snapshots (read-only backup/audit)
+- CAPsMAN visibility (read-only controller tools for managed APs)
+- User guidance in responses (contextual hints for wireless/CAPsMAN)
+- All features remain read-only; no write operations
+
+### Phase 3 – Admin Interface & Single-Device Writes
 
 - System identity/comments, interface descriptions (production-safe)
 - DNS/NTP changes (lab/staging only by default)
-- Strong audit logging
-- CLI wrappers and simple admin web console
-
-### Phase 3 – Controlled Network Config Writes
-
 - Secondary IPs on non-management interfaces
 - MCP-owned address-lists (lab/staging)
 - Optional lab-only DHCP/bridge changes
+- Admin UI/CLI for device management
 - Management path protection
-- Optional automated device onboarding
+- Plan/apply framework for safe writes
 
-### Phase 4 – Multi-Device & Cross-Topic Workflows
+### Phase 4 – Multi-Device Coordination & Diagnostics
 
-- Professional-tier tools for multi-device DNS/NTP rollouts
-- Shared address-list sync
-- Fleet-level health/drift reporting
-- Mandatory plan/apply with human approval tokens
-- Staged rollout and potential rollback
+- Coordinated multi-device plan/apply with staged rollout
+- Diagnostics tools (ping/traceroute/bandwidth-test)
+- SSH key-based authentication
+- Client compatibility modes for legacy RouterOS
+- Automated approval tokens for trusted environments
+- Long-running operations with JSON-RPC streaming
 
-### Phase 5 – High-Risk Areas & Expert Workflows (Optional)
+### Phase 5 – Multi-User RBAC & Governance (Optional)
 
-- Optional expert-only workflows (firewall templates, selected static routes)
-- Interface admin on non-critical ports
-- Limited wireless RF changes
-- Always professional tier with plan/apply + approvals
-- **Typically disabled by default in production**
+- Multi-user role-based access control (RBAC)
+- OAuth Authorization Code flow with PKCE
+- Per-user device scopes and approval workflows
+- Separate approver roles and approval queue
+- Compliance reporting and policy enforcement
+- Multi-instance deployments with shared session store
 
 ## Quick Start
 

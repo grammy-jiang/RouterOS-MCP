@@ -59,11 +59,16 @@ This service leverages the three core MCP primitives to provide safe, ergonomic 
   - OAuth/OIDC integration for remote access
   - Additional read-only tools (wireless, DHCP, bridge visibility)
   - Resource caching and performance optimization
-- Phase 3: Admin UI/CLI, single-device advanced writes, Advanced Expert Workflows (lab/staging). Diagnostics and SSH key auth postponed.
-- Phase 4: Coordinated multi-device workflows, automated approval tokens, diagnostics (ping/traceroute/bandwidth-test) and SSH key auth/client compatibility.
+- Phase 2.1 (EXTENDING PHASE 2): Resource Management & Real-Time Updates
+  - Resource subscriptions (SSE for real-time health monitoring)
+  - Configuration snapshots (read-only backup/audit)
+  - CAPsMAN visibility (read-only controller tools)
+  - User guidance in responses (contextual hints for wireless/CAPsMAN)
+- Phase 3: Admin UI/CLI, single-device advanced writes (DNS/NTP, secondary IPs, address-lists, DHCP, bridge). Diagnostics and SSH key auth postponed to Phase 4.
+- Phase 4: Coordinated multi-device workflows, diagnostics (ping/traceroute/bandwidth-test), SSH key auth/client compatibility, and automated approval tokens.
 - Phase 5: Multi-user RBAC, approval workflow engine, per-user device scopes, enterprise governance & observability.
 
-This approach ensures local deployments work fully in Phase 1, while Phase 2 enables remote/enterprise deployments and expands read-only visibility.
+This approach ensures local deployments work fully in Phase 1, while Phase 2/2.1 expand read-only visibility and monitoring, Phase 3 enables safe single-device writes, and Phase 4+ handle multi-device and enterprise scenarios.
 
 ---
 

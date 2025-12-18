@@ -3,41 +3,46 @@
 ## Purpose
 
 Define which high-risk operations exist on RouterOS (e.g., reboot, upgrade, reset configuration, interface shutdown on WAN, major routing and firewall changes), how and whether they are exposed via MCP, and what guardrails, approvals, and rollbacks are required to keep usage safe. This document serves as the “safety bible” for adding or changing MCP tools that can impact device reachability or production traffic.
-**Phasing Note**: Phase 3 introduces Advanced Expert Workflows (firewall, routing, wireless, DHCP, bridge) as **single-device, lab/staging-only operations** with mandatory plan/apply workflows. Multi-device coordination and diagnostics (ping/traceroute/bandwidth-test) are deferred to Phase 4+. Phase 5 extends to multi-user RBAC and approval workflow engines.
----
+
+## **Phasing Note**: Phase 2.1 introduces read-only visibility enhancements (CAPsMAN tools, configuration snapshots, user guidance). Phase 3 introduces single-device writes (system identity, DNS/NTP, secondary IPs, limited DHCP/bridge/address-lists) as **single-device, lab/staging-only operations** with mandatory plan/apply workflows. Advanced writes for firewall filter rules, static routes, and wireless RF are deferred to Phase 4+. Multi-device coordination and diagnostics (ping/traceroute/bandwidth-test) are also deferred to Phase 4+. Phase 5 extends to multi-user RBAC and approval workflow engines.
 
 ## Catalog of high-risk actions (reboot, system upgrade, reset, interface disable on WAN, routing/firewall changes, wireless RF changes)
 
 The following categories of actions are considered **high risk** because they can impact reachability, security, or large portions of traffic:
 
 - **Device lifecycle & control**:
-  - `system reboot` or shutdown.  
-  - `system upgrade` (RouterOS package upgrades).  
+
+  - `system reboot` or shutdown.
+  - `system upgrade` (RouterOS package upgrades).
   - `system reset` or restore from backups.
 
 - **Management plane & access**:
-  - Changing management IP addresses or gateways.  
-  - Changing access control lists that protect management interfaces.  
+
+  - Changing management IP addresses or gateways.
+  - Changing access control lists that protect management interfaces.
   - Modifying RouterOS users, authentication methods, certificates, VPN, remote access.
 
 - **Forwarding plane: firewall & NAT**:
-  - Editing rules in default chains (`INPUT`, `FORWARD`, `OUTPUT`).  
-  - Creating, reordering, or removing NAT rules.  
+
+  - Editing rules in default chains (`INPUT`, `FORWARD`, `OUTPUT`).
+  - Creating, reordering, or removing NAT rules.
   - Modifying mangle rules that affect routing or classification.
 
 - **Routing & bridging**:
-  - Adding/removing core static routes (especially for management or backbone networks).  
-  - Changing routing policies, protocol filters (BGP/OSPF), or timers.  
-  - Bridge VLAN filtering changes on production segments.  
+
+  - Adding/removing core static routes (especially for management or backbone networks).
+  - Changing routing policies, protocol filters (BGP/OSPF), or timers.
+  - Bridge VLAN filtering changes on production segments.
   - STP/RSTP/MSTP parameters (priority, enabling/disabling STP) that can create loops or outages.
 
 - **DHCP & addressing**:
-  - DHCP server configuration on production networks.  
-  - Changing address pools or options that affect many clients.  
+
+  - DHCP server configuration on production networks.
+  - Changing address pools or options that affect many clients.
   - Modifying IP addressing or masks on key interfaces.
 
 - **Wireless & RF**:
-  - Changing SSIDs or security on production APs.  
+  - Changing SSIDs or security on production APs.
   - Changing frequencies, channels, or TX power on production APs.
 
 ---
@@ -47,27 +52,29 @@ The following categories of actions are considered **high risk** because they ca
 For each high-risk category, we define v1 exposure:
 
 - **Out of scope for 1.x (no write exposure)**:
-  - RouterOS user management, authentication, certificates.  
-  - VPN and remote access configuration.  
-  - System upgrade/reset/factory defaults.  
-  - NAT configuration (all writes).  
+
+  - RouterOS user management, authentication, certificates.
+  - VPN and remote access configuration.
+  - System upgrade/reset/factory defaults.
+  - NAT configuration (all writes).
   - Bridge VLAN filtering and STP on production devices.
 
 - **Professional-only, lab/staging only by default**:
-  - Certain routing changes (non-core static routes).  
-  - DHCP changes on lab/staging networks.  
+
+  - Certain routing changes (non-core static routes).
+  - DHCP changes on lab/staging networks.
   - Wireless SSID and RF changes on lab/staging APs.
 
 - **Professional-only, optional for controlled production clusters**:
-  - Templated firewall rule changes in MCP-owned chains.  
-  - Selected static routes in non-core paths, after simulation and strict checks.  
+  - Templated firewall rule changes in MCP-owned chains.
+  - Selected static routes in non-core paths, after simulation and strict checks.
   - Interface admin up/down on non-management interfaces, when redundant paths are confirmed.
 
 All high-risk operations that are exposed via MCP must:
 
-- Be **professional-tier** tools.  
-- Use **plan/apply** workflows (no single-step apply).  
-- Require human approval tokens for the apply step.  
+- Be **professional-tier** tools.
+- Use **plan/apply** workflows (no single-step apply).
+- Require human approval tokens for the apply step.
 - Obey environment tags and capability flags (prod typically disabled or heavily restricted).
 
 Many deployments are expected and recommended to keep these capabilities **permanently disabled** in production, even if the code exists.
@@ -79,31 +86,34 @@ Many deployments are expected and recommended to keep these capabilities **perma
 For any high-risk tool that is enabled:
 
 - **Pre-checks**:
+
   - Verify that:
-    - Target devices are in allowed environments (often `lab`/`staging`).  
-    - Device capability flags permit professional workflows and the specific topic.  
-    - Management path will remain reachable (where possible).  
+    - Target devices are in allowed environments (often `lab`/`staging`).
+    - Device capability flags permit professional workflows and the specific topic.
+    - Management path will remain reachable (where possible).
     - Proposed changes do not violate obvious invariants (e.g., creating overlapping subnets).
 
 - **Dry-run / plan**:
+
   - Plan step:
     - Computes a detailed preview of changes (per device), including:
-      - Before/after summaries.  
-      - Risk classification (e.g., “may affect management path”).  
+      - Before/after summaries.
+      - Risk classification (e.g., “may affect management path”).
     - Does not apply any changes.
 
 - **Apply with staged rollout**:
+
   - Changes are applied:
-    - In small batches of devices.  
-    - With pauses and health checks between batches.  
+    - In small batches of devices.
+    - With pauses and health checks between batches.
   - Failure or degradation triggers:
-    - Halt of further batches.  
+    - Halt of further batches.
     - Optional automatic rollback for affected devices where feasible.
 
 - **Safe-mode rollback** (where possible):
   - For certain operations (e.g., adding a static route, modifying DNS/NTP):
-    - Keep a snapshot of the previous configuration.  
-    - If post-change checks fail, revert to the snapshot.  
+    - Keep a snapshot of the previous configuration.
+    - If post-change checks fail, revert to the snapshot.
   - Not all operations are trivially reversible (e.g., stateful firewall changes or STP tweaks), so rollbacks must be carefully designed per topic.
 
 ---
@@ -113,30 +123,33 @@ For any high-risk tool that is enabled:
 We classify topics and operations into approximate risk levels:
 
 - **Low risk** (advanced tier, potentially prod):
-  - System identity/comment, interface descriptions.  
+
+  - System identity/comment, interface descriptions.
   - Non-impactful metadata (tags, comments).
 
 - **Medium risk** (advanced tier, often lab/staging first):
-  - DNS/NTP changes on non-critical devices.  
-  - Secondary IPs on non-management interfaces.  
+
+  - DNS/NTP changes on non-critical devices.
+  - Secondary IPs on non-management interfaces.
   - DHCP/bridge changes on lab/staging only.
 
 - **High risk** (professional tier, often lab-only or opt-in prod):
-  - Firewall rule changes in MCP-owned chains.  
-  - Static routes on production devices.  
-  - Interface admin up/down on non-core ports.  
+
+  - Firewall rule changes in MCP-owned chains.
+  - Static routes on production devices.
+  - Interface admin up/down on non-core ports.
   - Wireless SSID/RF tweaks on production APs.
 
 - **Extreme risk** (out-of-scope or future major version only):
-  - NAT changes.  
-  - Bridge VLAN filtering and STP core parameters on production networks.  
-  - User management, VPN, remote access changes.  
+  - NAT changes.
+  - Bridge VLAN filtering and STP core parameters on production networks.
+  - User management, VPN, remote access changes.
   - System upgrade/reset/factory defaults.
 
 Mapping to MCP tiers:
 
-- **Fundamental**: read-only and diagnostics across all topics, including high-risk ones.  
-- **Advanced**: low/medium risk writes on appropriately flagged devices/environments.  
+- **Fundamental**: read-only and diagnostics across all topics, including high-risk ones.
+- **Advanced**: low/medium risk writes on appropriately flagged devices/environments.
 - **Professional**: high-risk writes and all multi-device workflows; mandatory plan/apply and approvals.
 
 ---
@@ -144,17 +157,20 @@ Mapping to MCP tiers:
 ## Auditability and governance (who can change safeguards, how changes are reviewed)
 
 - **Governance of safeguards**:
+
   - Only `admin` users with specific elevated privileges (and possibly out-of-band approvals) can change:
-    - Device environment tags (`lab`/`staging`/`prod`).  
-    - Device capability flags (`allow_advanced_writes`, `allow_professional_workflows`, topic-specific flags).  
+    - Device environment tags (`lab`/`staging`/`prod`).
+    - Device capability flags (`allow_advanced_writes`, `allow_professional_workflows`, topic-specific flags).
     - Global configuration that enables/disables high-risk tools.
 
 - **Change management**:
+
   - Any change to safeguard configuration is:
-    - Logged as an `AuditEvent` with clear markers.  
+    - Logged as an `AuditEvent` with clear markers.
     - Potentially gated by an internal process (e.g., code review, configuration review).
 
 - **Audit requirements**:
+
   - All high-risk tool invocations must:
     - Reference a `plan_id` (from Doc 05 Plan entity).
     - Include `correlation_id` linking to the originating MCP request for end-to-end tracing.
@@ -184,6 +200,7 @@ Mapping to MCP tiers:
 All high-risk operations follow a mandatory two-phase workflow exposed via separate MCP tools:
 
 **Phase 1: Plan (Validation & Preview)**
+
 - Tool naming: `{topic}/plan-{operation}` (e.g., `firewall/plan-add-rule`, `routing/plan-static-routes`)
 - Creates a `Plan` entity (Doc 05) with `risk_level` assessment
 - Performs all validations without applying changes
@@ -191,6 +208,7 @@ All high-risk operations follow a mandatory two-phase workflow exposed via separ
 - Generates approval token that must be used in Phase 2
 
 **Phase 2: Apply (Execution with Approval)**
+
 - Tool naming: `{topic}/apply-plan`
 - Requires `plan_id` and valid `approval_token`
 - Creates `Job` entity (Doc 05) linked to Plan
@@ -811,18 +829,18 @@ async def execute_rollback(
 
 **High-Risk Operation Error Codes** (extends Doc 19):
 
-| Error Code | HTTP Status | Description | Retry? |
-|------------|-------------|-------------|--------|
-| `DEVICE_ENVIRONMENT_RESTRICTED` | 403 | Device in 'prod' environment, operation not allowed | No |
-| `DEVICE_CAPABILITY_MISSING` | 403 | Device lacks required capability flag | No |
-| `PRE_CHANGE_HEALTH_FAILED` | 412 | Pre-change health check failed | Wait & Retry |
-| `POST_CHANGE_HEALTH_FAILED` | 500 | Post-change health check failed (triggers rollback) | No |
-| `APPROVAL_TOKEN_EXPIRED` | 403 | Approval token expired (>10 minutes old) | Re-plan |
-| `APPROVAL_TOKEN_INVALID` | 403 | Approval token signature validation failed | No |
-| `PLAN_NOT_FOUND` | 404 | Plan ID not found in database | No |
-| `PLAN_ALREADY_APPLIED` | 409 | Plan has already been executed | No |
-| `SNAPSHOT_CREATE_FAILED` | 500 | Failed to create pre-change snapshot | Retry |
-| `ROLLBACK_FAILED` | 500 | Automatic rollback failed - manual intervention required | No |
+| Error Code                      | HTTP Status | Description                                              | Retry?       |
+| ------------------------------- | ----------- | -------------------------------------------------------- | ------------ |
+| `DEVICE_ENVIRONMENT_RESTRICTED` | 403         | Device in 'prod' environment, operation not allowed      | No           |
+| `DEVICE_CAPABILITY_MISSING`     | 403         | Device lacks required capability flag                    | No           |
+| `PRE_CHANGE_HEALTH_FAILED`      | 412         | Pre-change health check failed                           | Wait & Retry |
+| `POST_CHANGE_HEALTH_FAILED`     | 500         | Post-change health check failed (triggers rollback)      | No           |
+| `APPROVAL_TOKEN_EXPIRED`        | 403         | Approval token expired (>10 minutes old)                 | Re-plan      |
+| `APPROVAL_TOKEN_INVALID`        | 403         | Approval token signature validation failed               | No           |
+| `PLAN_NOT_FOUND`                | 404         | Plan ID not found in database                            | No           |
+| `PLAN_ALREADY_APPLIED`          | 409         | Plan has already been executed                           | No           |
+| `SNAPSHOT_CREATE_FAILED`        | 500         | Failed to create pre-change snapshot                     | Retry        |
+| `ROLLBACK_FAILED`               | 500         | Automatic rollback failed - manual intervention required | No           |
 
 **Example Error Response**:
 

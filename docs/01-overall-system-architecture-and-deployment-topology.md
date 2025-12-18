@@ -10,17 +10,17 @@ Describe the high-level architecture, components, and deployment topology of the
 
 ### Context
 
-- The MCP service runs on a Linux server (bare metal or VM) or as a containerized workload in a cluster.  
-- It manages many RouterOS v7 devices via RouterOS **REST API** as the primary interface, with tightly-scoped SSH/CLI as a fallback for missing functionality.  
-- It is exposed to AI tools (e.g. ChatGPT) via the **Model Context Protocol (MCP)**, typically behind Cloudflare Tunnel.  
+- The MCP service runs on a Linux server (bare metal or VM) or as a containerized workload in a cluster.
+- It manages many RouterOS v7 devices via RouterOS **REST API** as the primary interface, with tightly-scoped SSH/CLI as a fallback for missing functionality.
+- It is exposed to AI tools (e.g. ChatGPT) via the **Model Context Protocol (MCP)**, typically behind Cloudflare Tunnel.
 - Authentication is via OAuth/OIDC against an external identity provider; authorization is enforced internally via roles, device scopes, tool tiers, and environment/capability flags.
 
 ### Goals
 
-- Provide a strongly-typed, RouterOS-aware **MCP API surface** that is safe for AI and human clients.  
-- Cleanly separate concerns: API/MCP layer, domain/service layer, and infrastructure layer.  
-- Support the **phase model** (Phase 0–5) for incremental capability rollout and risk management.  
-- Make key safety mechanisms (environment tags, capability flags, plan/apply, approvals) first-class citizens in the architecture.  
+- Provide a strongly-typed, RouterOS-aware **MCP API surface** that is safe for AI and human clients.
+- Cleanly separate concerns: API/MCP layer, domain/service layer, and infrastructure layer.
+- Support the **phase model** (Phase 0–5) for incremental capability rollout and risk management.
+- Make key safety mechanisms (environment tags, capability flags, plan/apply, approvals) first-class citizens in the architecture.
 - Fit naturally into standard Linux / container deployment models with minimal operational friction.
 
 ### Non-goals
@@ -40,6 +40,7 @@ The MCP service architecture evolves across phases, with careful staging of comp
 **Goal:** Universal MCP client compatibility with safe read/write operations
 
 **Architecture Components:**
+
 - **Transport:** STDIO only (stdin/stdout for protocol, stderr for logs)
 - **MCP Primitives:** Tools only (40 tools across fundamental/advanced/professional tiers)
 - **Security:** OS-level isolation (process sandboxing, file permissions)
@@ -48,6 +49,7 @@ The MCP service architecture evolves across phases, with careful staging of comp
 - **Background Jobs:** APScheduler for health checks and metrics collection
 
 **What's Included:**
+
 - Device registration and lifecycle management
 - Read-only fundamental tools (inventory, health, diagnostics)
 - Advanced tools for low-risk single-device writes (DNS/NTP, identity, comments)
@@ -56,6 +58,7 @@ The MCP service architecture evolves across phases, with careful staging of comp
 - Audit logging for all writes and sensitive reads
 
 **What's NOT Included:**
+
 - Resources and Prompts (deferred to Phase 2)
 - HTTP/SSE transport for MCP (deferred to Phase 2)
 - OAuth flows (OIDC token validation only, no OAuth Authorization Code flow)
@@ -69,6 +72,7 @@ The MCP service architecture evolves across phases, with careful staging of comp
 **Goal:** Richer user experience and remote access for capable MCP clients
 
 **Architecture Additions:**
+
 - **MCP Primitives:**
   - **Resources:** 12 resource URIs (device health, configs, fleet summaries)
   - **Prompts:** 8 workflow templates (dns_ntp_rollout, troubleshoot_dns_ntp, etc.)
@@ -86,6 +90,7 @@ The MCP service architecture evolves across phases, with careful staging of comp
   - `prompts/get` handler (render template with arguments)
 
 **What's Included:**
+
 - Efficient resource access for capable clients (Claude, VS Code)
 - Workflow guidance via prompts (DNS/NTP rollout, troubleshooting)
 - HTTP/SSE transport for remote MCP clients
@@ -93,26 +98,76 @@ The MCP service architecture evolves across phases, with careful staging of comp
 - Backward compatibility: STDIO transport and Phase-1 fallback tools still available
 
 **What's NOT Included:**
+
 - Multi-user OAuth Authorization Code flow (deferred to Phase 5)
-- Advanced Expert Workflows (firewall, routing, wireless; deferred to Phase 3)
+- Resource subscriptions and CAPsMAN tools (moved to Phase 2.1)
+- Advanced writes for firewall filter rules, static routes, wireless RF (deferred to Phase 4+)
 
 **Client Compatibility:**
+
 - **Full MCP clients** (40%): Get resources + prompts + tools
 - **Tools-only clients** (60%): Get tools only (including fallbacks)
 
 ---
 
-### Phase 3: Advanced Expert Workflows (Single-Device Plan/Apply)
+### Phase 2.1: Resource Management & Real-Time Updates (Extending Phase 2)
 
-**Goal:** Enable advanced writes (firewall, routing, wireless, DHCP, bridge) with mandatory plan/apply guardrails for single-device operations in lab/staging environments
+**Goal:** Extend Phase 2 capabilities with resource snapshots, real-time subscriptions, and wireless visibility enhancements
 
 **Architecture Additions:**
+
+- **MCP Features:**
+  - **Resource Subscriptions:** SSE subscriptions for real-time device health updates
+  - **Configuration Snapshots:** Read-only snapshot creation/retrieval for backup and audit
+  - **CAPsMAN Visibility:** Read-only tools for CAPsMAN controller-managed wireless
+  - **User Guidance:** Contextual hints in wireless outputs for CAPsMAN deployments
+- **Infrastructure:**
+  - **Snapshot Storage:** Database table for configuration snapshots
+  - **Scheduled Jobs:** APScheduler for automatic snapshot creation
+  - **Subscription Manager:** Track active SSE subscriptions per device
+  - **CAPsMAN Queries:** SSH fallback queries for `/caps-man` endpoints
+- **Response Enhancements:**
+  - Automatic CAPsMAN detection in wireless tools
+  - Conditional guidance text added to responses
+
+**What's Included:**
+
+- Resource subscriptions via SSE (real-time health monitoring)
+- Configuration snapshots (read-only, scheduled or on-demand)
+- CAPsMAN controller visibility (read-only tools)
+- User guidance in wireless outputs (informational only)
+- All operations remain read-only; no configuration changes
+- Backward compatibility: all Phase 2 features still available
+
+**What's NOT Included:**
+
+- Write operations (deferred to Phase 3)
+- Multi-user support (deferred to Phase 5)
+- CAPsMAN controller configuration changes (write operations)
+- Persistent subscription state across restarts
+- Advanced filtering or transformation of subscribed data
+
+**Client Compatibility:**
+
+- Full MCP clients benefit most (40%): SSE subscriptions available
+- Tools-only clients (60%): Snapshot tools and CAPsMAN tools still available as regular tool calls
+
+---
+
+### Phase 3: Admin Interface & Single-Device Writes (Plan/Apply)
+
+**Goal:** Enable single-device advanced writes with mandatory plan/apply guardrails and admin tooling for lab/staging environments
+
+**Architecture Additions:**
+
 - **MCP Tools:**
-  - **Firewall:** Plan/apply workflows for filter rules (lab/staging only)
-  - **Routing:** Plan/apply workflows for static routes (non-core paths)
-  - **Wireless:** Plan/apply workflows for SSID/RF changes (lab/staging only)
-  - **DHCP:** Plan/apply workflows for DHCP server configuration (lab/staging only)
-  - **Bridge:** Plan/apply workflows for bridge ports and settings (lab/staging only)
+  - **System:** System identity/comments
+  - **Interface:** Interface comments and descriptions
+  - **DNS/NTP:** DNS/NTP server configuration (lab/staging only)
+  - **IP:** Secondary IP addresses on non-management interfaces
+  - **Firewall (limited):** MCP-owned address-lists (create/update/delete)
+  - **DHCP (limited):** DHCP server enable/disable and basic pool config (lab/staging only)
+  - **Bridge (limited):** Bridge port membership on non-critical ports (lab/staging only)
 - **Safety Mechanisms:**
   - Pre-checks for environment tags (lab/staging enforcement)
   - Device capability flags (`allow_professional_workflows`, topic-specific flags)
@@ -125,15 +180,25 @@ The MCP service architecture evolves across phases, with careful staging of comp
   - Audit log viewer
 
 **What's Included:**
-- Professional-tier tools for single-device advanced writes
-- Plan/apply framework with mandatory approvals
+
+- Single-device write operations with plan/apply framework
+- System identity, interface descriptions, DNS/NTP configuration
+- Secondary IPs on non-management interfaces
+- MCP-owned address-lists (limited firewall operations)
+- Optional lab-only DHCP and bridge configuration
+- Mandatory approvals for all write operations
 - Lab/staging environment enforcement
-- Admin tooling for device and plan management
+- Admin UI/CLI for device and plan management
 
 **What's NOT Included:**
+
+- Firewall filter rule writes (deferred to Phase 4)
+- Static route management (deferred to Phase 4)
+- Wireless RF/SSID writes (deferred to Phase 4)
 - Multi-device coordinated workflows (deferred to Phase 4)
 - Diagnostics tools (ping/traceroute/bandwidth-test; deferred to Phase 4)
 - SSH key authentication and client compatibility modes (deferred to Phase 4)
+- CAPsMAN controller writes (out of scope)
 
 **Client Compatibility:** 100% (STDIO or HTTP/SSE, client choice)
 
@@ -144,6 +209,7 @@ The MCP service architecture evolves across phases, with careful staging of comp
 **Goal:** Support coordinated multi-device workflows, diagnostics, and SSH key authentication
 
 **Architecture Additions:**
+
 - **Multi-Device Workflows:**
   - Batch plan/apply across multiple devices
   - Staged rollout with health checks between batches
@@ -160,12 +226,14 @@ The MCP service architecture evolves across phases, with careful staging of comp
   - Workflow orchestration for complex multi-device operations
 
 **What's Included:**
+
 - Coordinated multi-device plan/apply
 - Long-running diagnostics with JSON-RPC streaming
 - SSH key auth and client compatibility
 - Automated approvals for trusted workflows
 
 **What's NOT Included:**
+
 - Multi-user RBAC (deferred to Phase 5)
 - Approval workflow engine with separate approver roles (deferred to Phase 5)
 
@@ -180,6 +248,7 @@ The MCP service architecture evolves across phases, with careful staging of comp
 **Goal:** Support multi-user access with role-based permissions, approval workflows, and enterprise governance
 
 **Architecture Additions:**
+
 - **Security:**
   - **OAuth Authorization Code + PKCE:** Full OAuth flow for browser-based clients
   - **Multi-user RBAC:** Role-based access control for users and devices
@@ -200,6 +269,7 @@ The MCP service architecture evolves across phases, with careful staging of comp
   - Shared session store (Redis) for multi-instance deployments
 
 **What's Included:**
+
 - Multi-user OAuth login flow
 - Role-based access control
 - Per-user device scopes
@@ -207,6 +277,7 @@ The MCP service architecture evolves across phases, with careful staging of comp
 - Enterprise governance and compliance features
 
 **What's Unchanged:**
+
 - STDIO and HTTP/SSE transports still supported
 - Single-user mode still available (backward compatibility)
 - All Phase 1-4 features remain
@@ -331,6 +402,7 @@ Legend:
 ---
 
 1. **API & MCP layer**
+
    - **MCP server / HTTP API**:
      - Exposes MCP tools and possibly a REST/JSON HTTP API for human-oriented UIs.
      - Handles request authentication (OIDC tokens) and maps identities to internal user roles and device scopes.
@@ -347,9 +419,9 @@ Legend:
                 "version": "1.0.0"
               },
               "capabilities": {
-                "tools": {"listChanged": true},
-                "resources": {"subscribe": true, "listChanged": true},
-                "prompts": {"listChanged": true}
+                "tools": { "listChanged": true },
+                "resources": { "subscribe": true, "listChanged": true },
+                "prompts": { "listChanged": true }
               }
             }
             ```
@@ -362,17 +434,18 @@ Legend:
      - Web console or HTTP endpoints for human operators to manage devices, review plans, approve changes, and inspect audit logs.
 
 2. **Domain & service layer**
-   - **Device registry service**:  
-     - Manages devices, environments (`lab`/`staging`/`prod`), capability flags, and associated credentials.  
+
+   - **Device registry service**:
+     - Manages devices, environments (`lab`/`staging`/`prod`), capability flags, and associated credentials.
      - Implements security checks around device scope and environment-based gating.
-   - **RouterOS operation services** (per topic or group of topics):  
-     - System, interface, IP, DNS, NTP, DHCP, routing, logs, diagnostics, etc.  
-     - Encapsulate validation, idempotency, and mapping between domain objects and RouterOS API calls.  
-   - **Plan & job orchestration service**:  
-     - Implements plan/apply, multi-device workflows, and long-running tasks (Phase 3-5).  
-     - Coordinates pre-checks, validations, rollouts with backoff, and rollbacks.  
-   - **Audit & policy service**:  
-     - Applies cross-cutting policies (e.g., environment/capability constraints).  
+   - **RouterOS operation services** (per topic or group of topics):
+     - System, interface, IP, DNS, NTP, DHCP, routing, logs, diagnostics, etc.
+     - Encapsulate validation, idempotency, and mapping between domain objects and RouterOS API calls.
+   - **Plan & job orchestration service**:
+     - Implements plan/apply, multi-device workflows, and long-running tasks (Phase 3-5).
+     - Coordinates pre-checks, validations, rollouts with backoff, and rollbacks.
+   - **Audit & policy service**:
+     - Applies cross-cutting policies (e.g., environment/capability constraints).
      - Writes structured audit events for sensitive reads and all writes.
 
 3. **Infrastructure layer**
@@ -447,6 +520,7 @@ Phase 2+ deployment:
 ```
 
 **Critical STDIO best practices:**
+
 - Never use `print()` for debugging (use `logging.error()` to stderr)
 - Never write to stdout except via MCP protocol handler
 - Test STDIO transport by piping sample requests: `echo '{"jsonrpc":"2.0",...}' | ./mcp-server`
@@ -519,6 +593,7 @@ MCP exposes three primitives (Tools, Resources, Prompts), each with different ar
 **Phase-1 Fallback Pattern**
 
 For clients that don't support Resources (ChatGPT, tools-only clients), Phase-1 fallback tools provide equivalent functionality:
+
 - `device/get-health-data` tool → `device://{id}/health` resource
 - `fleet/get-summary` tool → `fleet://{env}/summary` resource
 - Each fallback tool includes `resource_uri` hint for migration to Phase 2
@@ -527,18 +602,18 @@ For clients that don't support Resources (ChatGPT, tools-only clients), Phase-1 
 
 ## Host platform assumptions (Linux, systemd, container vs bare metal)
 
-- The service targets **Linux** as the primary host OS.  
+- The service targets **Linux** as the primary host OS.
 - Two primary deployment modes are supported:
-  - As a **systemd-managed service** on a VM or bare-metal host.  
+  - As a **systemd-managed service** on a VM or bare-metal host.
   - As a **containerized service** (Docker, Kubernetes, etc.).
 - In both cases:
-  - Configuration is primarily via environment variables and optional config files.  
-  - A single binary/process may serve both MCP and HTTP endpoints; horizontal scaling is achieved by running multiple instances.  
+  - Configuration is primarily via environment variables and optional config files.
+  - A single binary/process may serve both MCP and HTTP endpoints; horizontal scaling is achieved by running multiple instances.
   - Secrets (master key, DB passwords, OIDC client secrets) are injected via environment or external secret managers, not stored in plain text on disk.
 
 Operationally:
 
-- There should be a clear **service unit** definition (for systemd) or a deployment manifest (for k8s) that configures ports, logging, and resource limits.  
+- There should be a clear **service unit** definition (for systemd) or a deployment manifest (for k8s) that configures ports, logging, and resource limits.
 - The service must not assume local state other than configuration and transient caches; persistent state should be in external storage (DB, metrics store).
 
 ---
@@ -547,26 +622,26 @@ Operationally:
 
 ### Single-region baseline
 
-- Deploy at least one application instance in the management region (e.g., a data center or cloud region).  
-- RouterOS devices may be distributed across sites, as long as the management server can reach their management IPs over TCP (REST, optionally SSH).  
+- Deploy at least one application instance in the management region (e.g., a data center or cloud region).
+- RouterOS devices may be distributed across sites, as long as the management server can reach their management IPs over TCP (REST, optionally SSH).
 - A **single-region, multi-instance** pattern is recommended for availability:
-  - 2–3 stateless app instances behind a load balancer / reverse proxy (or behind Cloudflare Tunnel).  
+  - 2–3 stateless app instances behind a load balancer / reverse proxy (or behind Cloudflare Tunnel).
 
 ### Network layout
 
 - MCP instances run in a **management network** with outbound access to:
-  - RouterOS device REST/SSH ports.  
-  - The OIDC provider.  
-  - The database and observability backends.  
-  - Cloudflare Tunnel connector (if used).  
+  - RouterOS device REST/SSH ports.
+  - The OIDC provider.
+  - The database and observability backends.
+  - Cloudflare Tunnel connector (if used).
 - Inbound access from the public Internet is **not** direct:
-  - Public-facing clients (ChatGPT / browsers) connect via Cloudflare Tunnel to the MCP service.  
+  - Public-facing clients (ChatGPT / browsers) connect via Cloudflare Tunnel to the MCP service.
   - The origin (MCP) listens on a private interface/port accessible only to the Tunnel connector or internal load balancer.
 
 ### High availability
 
-- Stateless app instances can be scaled horizontally; database and storage must provide at least basic HA (e.g., managed DB with replicas).  
-- Health checks and readiness probes are used so the orchestrator/systemd can restart unhealthy instances.  
+- Stateless app instances can be scaled horizontally; database and storage must provide at least basic HA (e.g., managed DB with replicas).
+- Health checks and readiness probes are used so the orchestrator/systemd can restart unhealthy instances.
 - In case of partial outages (e.g., DB read-only mode), the service should degrade gracefully (e.g., allow reads, deny writes).
 
 ---
@@ -576,38 +651,38 @@ Operationally:
 ### RouterOS
 
 - The service connects to RouterOS devices via:
-  - **REST API** endpoints (`/rest/...`) over HTTP(S).  
-  - Optional **SSH** for whitelisted commands on devices where REST is insufficient.  
+  - **REST API** endpoints (`/rest/...`) over HTTP(S).
+  - Optional **SSH** for whitelisted commands on devices where REST is insufficient.
 - Connectivity assumptions:
-  - Management IP addresses or hostnames are reachable from the MCP network.  
+  - Management IP addresses or hostnames are reachable from the MCP network.
   - Network ACLs permit the relevant ports (e.g., 80/443/8728/8729 or custom REST/SSH ports).
 
 ### OAuth/OIDC
 
 - The MCP service acts as an **OIDC client**:
-  - Uses Authorization Code + PKCE flow for browser-based admin/UI.  
-  - Accepts bearer tokens (access tokens or ID tokens) for MCP/HTTP API calls.  
+  - Uses Authorization Code + PKCE flow for browser-based admin/UI.
+  - Accepts bearer tokens (access tokens or ID tokens) for MCP/HTTP API calls.
 - The service:
-  - Validates tokens (signature, issuer, audience, expiry).  
-  - Extracts `sub`, `email`, and `groups`/`roles` claims.  
+  - Validates tokens (signature, issuer, audience, expiry).
+  - Extracts `sub`, `email`, and `groups`/`roles` claims.
   - Maps these claims to internal `user_role` and `device_scope` using a static configuration mapping.
 
 ### Cloudflare Tunnel
 
-- Cloudflare Tunnel terminates TLS on the edge and forwards traffic to the MCP origin.  
+- Cloudflare Tunnel terminates TLS on the edge and forwards traffic to the MCP origin.
 - The integration points:
-  - Tunnel runs on the same host or same network as the MCP instances.  
-  - Origin is locked down so only the Tunnel (and internal admin access) can reach it.  
+  - Tunnel runs on the same host or same network as the MCP instances.
+  - Origin is locked down so only the Tunnel (and internal admin access) can reach it.
 - Cloudflare Access (or equivalent) can front the MCP UI, acting as an OIDC provider or SSO gate.
 
 ### Logging & metrics backends
 
 - The MCP service emits:
-  - Structured logs (JSON) to stdout or a log collector.  
-  - Metrics via an HTTP endpoint (e.g., Prometheus) or push-based exporter.  
-  - Traces via OpenTelemetry exporters.  
+  - Structured logs (JSON) to stdout or a log collector.
+  - Metrics via an HTTP endpoint (e.g., Prometheus) or push-based exporter.
+  - Traces via OpenTelemetry exporters.
 - Backends may be:
-  - Self-hosted (ELK/EFK, Prometheus/Grafana, Jaeger/Tempo).  
+  - Self-hosted (ELK/EFK, Prometheus/Grafana, Jaeger/Tempo).
   - Managed cloud services.
 
 ---
@@ -616,13 +691,13 @@ Operationally:
 
 The typical request path from a user or AI client:
 
-1. User/AI interacts with a client (ChatGPT UI or custom UI) that uses MCP.  
-2. MCP client connects to a public URL fronted by **Cloudflare Tunnel**.  
-3. Cloudflare forwards the request to the MCP origin (load balancer or service instance).  
+1. User/AI interacts with a client (ChatGPT UI or custom UI) that uses MCP.
+2. MCP client connects to a public URL fronted by **Cloudflare Tunnel**.
+3. Cloudflare forwards the request to the MCP origin (load balancer or service instance).
 4. The MCP service:
-   - Validates the attached OAuth/OIDC token (if present) or initiates an OIDC flow (for browser-based UI).  
-   - Maps identity to `user_role` and `device_scope`.  
-   - Applies environment and capability checks, then dispatches to the appropriate domain service.  
+   - Validates the attached OAuth/OIDC token (if present) or initiates an OIDC flow (for browser-based UI).
+   - Maps identity to `user_role` and `device_scope`.
+   - Applies environment and capability checks, then dispatches to the appropriate domain service.
 5. Domain service calls RouterOS via REST (or SSH where needed) and returns structured results, which are sent back through the same path.
 
 In this pipeline:
@@ -716,21 +791,21 @@ The architecture enforces multiple security zones with explicit trust boundaries
 
 ### Scaling
 
-- Horizontal scaling by running multiple stateless app instances sharing:  
-  - A database.  
-  - A secrets store.  
-  - Metrics/logging backends.  
-- RouterOS calls are rate-limited **per device**; the RouterOS client library centralizes per-device concurrency and QPS limits.  
+- Horizontal scaling by running multiple stateless app instances sharing:
+  - A database.
+  - A secrets store.
+  - Metrics/logging backends.
+- RouterOS calls are rate-limited **per device**; the RouterOS client library centralizes per-device concurrency and QPS limits.
 - Background jobs (health checks, collectors, rollouts) are distributed via a job queue or database-backed scheduler to avoid duplication.
 
 ### Multi-device workflows
 
-- Multi-device workflows (Phase 3-5) are implemented via plan/apply:  
-  - Plan generation computes changes across many devices and writes a `Plan` entity to the DB.  
-  - Apply executes the plan in stages (e.g., batches) with health checks and potential rollback.  
+- Multi-device workflows (Phase 3-5) are implemented via plan/apply:
+  - Plan generation computes changes across many devices and writes a `Plan` entity to the DB.
+  - Apply executes the plan in stages (e.g., batches) with health checks and potential rollback.
 - The orchestration service must consider:
-  - Device environments (`lab`/`staging`/`prod`).  
-  - Capability flags per device.  
+  - Device environments (`lab`/`staging`/`prod`).
+  - Capability flags per device.
   - Backoff and partial failure handling.
 
 ### Multi-tenant
@@ -744,27 +819,26 @@ The architecture enforces multiple security zones with explicit trust boundaries
 
 **Key failure modes**
 
-- RouterOS device is unreachable (network issues, device down).  
-- RouterOS REST or SSH returns errors (auth failure, timeouts, rate limiting).  
-- Database or metrics storage is unavailable or degraded.  
-- OIDC provider or Cloudflare Tunnel is unavailable or misconfigured.  
+- RouterOS device is unreachable (network issues, device down).
+- RouterOS REST or SSH returns errors (auth failure, timeouts, rate limiting).
+- Database or metrics storage is unavailable or degraded.
+- OIDC provider or Cloudflare Tunnel is unavailable or misconfigured.
 - Internal bugs or overload in the MCP service.
 
 **Resilience strategies**
 
-- Per-device retry and backoff policies for RouterOS calls, with circuit breakers/default cool-down when devices misbehave.  
+- Per-device retry and backoff policies for RouterOS calls, with circuit breakers/default cool-down when devices misbehave.
 - Separation of read and write paths:
-  - On partial outages, keep read-only operations working whenever possible; fail closed on writes.  
+  - On partial outages, keep read-only operations working whenever possible; fail closed on writes.
 - Robust error mapping:
-  - Clear, structured error codes for MCP clients (including AI), so they can react appropriately.  
+  - Clear, structured error codes for MCP clients (including AI), so they can react appropriately.
 - Timeouts and cancellation:
   - All outbound calls have conservative timeouts; long-running workflows use async jobs with progress tracking.
 
 **Backoff strategies**
 
 - Health checks and metrics collection:
-  - When a device repeatedly fails, increase the interval between attempts, up to a configurable maximum.  
+  - When a device repeatedly fails, increase the interval between attempts, up to a configurable maximum.
 - Multi-device apply:
-  - Use staged rollout; pause further batches if error rates exceed thresholds.  
+  - Use staged rollout; pause further batches if error rates exceed thresholds.
   - Optionally auto-rollback for affected devices when post-change checks fail.
-
