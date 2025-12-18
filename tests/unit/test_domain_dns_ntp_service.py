@@ -101,6 +101,11 @@ class FakeSSHClient:
             "/ip/dns/cache/print": """ #  NAME          TYPE  DATA             TTL
  0  example.com   A     93.184.216.34    60
  1  google.com    A     142.250.80.46    300""",
+            "/ip/dns/cache/print as-value without-paging": """name=example.com type=A data=93.184.216.34 ttl=60s
+
+name=google.com type=A data=142.250.80.46 ttl=5m
+
+""",
         }
         return outputs.get(command, "")
 

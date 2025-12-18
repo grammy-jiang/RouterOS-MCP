@@ -55,8 +55,17 @@ ALLOWED_SSH_COMMANDS: Final[set[str]] = {
     "/ip/route/print",  # Routing table (standard table format)
     "/ip/dns/print",  # DNS configuration (standard format: key: value)
     "/system/ntp/client/print",  # NTP configuration (standard format: key: value)
-    "/ip/dns/cache/print",  # DNS cache (standard table format)
+    "/ip/dns/cache/print",  # DNS cache (all formats: table, as-value, detail, with/without-paging)
+    "/interface/bridge/print",  # Bridge configuration (standard table format with multi-line detail)
+    "/interface/bridge/port/print",  # Bridge port assignments (standard table format)
+    "/ip/dhcp-server/print",  # DHCP server configuration (standard table format)
+    "/ip/dhcp-server/lease/print",  # DHCP leases (standard table format)
     "/interface/monitor-traffic",  # Interface traffic statistics (with 'once' parameter)
+    "/interface/wireless/print",  # Wireless interface listing (legacy wireless package)
+    "/interface/wifi/print",  # WiFi interface listing (RouterOS v7 WiFi package)
+    "/interface/wireless/registration-table/print",  # Connected wireless clients (legacy wireless)
+    "/interface/wifi/registration-table/print",  # Connected WiFi clients (RouterOS v7 WiFi package)
+    "/caps-man/remote-cap/print",  # CAPsMAN-managed CAP devices (APs)
     "/ping",  # ICMP ping
     "/tool/ping",  # ICMP ping via tool
     "/tool/traceroute",  # Traceroute

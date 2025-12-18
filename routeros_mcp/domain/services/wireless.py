@@ -15,6 +15,7 @@ from routeros_mcp.infra.routeros.exceptions import (
     RouterOSClientError,
     RouterOSNetworkError,
     RouterOSServerError,
+    RouterOSSSHError,
     RouterOSTimeoutError,
 )
 
@@ -115,6 +116,70 @@ class WirelessService:
                     f"rest_error={rest_exc}, ssh_error={ssh_exc}"
                 ) from ssh_exc
 
+    async def has_capsman_managed_aps(self, device_id: str) -> bool:
+        """Return True if this device appears to manage any CAP devices via CAPsMAN.
+
+        We detect this by checking whether CAPsMAN has any entries in
+        /caps-man/remote-cap. This is a safe, read-only capability probe.
+
+        Notes:
+        - If CAPsMAN is not installed/enabled, RouterOS typically returns a "no such command"
+          or "bad command" error; in that case this returns False.
+        - Uses REST first when available, then SSH fallback.
+        """
+        await self.device_service.get_device(device_id)
+
+        # Try REST first
+        try:
+            client = await self.device_service.get_rest_client(device_id)
+        except Exception as e:
+            logger.debug(
+                "No REST client available for CAPsMAN probe; falling back to SSH",
+                extra={"device_id": device_id, "error": str(e)},
+            )
+            client = None
+
+        if client is not None:
+            try:
+                data: Any = await client.get("/rest/caps-man/remote-cap")
+                if isinstance(data, list):
+                    return len(data) > 0
+            except Exception as rest_exc:
+                logger.debug(
+                    "REST CAPsMAN remote-cap probe failed; falling back to SSH",
+                    extra={"device_id": device_id, "error": str(rest_exc)},
+                )
+            finally:
+                await client.close()
+
+        # SSH fallback
+        ssh_client = await self.device_service.get_ssh_client(device_id)
+        try:
+            try:
+                output = await ssh_client.execute("/caps-man/remote-cap/print without-paging")
+            except Exception as e:
+                msg = str(e).lower()
+                # CAPsMAN not available on this RouterOS build/config
+                if "no such command" in msg or "bad command" in msg:
+                    return False
+                raise
+
+            return self._routeros_table_has_data_rows(output)
+        finally:
+            await ssh_client.close()
+
+    @staticmethod
+    def _routeros_table_has_data_rows(output: str) -> bool:
+        """Best-effort check for at least one data row in RouterOS 'print' table output."""
+        for line in output.splitlines():
+            s = line.strip()
+            if not s or s.startswith("Flags:") or s.startswith("Columns:") or s.startswith("#"):
+                continue
+            # Most RouterOS tables start rows with an index: '0', '1', ... (possibly padded)
+            if s[0].isdigit():
+                return True
+        return False
+
     async def _get_wireless_interfaces_via_rest(
         self, device_id: str
     ) -> list[dict[str, Any]]:
@@ -159,8 +224,21 @@ class WirelessService:
         ssh_client = await self.device_service.get_ssh_client(device_id)
 
         try:
-            output = await ssh_client.execute("/interface/wireless/print")
-            return self._parse_wireless_print_output(output)
+            # RouterOS can expose WiFi either via legacy 'wireless' package or the newer 'wifi' package.
+            # Try legacy first for backwards compatibility, then fall back to 'wifi'.
+            try:
+                output = await ssh_client.execute("/interface/wireless/print")
+                return self._parse_wireless_print_output(output)
+            except Exception as e1:
+                try:
+                    output = await ssh_client.execute("/interface/wifi/print")
+                    return self._parse_wireless_print_output(output)
+                except Exception as e2:
+                    # If wireless is not present on the device, treat as no interfaces.
+                    msg = f"{e1} | {e2}"
+                    if "no such command" in msg.lower() or "bad command" in msg.lower():
+                        return []
+                    raise
         finally:
             await ssh_client.close()
 
@@ -347,8 +425,21 @@ class WirelessService:
         ssh_client = await self.device_service.get_ssh_client(device_id)
 
         try:
-            output = await ssh_client.execute("/interface/wireless/registration-table/print")
-            return self._parse_wireless_clients_output(output)
+            # Try legacy wireless registration-table first, then RouterOS v7 wifi package.
+            try:
+                output = await ssh_client.execute("/interface/wireless/registration-table/print")
+                return self._parse_wireless_clients_output(output)
+            except Exception as e1:
+                try:
+                    output = await ssh_client.execute("/interface/wifi/registration-table/print")
+                    return self._parse_wireless_clients_output(output)
+                except Exception as e2:
+                    # If wireless is not present on the device, treat as no connected clients.
+                    msg = f"{e1} | {e2}"
+                    if "no such command" in msg.lower() or "bad command" in msg.lower():
+                        return []
+                    # Preserve original error signal for unexpected failures.
+                    raise RouterOSSSHError(f"Wireless registration-table failed: {msg}")
         finally:
             await ssh_client.close()
 

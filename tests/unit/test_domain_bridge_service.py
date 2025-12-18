@@ -235,12 +235,16 @@ async def test_list_bridge_ports_via_rest(fake_env):
 @pytest.mark.asyncio
 async def test_list_bridges_ssh_fallback(monkeypatch: pytest.MonkeyPatch):
     """Test bridge listing falls back to SSH when REST fails."""
-    # Create SSH client with sample output
-    ssh_output = """Flags: R - RUNNING; D - DISABLED
-Columns: NAME, MTU, ACTUAL-MTU, MAC-ADDRESS, PROTOCOL-MODE
- #     NAME       MTU   ACTUAL-MTU  MAC-ADDRESS        PROTOCOL-MODE
- 0  R  bridge1    auto  1500        78:9A:18:A2:F3:D4  rstp
- 1     bridge2    1500  1500        78:9A:18:A2:F3:D5  stp
+    # Create SSH client with actual RouterOS multi-line output
+    ssh_output = """Flags: D - dynamic; X - disabled, R - running 
+ 0  R name="bridge-lan" mtu=auto actual-mtu=1500 l2mtu=1514 arp=enabled arp-timeout=auto mac-address=78:9A:18:A2:F3:D3 protocol-mode=rstp fast-forward=yes igmp-snooping=yes 
+      multicast-router=temporary-query multicast-querier=no startup-query-count=2 last-member-query-count=2 last-member-interval=1s membership-interval=4m20s querier-interval=4m15s query-interval=2m5s 
+      query-response-interval=10s startup-query-interval=31s250ms igmp-version=2 mld-version=1 auto-mac=yes ageing-time=5m priority=0x8000 max-message-age=20s forward-delay=15s transmit-hold-count=6 
+      vlan-filtering=yes ether-type=0x8100 pvid=1 frame-types=admit-all ingress-filtering=yes dhcp-snooping=no port-cost-mode=long mvrp=no max-learned-entries=auto 
+
+ 1  R ;;; Dedicated Loopback for Router-ID
+      name="lo-router-id" mtu=auto actual-mtu=1500 l2mtu=65535 arp=enabled arp-timeout=auto mac-address=F2:7A:43:BA:E3:35 protocol-mode=rstp fast-forward=yes igmp-snooping=no auto-mac=yes 
+      ageing-time=5m priority=0x8000 max-message-age=20s forward-delay=15s transmit-hold-count=6 vlan-filtering=no dhcp-snooping=no port-cost-mode=long mvrp=no max-learned-entries=auto
 """
     ssh_client = _FakeSSHClient(ssh_output)
 
@@ -264,13 +268,18 @@ Columns: NAME, MTU, ACTUAL-MTU, MAC-ADDRESS, PROTOCOL-MODE
 
     # Verify we got bridges from SSH
     assert len(bridges) == 2
-    assert bridges[0]["name"] == "bridge1"
+    assert bridges[0]["name"] == "bridge-lan"
+    assert bridges[0]["mac_address"] == "78:9A:18:A2:F3:D3"
+    assert bridges[0]["protocol_mode"] == "rstp"
     assert bridges[0]["running"] is True
+    assert bridges[0]["vlan_filtering"] is True
     assert bridges[0]["transport"] == "ssh"
     assert bridges[0]["fallback_used"] is True
 
-    assert bridges[1]["name"] == "bridge2"
-    assert bridges[1]["running"] is False
+    assert bridges[1]["name"] == "lo-router-id"
+    assert bridges[1]["mac_address"] == "F2:7A:43:BA:E3:35"
+    assert bridges[1]["running"] is True
+    assert bridges[1]["vlan_filtering"] is False
 
     # Verify SSH client was called
     assert any("/interface/bridge/print" in call for call in ssh_client.calls)
@@ -279,13 +288,23 @@ Columns: NAME, MTU, ACTUAL-MTU, MAC-ADDRESS, PROTOCOL-MODE
 @pytest.mark.asyncio
 async def test_list_bridge_ports_ssh_fallback(monkeypatch: pytest.MonkeyPatch):
     """Test bridge port listing falls back to SSH when REST fails."""
-    # Create SSH client with sample output
-    ssh_output = """Flags: H - HW-OFFLOAD; I - INACTIVE; D - DISABLED
-Columns: INTERFACE, BRIDGE, HW, PVID, PRIORITY, PATH-COST
- #     INTERFACE  BRIDGE    HW  PVID  PRIORITY  PATH-COST
- 0  H  ether2     bridge1   yes 1     0x80      10
- 1  H  ether3     bridge1   yes 10    0x80      10
- 2     ether4     bridge2   no  1     0x80      10
+    # Create SSH client with actual RouterOS output from core-RB5009
+    ssh_output = """Flags: I - INACTIVE; D - DYNAMIC; H - HW-OFFLOAD
+Columns: INTERFACE, BRIDGE, HW, HORIZON, TRUSTED, FAST-LEAVE, BPDU-GUARD, EDGE, POINT-TO-POINT, PVID, FRAME-TYPES
+ #     INTERFACE  BRIDGE      HW   HORIZON  TRUSTED  FAST-LEAVE  BPDU-GUARD  EDGE  POINT-TO-POINT  PVID  FRAME-TYPES
+ 0   H ether2     bridge-lan  yes  none     no       no          yes         auto  auto              20  admit-all  
+ 1 I H ether3     bridge-lan  yes  none     no       no          yes         auto  auto              30  admit-all  
+ 2 I H ether4     bridge-lan  yes  none     no       no          yes         auto  auto              60  admit-all  
+;;; Uplink to ap-hAP-lite (trunk: VLAN20 untagged, 50 tagged)
+ 3 I H ether5     bridge-lan  yes  none     no       no          no          auto  auto              20  admit-all  
+ 4 I H ether6     bridge-lan  yes  none     no       no          yes         auto  auto              60  admit-all  
+ 5 I H ether7     bridge-lan  yes  none     no       no          yes         auto  auto              70  admit-all  
+;;; Uplink to ap-cAP-ac (trunk: VLAN20 untagged, 30/40 tagged)
+ 6   H ether8     bridge-lan  yes  none     no       no          no          auto  auto              20  admit-all  
+ 7  D  cap3       bridge-lan       none     no       no          no          yes   no                30  admit-all  
+ 8 ID  cap4       bridge-lan       none     no       no          no          yes   no                40  admit-all  
+ 9  D  cap1       bridge-lan       none     no       no          no          yes   no                30  admit-all  
+10 ID  cap2       bridge-lan       none     no       no          no          yes   no                40  admit-all  
 """
     ssh_client = _FakeSSHClient(ssh_output)
 
@@ -307,22 +326,39 @@ Columns: INTERFACE, BRIDGE, HW, PVID, PRIORITY, PATH-COST
     # Call should fall back to SSH
     ports = await service.list_bridge_ports("dev-1")
 
-    # Verify we got ports from SSH
-    assert len(ports) == 3
+    # Verify we got 11 ports
+    assert len(ports) == 11
+
+    # Port 0: ether2 - active, HW column=yes, PVID 20
     assert ports[0]["interface"] == "ether2"
-    assert ports[0]["bridge"] == "bridge1"
-    assert ports[0]["hw"] is True
-    assert ports[0]["pvid"] == 1
+    assert ports[0]["bridge"] == "bridge-lan"
+    assert ports[0]["hw"] is True  # HW column = yes
+    assert ports[0]["hw_offload_flag"] is True  # H flag present
+    assert ports[0]["disabled"] is False  # No I flag
+    assert ports[0]["pvid"] == 20
     assert ports[0]["transport"] == "ssh"
     assert ports[0]["fallback_used"] is True
 
+    # Port 1: ether3 - inactive (I flag), HW column=yes, PVID 30
     assert ports[1]["interface"] == "ether3"
-    assert ports[1]["pvid"] == 10
+    assert ports[1]["bridge"] == "bridge-lan"
+    assert ports[1]["hw"] is True  # HW column = yes
+    assert ports[1]["disabled"] is True  # Has I flag
+    assert ports[1]["pvid"] == 30
 
-    assert ports[2]["interface"] == "ether4"
-    assert ports[2]["bridge"] == "bridge2"
-    assert ports[2]["disabled"] is False  # D flag not set, so disabled is False
-    assert ports[2]["hw"] is False
+    # Port 7: cap3 - dynamic (D flag), HW column empty/no, PVID 30
+    assert ports[7]["interface"] == "cap3"
+    assert ports[7]["bridge"] == "bridge-lan"
+    assert ports[7]["disabled"] is False  # D flag = dynamic, not inactive
+    assert ports[7]["dynamic"] is True  # D flag present
+    assert ports[7]["hw"] is False  # HW column empty
+    assert ports[7]["pvid"] == 30
+
+    # Port 8: cap4 - inactive and dynamic (ID flags), PVID 40
+    assert ports[8]["interface"] == "cap4"
+    assert ports[8]["disabled"] is True  # I flag = inactive
+    assert ports[8]["dynamic"] is True  # D flag = dynamic
+    assert ports[8]["pvid"] == 40
 
     # Verify SSH client was called
     assert any("/interface/bridge/port/print" in call for call in ssh_client.calls)
@@ -353,21 +389,48 @@ async def test_parse_bridge_output_various_formats():
 @pytest.mark.asyncio
 async def test_parse_bridge_port_output_various_formats():
     """Test parsing bridge port output with various RouterOS formats."""
-    # Test with different flag combinations
-    output = """Flags: H - HW-OFFLOAD; I - INACTIVE; D - DISABLED
- #     INTERFACE  BRIDGE    HW  PVID  PRIORITY  PATH-COST
- 0  H  ether2     bridge1   yes 1     0x80      10
- 1  D  ether3     bridge1   no  100   0x90      20
- 2  HI ether4     bridge2   yes 1     0x80      10
+    # Test with actual RouterOS output format with flags and multiple columns
+    output = """Flags: I - INACTIVE; D - DYNAMIC; H - HW-OFFLOAD
+Columns: INTERFACE, BRIDGE, HW, HORIZON, TRUSTED, FAST-LEAVE, BPDU-GUARD, EDGE, POINT-TO-POINT, PVID, FRAME-TYPES
+ #     INTERFACE  BRIDGE      HW   HORIZON  TRUSTED  FAST-LEAVE  BPDU-GUARD  EDGE  POINT-TO-POINT  PVID  FRAME-TYPES
+ 0   H ether2     bridge-lan  yes  none     no       no          yes         auto  auto              20  admit-all
+ 1 I H ether3     bridge-lan  yes  none     no       no          yes         auto  auto              30  admit-all
+ 2 I H ether4     bridge-lan  yes  none     no       no          yes         auto  auto              60  admit-all
+ 3  D  cap1       bridge-lan       none     no       no          no          yes   no                30  admit-all
+ 4 ID  cap2       bridge-lan       none     no       no          no          yes   no                40  admit-all
 """
 
     ports = bridge_module.BridgeService._parse_bridge_port_print_output(output)
 
-    assert len(ports) == 3
-    assert ports[0]["disabled"] is False
-    assert ports[0]["hw"] is True
-    assert ports[0]["pvid"] == 1
-    assert ports[1]["disabled"] is True
-    assert ports[1]["hw"] is False
-    assert ports[1]["pvid"] == 100
-    assert ports[2]["disabled"] is False  # D flag not set
+    assert len(ports) == 5
+
+    # Port 0: ether2 - HW column=yes, PVID 20, hw_offload_flag from H in margin
+    assert ports[0]["interface"] == "ether2"
+    assert ports[0]["bridge"] == "bridge-lan"
+    assert ports[0]["hw"] is True  # HW column = yes
+    assert ports[0]["hw_offload_flag"] is True  # H flag present in margin
+    assert ports[0]["disabled"] is False  # No I flag
+    assert ports[0]["pvid"] == 20
+
+    # Port 1: ether3 - inactive (I flag), HW column=yes, PVID 30
+    assert ports[1]["interface"] == "ether3"
+    assert ports[1]["disabled"] is True  # I flag = inactive
+    assert ports[1]["hw"] is True  # HW column = yes
+    assert ports[1]["pvid"] == 30
+    assert ports[1]["horizon"] == "none"
+    assert ports[1]["edge"] == "auto"
+
+    # Port 3: cap1 - dynamic (D flag), HW column empty, PVID 30, edge=yes
+    assert ports[3]["interface"] == "cap1"
+    assert ports[3]["disabled"] is False  # D flag = dynamic, not inactive
+    assert ports[3]["dynamic"] is True  # D flag present
+    assert ports[3]["hw"] is False  # HW column empty (no)
+    assert ports[3]["pvid"] == 30
+    assert ports[3]["edge"] == "yes"
+    assert ports[3]["point_to_point"] == "no"
+
+    # Port 4: cap2 - inactive and dynamic (I D or ID flags), PVID 40
+    assert ports[4]["interface"] == "cap2"
+    assert ports[4]["disabled"] is True  # I flag = inactive
+    assert ports[4]["dynamic"] is True  # D flag = dynamic
+    assert ports[4]["pvid"] == 40

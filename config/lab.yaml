@@ -11,9 +11,9 @@ log_format: text
 # MCP (stdio for local development with Claude Desktop)
 mcp_transport: stdio
 
-# Database (SQLite for easy development)
-database_url: sqlite:///./data/routeros_mcp_lab.db
-database_echo: true
+# Database (SQLite for easy development with async driver)
+database_url: sqlite+aiosqlite:///./data/routeros_mcp_lab.db
+database_echo: false # Disabled for stdio mode (stdout is reserved for MCP protocol)
 
 # RouterOS (permissive for lab)
 routeros_rest_timeout_seconds: 10.0
@@ -23,6 +23,5 @@ routeros_retry_attempts: 2
 health_check_interval_seconds: 30
 health_check_jitter_seconds: 5
 
-# Security
-# encryption_key will use insecure default for lab (warning will be shown)
-# NEVER use this in production!
+# Security (lab encryption key - DO NOT use in production!)
+encryption_key: "e9IQ087sn4sumtRu6xA3vIuREHHllDYTUe1s-reUFZw="

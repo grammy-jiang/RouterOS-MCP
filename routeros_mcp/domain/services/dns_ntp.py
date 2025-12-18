@@ -80,6 +80,47 @@ def _parse_duration_to_ms(value: Any) -> float:
     return sign * _safe_float(text)
 
 
+def _parse_ttl_to_seconds(value: Any) -> int:
+    """Convert RouterOS TTL strings (e.g., '1w2d3h4m5s', '5m12s', '300') to seconds.
+
+    Returns 0 if value cannot be parsed.
+    """
+    if value is None:
+        return 0
+    if isinstance(value, (int, float)):
+        # Assume already in seconds
+        return int(value)
+
+    text = str(value).strip().lower()
+    if not text:
+        return 0
+
+    # Accept plain integer seconds
+    try:
+        return int(float(text))
+    except ValueError:
+        pass
+
+    import re
+
+    total = 0.0
+    # Find all occurrences like 10w, 2d, 3h, 4m, 5s (order flexible)
+    for num, unit in re.findall(r"(\d+(?:\.\d+)?)([wdhms])", text):
+        n = float(num)
+        if unit == "w":
+            total += n * 7 * 24 * 3600
+        elif unit == "d":
+            total += n * 24 * 3600
+        elif unit == "h":
+            total += n * 3600
+        elif unit == "m":
+            total += n * 60
+        elif unit == "s":
+            total += n
+
+    return int(total)
+
+
 class DNSNTPService:
     """Service for RouterOS DNS and NTP operations.
 
@@ -482,53 +523,102 @@ class DNSNTPService:
         ssh_client = await self.device_service.get_ssh_client(device_id)
 
         try:
-            output = await ssh_client.execute("/ip/dns/cache/print")
+            # Try key=value output format first (more robust)
+            output = await ssh_client.execute("/ip/dns/cache/print as-value without-paging")
+            entries: list[dict[str, Any]] = []
 
-            # Parse /ip/dns/cache/print output (table format)
-            result: list[dict[str, Any]] = []
-            lines = output.strip().split("\n")
+            if output.strip():  # Only parse if we got output
+                current: dict[str, str] = {}
 
-            for line in lines:
-                if not line.strip() or line.startswith("Flags:") or line.startswith("#"):
-                    continue
+                for raw_line in output.splitlines():
+                    line = raw_line.strip()
+                    if not line:
+                        # Commit current entry on blank separator
+                        # Accept entries with type+data present (name can be empty for root/NS records)
+                        if current.get("type") and (current.get("data") is not None):
+                            entries.append({
+                                "name": current.get("name", ""),
+                                "type": current.get("type", ""),
+                                "data": current.get("data", ""),
+                                "ttl": _parse_ttl_to_seconds(current.get("ttl")),
+                            })
+                        current = {}
+                        continue
 
-                if len(result) >= limit:
-                    break
+                    if line.lower().startswith("flags:") or line.startswith("#"):
+                        continue
 
-                # Table format: [id] [flags?] [name] [type] [data] [ttl]
-                parts = line.split()
-                if not parts or not (parts[0][0] == "*" or parts[0][0].isdigit()):
-                    continue
+                    # Parse key=value pairs on this line (could be one or many)
+                    for tok in line.split():
+                        if "=" not in tok:
+                            continue
+                        key, val = tok.split("=", 1)
+                        current[key.strip()] = val.strip().strip('"')
 
-                try:
-                    idx = 1
-                    # Check if second part is flags
-                    if len(parts) > 1 and len(parts[1]) <= 3 and not parts[1][0].isdigit():
-                        idx = 2
+                # Commit any trailing entry
+                if current.get("type") and (current.get("data") is not None):
+                    entries.append({
+                        "name": current.get("name", ""),
+                        "type": current.get("type", ""),
+                        "data": current.get("data", ""),
+                        "ttl": _parse_ttl_to_seconds(current.get("ttl")),
+                    })
 
-                    if len(parts) > idx + 2:
-                        name = parts[idx]
-                        type_val = parts[idx + 1]
-                        data = parts[idx + 2]
-                        ttl = 0
-
-                        if len(parts) > idx + 3:
-                            try:
-                                ttl = int(parts[idx + 3])
-                            except ValueError:
-                                pass
-
-                        result.append({
-                            "name": name,
-                            "type": type_val,
-                            "data": data,
-                            "ttl": ttl,
-                        })
-                except (IndexError, ValueError) as e:
-                    logger.debug(f"Failed to parse DNS cache line: {line}", exc_info=e)
-                    continue
-
-            return result, len(result)
+            # If as-value didn't produce results, try detail format
+            if not entries:
+                output = await ssh_client.execute("/ip/dns/cache/print detail without-paging")
+                logger.debug(f"DNS cache output (detail format): {len(output)} bytes")
+                
+                lines = output.strip().split("\n")
+                current_detail: dict[str, str] = {}
+                
+                for raw_line in lines:
+                    line = raw_line.strip()
+                    if not line or line.startswith("Flags:"):
+                        continue
+                    
+                    # Check if line starts with a number (new entry)
+                    if line and line[0].isdigit():
+                        # Commit previous entry
+                        if current_detail.get("type") and (current_detail.get("data") is not None):
+                            ttl_seconds = _parse_ttl_to_seconds(current_detail.get("ttl"))
+                            entries.append({
+                                "name": current_detail.get("name", "").strip('"'),
+                                "type": current_detail.get("type", ""),
+                                "data": current_detail.get("data", ""),
+                                "ttl": ttl_seconds,
+                            })
+                        current_detail = {}
+                    
+                    # Parse key=value pairs on this line
+                    # Split by spaces but respect quoted values
+                    import shlex
+                    try:
+                        tokens = shlex.split(line)
+                    except ValueError:
+                        # If shlex fails, fall back to simple split
+                        tokens = line.split()
+                    
+                    for token in tokens:
+                        if "=" in token:
+                            key, val = token.split("=", 1)
+                            current_detail[key.strip()] = val.strip().strip('"')
+                
+                # Commit any trailing entry
+                if current_detail.get("type") and (current_detail.get("data") is not None):
+                    ttl_seconds = _parse_ttl_to_seconds(current_detail.get("ttl"))
+                    entries.append({
+                        "name": current_detail.get("name", "").strip('"'),
+                        "type": current_detail.get("type", ""),
+                        "data": current_detail.get("data", ""),
+                        "ttl": ttl_seconds,
+                    })
+                
+                logger.debug(f"Parsed {len(entries)} DNS cache entries from detail format")
+            
+            total_count = len(entries)
+            result = entries[:limit]
+            return result, total_count
 
         finally:
             await ssh_client.close()
@@ -702,13 +792,14 @@ class DNSNTPService:
                 if not line.strip() or line.startswith("Flags:") or line.startswith("#"):
                     continue
 
-                # Continuation line for multi-value fields
-                if line[0].isspace() and ":" not in line and current_key:
+                # Continuation line for multi-value fields (indented lines without :)
+                if line[0].isspace() and ":" not in line:
                     cont_value = line.strip()
-                    if current_key == "servers" and cont_value:
-                        ntp_servers.append(cont_value)
-                    elif current_key == "dynamic-servers" and cont_value:
-                        dynamic_servers.append(cont_value)
+                    if cont_value:
+                        if current_key == "servers":
+                            ntp_servers.append(cont_value)
+                        elif current_key == "dynamic-servers":
+                            dynamic_servers.append(cont_value)
                     continue
 
                 # Table rows (e.g., "0   pool.ntp.org  unicast  true")
@@ -738,6 +829,7 @@ class DNSNTPService:
                                 ntp_servers = [s.strip() for s in value.split(",") if s.strip()]
                             else:
                                 ntp_servers = [value]
+                        # If no value on this line, subsequent indented lines will be captured as continuation
                     elif key == "dynamic-servers":
                         dynamic_servers = []
                         if value:
@@ -753,18 +845,18 @@ class DNSNTPService:
                         status = value or status
                     elif key in {"synced-server", "active-server", "primary-ntp"}:
                         synced_server = value
-                    elif key == "stratum":
-                        try:
-                            stratum = int(value)
-                        except (TypeError, ValueError):
-                            stratum = stratum
-                    elif key in {"synced-stratum", "active-stratum"}:
+                    elif key == "synced-stratum":
                         try:
                             synced_stratum = int(value)
                         except (TypeError, ValueError):
                             synced_stratum = synced_stratum
                         if stratum is None:
                             stratum = synced_stratum
+                    elif key in {"stratum", "active-stratum"}:
+                        try:
+                            stratum = int(value)
+                        except (TypeError, ValueError):
+                            stratum = stratum
                     elif key in {"offset", "primary-offset"}:
                         offset_ms = _parse_duration_to_ms(value)
                     elif key == "system-offset":

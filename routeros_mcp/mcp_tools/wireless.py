@@ -28,6 +28,13 @@ def register_wireless_tools(mcp: FastMCP, settings: Settings) -> None:
     """
     session_factory = get_session_factory(settings)
 
+    capsman_hint = (
+        "CAPsMAN note: This router appears to manage one or more CAP devices (APs) via CAPsMAN. "
+        "These results only reflect wireless interfaces/clients local to this device. "
+        "To view SSIDs/clients on CAP-managed APs, inspect CAPsMAN state (e.g., the CAPsMAN "
+        "registration table) or query the CAP device(s) directly."
+    )
+
     @mcp.tool()
     async def get_wireless_interfaces(device_id: str) -> dict[str, Any]:
         """List wireless interfaces with SSID, frequency, and power configuration.
@@ -76,15 +83,23 @@ def register_wireless_tools(mcp: FastMCP, settings: Settings) -> None:
                 # Get wireless interfaces
                 interfaces = await wireless_service.get_wireless_interfaces(device_id)
 
+                # Add CAPsMAN hint only when CAPsMAN-managed APs are detected.
+                capsman_has_aps = await wireless_service.has_capsman_managed_aps(device_id)
+
                 content = f"Found {len(interfaces)} wireless interface(s) on {device.name}"
+                if capsman_has_aps:
+                    content = f"{content}\n\n{capsman_hint}"
 
                 return format_tool_result(
                     content=content,
-                    meta={
-                        "device_id": device_id,
-                        "interfaces": interfaces,
-                        "total_count": len(interfaces),
-                    },
+                    meta=(
+                        {
+                            "device_id": device_id,
+                            "interfaces": interfaces,
+                            "total_count": len(interfaces),
+                            **({"hints": [capsman_hint]} if capsman_has_aps else {}),
+                        }
+                    ),
                 )
 
         except MCPError as e:
@@ -151,15 +166,23 @@ def register_wireless_tools(mcp: FastMCP, settings: Settings) -> None:
                 # Get wireless clients
                 clients = await wireless_service.get_wireless_clients(device_id)
 
+                # Add CAPsMAN hint only when CAPsMAN-managed APs are detected.
+                capsman_has_aps = await wireless_service.has_capsman_managed_aps(device_id)
+
                 content = f"Found {len(clients)} connected wireless client(s) on {device.name}"
+                if capsman_has_aps:
+                    content = f"{content}\n\n{capsman_hint}"
 
                 return format_tool_result(
                     content=content,
-                    meta={
-                        "device_id": device_id,
-                        "clients": clients,
-                        "total_count": len(clients),
-                    },
+                    meta=(
+                        {
+                            "device_id": device_id,
+                            "clients": clients,
+                            "total_count": len(clients),
+                            **({"hints": [capsman_hint]} if capsman_has_aps else {}),
+                        }
+                    ),
                 )
 
         except MCPError as e:

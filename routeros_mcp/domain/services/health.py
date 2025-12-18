@@ -71,14 +71,35 @@ class HealthService:
         # Get device
         device = await self.device_service.get_device(device_id)
 
-        # Try to check connectivity and get metrics
+        result = None
         try:
-            client = await self.device_service.get_rest_client(device_id)
-
-            # Get system resource metrics
-            resource_data = await client.get("/rest/system/resource")
-
-            await client.close()
+            # Try to check connectivity and get metrics
+            resource_data = None
+            try:
+                # Try REST API first
+                client = await self.device_service.get_rest_client(device_id)
+                resource_data = await client.get("/rest/system/resource")
+                await client.close()
+            except Exception as rest_error:
+                # Fall back to SSH if REST fails
+                logger.info(
+                    "REST API unavailable, falling back to SSH",
+                    extra={"device_id": device_id, "rest_error": str(rest_error)},
+                )
+                try:
+                    ssh_client = await self.device_service.get_ssh_client(device_id)
+                    # Execute RouterOS command to get system resources
+                    result_str = await ssh_client.execute("/system/resource/print")
+                    await ssh_client.close()
+                    
+                    # Parse SSH output into resource_data dict
+                    resource_data = self._parse_ssh_resource_output(result_str)
+                except Exception as ssh_error:
+                    logger.warning(
+                        "Both REST and SSH failed",
+                        extra={"device_id": device_id, "ssh_error": str(ssh_error)},
+                    )
+                    raise Exception(f"No available connection method: REST={rest_error}, SSH={ssh_error}")
 
             # Parse metrics
             cpu_usage = self._parse_cpu_usage(resource_data)
@@ -131,6 +152,7 @@ class HealthService:
                 metadata={
                     "routeros_version": device.routeros_version,
                     "hardware_model": device.hardware_model,
+                    "total_memory_bytes": memory_total,
                 },
             )
 
@@ -222,17 +244,26 @@ class HealthService:
         Args:
             result: Health check result to store
         """
+        # Calculate memory bytes from percentage if available
+        memory_used_bytes = None
+        memory_total_bytes = None
+        if result.memory_usage_percent is not None and result.metadata:
+            # Try to extract total memory from metadata if stored
+            total_mem = result.metadata.get("total_memory_bytes")
+            if total_mem:
+                memory_total_bytes = int(total_mem)
+                memory_used_bytes = int(total_mem * result.memory_usage_percent / 100)
+        
         health_check_orm = HealthCheckORM(
             id=f"hc-{result.device_id}-{int(result.timestamp.timestamp())}",
             device_id=result.device_id,
             status=result.status,
             timestamp=result.timestamp,
             cpu_usage_percent=result.cpu_usage_percent,
-            memory_usage_percent=result.memory_usage_percent,
+            memory_used_bytes=memory_used_bytes,
+            memory_total_bytes=memory_total_bytes,
             uptime_seconds=result.uptime_seconds,
-            issues=result.issues,
-            warnings=result.warnings,
-            metadata=result.metadata,
+            error_message="; ".join(result.issues) if result.issues else None,
         )
 
         self.session.add(health_check_orm)
@@ -296,6 +327,79 @@ class HealthService:
                 "Failed to broadcast health update notification",
                 extra={"device_id": device_id, "error": str(e)},
             )
+
+    def _parse_ssh_resource_output(self, output: str) -> dict:
+        """Parse SSH output from /system resource print into dict format.
+
+        Args:
+            output: Raw SSH command output
+
+        Returns:
+            Dictionary with resource data compatible with REST API format
+        """
+        resource_data = {}
+        
+        # Parse key-value pairs from RouterOS output
+        # Example format:
+        #   uptime: 6d8h41m24s
+        #   version: 7.20.6 (stable)
+        #   cpu-load: 0%
+        #   free-memory: 858.6MiB
+        #   total-memory: 1024.0MiB
+        
+        for line in output.split('\n'):
+            line = line.strip()
+            if ':' in line:
+                key, value = line.split(':', 1)
+                key = key.strip()
+                value = value.strip()
+                
+                # Convert to REST API format (using hyphens)
+                if key == "cpu-load":
+                    # Remove % sign and convert to int
+                    resource_data["cpu-load"] = int(value.rstrip('%')) if value.rstrip('%').isdigit() else 0
+                elif key == "free-memory":
+                    # Convert MiB/GiB to bytes
+                    resource_data["free-memory"] = self._parse_memory_value(value)
+                elif key == "total-memory":
+                    # Convert MiB/GiB to bytes
+                    resource_data["total-memory"] = self._parse_memory_value(value)
+                elif key == "uptime":
+                    resource_data["uptime"] = value
+                elif key == "version":
+                    resource_data["version"] = value
+        
+        return resource_data
+    
+    def _parse_memory_value(self, value: str) -> int:
+        """Parse memory value from RouterOS format to bytes.
+        
+        Args:
+            value: Memory value like "858.6MiB" or "1024.0MiB" or "1.5GiB"
+            
+        Returns:
+            Memory value in bytes
+        """
+        value = value.strip()
+        
+        # Extract numeric part and unit
+        if 'GiB' in value:
+            num = float(value.replace('GiB', '').strip())
+            return int(num * 1024 * 1024 * 1024)
+        elif 'MiB' in value:
+            num = float(value.replace('MiB', '').strip())
+            return int(num * 1024 * 1024)
+        elif 'KiB' in value:
+            num = float(value.replace('KiB', '').strip())
+            return int(num * 1024)
+        else:
+            # Assume it's already in bytes
+            try:
+                return int(float(value))
+            except ValueError:
+                return 0
+        
+        return resource_data
 
     def _parse_cpu_usage(self, resource_data: dict) -> float:
         """Parse CPU usage from RouterOS resource data.

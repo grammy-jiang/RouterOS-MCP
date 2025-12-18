@@ -5,6 +5,7 @@ pools, and active leases.
 """
 
 import logging
+import shlex
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -168,53 +169,52 @@ class DHCPService:
         try:
             output = await ssh_client.execute("/ip/dhcp-server/print")
 
-            # Parse /ip/dhcp-server/print output (table format)
+            # Parse /ip/dhcp-server/print output (standard table format)
+            # Format:
+            # Columns: NAME, INTERFACE, ADDRESS-POOL, LEASE-TIME
+            # # NAME                 INTERFACE       ADDRESS-POOL         LEASE-TIME
+            # 0 dhcp-vlan20-mgmt     vlan20-mgmt     pool-vlan20-mgmt     30m
             servers = []
             lines = output.strip().split("\n")
 
             for line in lines:
-                if not line.strip() or line.startswith("Flags:") or line.startswith("#"):
+                # Skip empty lines, Columns header, and comment lines
+                if not line.strip() or line.startswith("Columns:") or line.startswith("#") or line.startswith("Flags:"):
                     continue
 
-                # Table format varies, but typically:
-                # [flags] [id] [name] [interface] [lease-time] [address-pool]
                 parts = line.split()
-                if not parts or not (parts[0][0] in {"*", "X", "D"} or parts[0][0].isdigit()):
+                if not parts:
                     continue
 
                 try:
-                    # Parse based on flags presence
-                    idx = 0
-                    flags = ""
-                    
-                    # Check for flags (usually single char or short string)
-                    if parts[idx] and len(parts[idx]) <= 3 and not parts[idx][0].isdigit():
-                        flags = parts[idx]
-                        idx += 1
-                    
-                    # Skip ID if present (numeric)
-                    if idx < len(parts) and parts[idx][0].isdigit():
-                        idx += 1
-                    
-                    # Remaining parts: name, interface, lease-time, address-pool
-                    if idx + 3 < len(parts):
-                        name = parts[idx]
-                        interface = parts[idx + 1]
-                        lease_time = parts[idx + 2]
-                        address_pool = parts[idx + 3]
-                        
-                        disabled = "X" in flags
-                        
+                    # Standard format: [id] [name] [interface] [address_pool] [lease_time]
+                    # Example: 0 dhcp-vlan20-mgmt vlan20-mgmt pool-vlan20-mgmt 30m
+                    # IDs are numeric (0, 1, 2, ...)
+                    if not parts[0][0].isdigit():
+                        # Might have flags (X for disabled, D for dynamic, etc.)
+                        # Skip flags for now, parse from position 1
+                        if len(parts) < 2 or not parts[1][0].isdigit():
+                            continue
+                        parts = parts[1:]
+
+                    # After ensuring first part is ID
+                    if len(parts) >= 5:
+                        # id, name, interface, address_pool, lease_time
+                        name = parts[1]
+                        interface = parts[2]
+                        address_pool = parts[3]
+                        lease_time = parts[4]
+                        disabled = False  # No explicit disabled flag in standard output
+
                         server_data = {
                             "name": name,
                             "interface": interface,
-                            "lease_time": lease_time,
                             "address_pool": address_pool,
+                            "lease_time": lease_time,
                             "disabled": disabled,
                         }
-                        
                         servers.append(server_data)
-                        
+
                 except (IndexError, ValueError) as e:
                     logger.debug("Failed to parse DHCP server line: %s", line, exc_info=e)
                     continue
@@ -359,65 +359,122 @@ class DHCPService:
         ssh_client = await self.device_service.get_ssh_client(device_id)
 
         try:
-            output = await ssh_client.execute("/ip/dhcp-server/lease/print")
+            # Over SSH, RouterOS may emit a shortened table which omits STATUS/LAST-SEEN columns.
+            # Using 'detail' ensures we can reliably extract status=bound and last-seen values.
+            # Use without-paging to avoid truncation.
+            output = await ssh_client.execute("/ip/dhcp-server/lease/print detail without-paging")
 
-            # Parse /ip/dhcp-server/lease/print output (table format)
+            # Parse /ip/dhcp-server/lease/print detail output.
+            # Example block:
+            #   0   ;;; cAP ac (RBcAPGi-5acD2nD)
+            #        address=192.168.20.251 mac-address=... server=... status=bound ... last-seen=13m43s
+            #        host-name="ap-cAP-ac"
+            #
+            #   4 D address=192.168.20.248 mac-address=... status=bound ... last-seen=9m56s
             active_leases = []
-            lines = output.strip().split("\n")
+            normalized = output.replace("\r", "")
+            lines = normalized.splitlines()
+
+            current: dict[str, Any] = {}
+            current_flags = ""
+
+            def flush_current() -> None:
+                nonlocal current, current_flags
+                if not current:
+                    return
+
+                status = current.get("status", "")
+                if status == "bound":
+                    lease_data = {
+                        "address": current.get("address", ""),
+                        "mac_address": current.get("mac-address", ""),
+                        "host_name": current.get("host-name", ""),
+                        "server": current.get("server", ""),
+                        "status": status,
+                        "last_seen": current.get("last-seen", ""),
+                    }
+
+                    comment = current.get("comment", "")
+                    if comment:
+                        lease_data["comment"] = comment
+
+                    if "D" in current_flags:
+                        lease_data["dynamic"] = True
+
+                    # Ensure required fields exist before adding.
+                    if lease_data["address"] and lease_data["mac_address"] and lease_data["server"]:
+                        active_leases.append(lease_data)
+
+                current = {}
+                current_flags = ""
 
             for line in lines:
-                if not line.strip() or line.startswith("Flags:") or line.startswith("#"):
+                stripped = line.strip()
+
+                if not stripped:
+                    flush_current()
                     continue
 
-                # Table format: [id] [flags] [address] [mac-address] [client-id] [host-name] [server]
-                # Example: " 0 D 192.168.1.10   00:11:22:33:44:55  1:00:11:22:33:44:55 client1     dhcp1"
-                parts = line.split()
-                if not parts:
+                # Detail header line example:
+                #   0   ;;; Comment
+                #   4 D address=... mac-address=...
+                if stripped.startswith("Flags:"):
+                    # Header line in detail output; ignore.
                     continue
 
-                try:
-                    idx = 0
-                    flags = ""
-                    
-                    # Skip ID (numeric column, typically first)
-                    if idx < len(parts) and parts[idx][0].isdigit():
-                        idx += 1
-                    
-                    # Check for flags (single char or short string like D, X, DX, etc.)
-                    if idx < len(parts) and len(parts[idx]) <= 3 and parts[idx][0] in {"*", "X", "D", "R", "B"}:
-                        flags = parts[idx]
-                        idx += 1
-                    
-                    # Only process bound leases (R flag or bound in flags)
-                    # X = disabled, D = dynamic, R = radius, B = blocked
-                    # Active lease typically has D flag without X
-                    disabled = "X" in flags
-                    is_bound = "D" in flags and not disabled
-                    
-                    if not is_bound:
+                # New record begins with numeric id.
+                if stripped[0].isdigit():
+                    flush_current()
+
+                    # Split the beginning into id + optional flags.
+                    parts = stripped.split(None, 2)
+                    if not parts:
                         continue
-                    
-                    # Parse lease fields: address, mac-address, client-id, host-name, server
-                    # Extract up to 5 fields, pad with empty strings if missing
-                    if idx < len(parts):
-                        address, mac_address, client_id, host_name, server = (
-                            (parts[idx:idx+5] + [""] * 5)[:5]
-                        )
-                        
-                        lease_data = {
-                            "address": address,
-                            "mac_address": mac_address,
-                            "client_id": client_id,
-                            "host_name": host_name,
-                            "server": server,
-                            "status": "bound",
-                        }
-                        
-                        active_leases.append(lease_data)
-                        
-                except (IndexError, ValueError) as e:
-                    logger.debug("Failed to parse DHCP lease line: %s", line, exc_info=e)
+
+                    # parts[0] is record id (unused)
+                    remainder = ""
+                    if len(parts) >= 2 and len(parts[1]) <= 3 and parts[1][0] in {"*", "X", "D", "R", "B"}:
+                        current_flags = parts[1]
+                        remainder = parts[2] if len(parts) == 3 else ""
+                    else:
+                        current_flags = ""
+                        remainder = parts[1] if len(parts) >= 2 else ""
+                        if len(parts) == 3:
+                            remainder = parts[1] + " " + parts[2]
+
+                    # Extract comment if present on the header line.
+                    if ";;;" in remainder:
+                        comment_idx = remainder.find(";;;")
+                        current["comment"] = remainder[comment_idx + 3 :].strip()
+                        remainder = remainder[:comment_idx].strip()
+
+                    # Parse any key=value tokens that also appear on the header line.
+                    if remainder:
+                        try:
+                            tokens = shlex.split(remainder)
+                        except ValueError:
+                            tokens = remainder.split()
+                        for token in tokens:
+                            if "=" not in token:
+                                continue
+                            k, v = token.split("=", 1)
+                            current[k] = v
+
                     continue
+
+                # Continuation lines are key=value tokens (often indented).
+                try:
+                    tokens = shlex.split(stripped)
+                except ValueError:
+                    tokens = stripped.split()
+                for token in tokens:
+                    if "=" not in token:
+                        continue
+                    k, v = token.split("=", 1)
+                    current[k] = v
+
+            # Flush last block.
+            flush_current()
 
             return {
                 "leases": active_leases,

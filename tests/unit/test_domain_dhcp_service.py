@@ -79,14 +79,52 @@ class FakeSSHClient:
     async def execute(self, command):
         self.calls.append(("execute", command))
         if command == "/ip/dhcp-server/print":
-            return """ #   NAME   INTERFACE  LEASE-TIME  ADDRESS-POOL
- 0   dhcp1  bridge     10m         pool1"""
-        elif command == "/ip/dhcp-server/lease/print":
+            return """Columns: NAME, INTERFACE, ADDRESS-POOL, LEASE-TIME
+# NAME                 INTERFACE       ADDRESS-POOL         LEASE-TIME
+0 dhcp-vlan20-mgmt     vlan20-mgmt     pool-vlan20-mgmt     30m       
+1 dhcp-vlan30-home     vlan30-home     pool-vlan30-home     30m       
+2 dhcp-vlan40-guest    vlan40-guest    pool-vlan40-guest    30m       
+3 dhcp-vlan50-iot      vlan50-iot      pool-vlan50-iot      30m       
+4 dhcp-vlan60-homelab  vlan60-homelab  pool-vlan60-homelab  30m       
+5 dhcp-vlan70-test     vlan70-test     pool-vlan70-test     30m"""
+        elif command.startswith("/ip/dhcp-server/lease/print"):
+            # Emulate RouterOS SSH output for `print detail` (reliable status/last-seen fields)
             return """Flags: X - disabled, R - radius, D - dynamic, B - blocked
- #   ADDRESS        MAC-ADDRESS        CLIENT-ID          HOST-NAME    SERVER
- 0 D 192.168.1.10   00:11:22:33:44:55  1:00:11:22:33:44:55 client1     dhcp1
- 1 D 192.168.1.11   AA:BB:CC:DD:EE:FF                     client2     dhcp1
- 2 X 192.168.1.12   11:22:33:44:55:66                                 dhcp1"""
+ 0   ;;; cAP ac (RBcAPGi-5acD2nD)
+     address=192.168.20.251 mac-address=18:FD:74:7C:7B:4F server=dhcp-vlan20-mgmt 
+     status=bound last-seen=6m33s
+     host-name=ap-cAP-ac
+
+ 1   ;;; hAP lite (RB941-2nD)
+     address=192.168.20.252 mac-address=6C:3B:6B:6D:C2:A2 server=dhcp-vlan20-mgmt 
+     status=waiting last-seen=never
+
+ 2   ;;; MCP Server on Raspberry Pi 3B
+     address=192.168.30.247 mac-address=B8:27:EB:E0:5C:A0 server=dhcp-vlan30-home 
+     status=bound last-seen=12m43s
+     host-name=MCPServer
+
+ 3   ;;; Xiaomi Pad 6 Pro
+     address=192.168.30.252 mac-address=5E:5E:90:C4:91:3C server=dhcp-vlan30-home 
+     status=bound last-seen=11m43s
+     host-name=Xiaomi-Pad-6-Pro
+
+ 4 D address=192.168.20.248 mac-address=00:E0:4C:34:5D:51 server=dhcp-vlan20-mgmt 
+     status=bound last-seen=2m46s
+
+ 5 D address=192.168.30.242 mac-address=0A:AF:A0:8D:C9:82 server=dhcp-vlan30-home 
+     status=bound last-seen=1m20s
+
+ 6 D address=192.168.30.253 mac-address=9A:45:26:5F:9C:5C server=dhcp-vlan30-home 
+     status=bound last-seen=4m54s
+
+ 7 D address=192.168.30.243 mac-address=2E:1A:66:2A:DB:31 server=dhcp-vlan30-home 
+     status=bound last-seen=12m14s
+
+ 8 D address=192.168.30.241 mac-address=D4:D2:52:3F:6F:C9 server=dhcp-vlan30-home 
+     status=bound last-seen=27m43s
+     host-name=SurfacePro7
+"""
         return ""
 
     async def close(self):
@@ -152,14 +190,23 @@ async def test_get_dhcp_server_status_ssh_fallback(service):
 
     result = await svc.get_dhcp_server_status("dev1")
 
-    assert result["total_count"] == 1
-    assert len(result["servers"]) == 1
+    assert result["total_count"] == 6
+    assert len(result["servers"]) == 6
 
+    # Check first server
     server = result["servers"][0]
-    assert server["name"] == "dhcp1"
-    assert server["interface"] == "bridge"
-    assert server["lease_time"] == "10m"
-    assert server["address_pool"] == "pool1"
+    assert server["name"] == "dhcp-vlan20-mgmt"
+    assert server["interface"] == "vlan20-mgmt"
+    assert server["address_pool"] == "pool-vlan20-mgmt"
+    assert server["lease_time"] == "30m"
+    assert server["disabled"] is False
+
+    # Check last server
+    server = result["servers"][5]
+    assert server["name"] == "dhcp-vlan70-test"
+    assert server["interface"] == "vlan70-test"
+    assert server["address_pool"] == "pool-vlan70-test"
+    assert server["lease_time"] == "30m"
     assert server["disabled"] is False
 
     assert result["transport"] == "ssh"
@@ -200,19 +247,41 @@ async def test_get_dhcp_leases_ssh_fallback(service):
 
     result = await svc.get_dhcp_leases("dev1")
 
-    # SSH should return 2 active leases (D flag, not X)
-    assert result["total_count"] == 2
-    assert len(result["leases"]) == 2
+    # SSH should return 8 bound leases (exclude ID 1 with "waiting" status)
+    assert result["total_count"] == 8
+    assert len(result["leases"]) == 8
 
+    # Check first lease with comment
     lease1 = result["leases"][0]
-    assert lease1["address"] == "192.168.1.10"
-    assert lease1["mac_address"] == "00:11:22:33:44:55"
-    assert lease1["host_name"] == "client1"
+    assert lease1["address"] == "192.168.20.251"
+    assert lease1["mac_address"] == "18:FD:74:7C:7B:4F"
+    assert lease1["host_name"] == "ap-cAP-ac"
+    assert lease1["server"] == "dhcp-vlan20-mgmt"
     assert lease1["status"] == "bound"
+    assert lease1["last_seen"] == "6m33s"
+    assert lease1["comment"] == "cAP ac (RBcAPGi-5acD2nD)"
 
+    # Check second lease (MCP Server on Raspberry Pi)
     lease2 = result["leases"][1]
-    assert lease2["address"] == "192.168.1.11"
-    assert lease2["mac_address"] == "AA:BB:CC:DD:EE:FF"
+    assert lease2["address"] == "192.168.30.247"
+    assert lease2["host_name"] == "MCPServer"
+    assert lease2["comment"] == "MCP Server on Raspberry Pi 3B"
+
+    # Check fourth returned lease (dynamic flag, no hostname, no comment)
+    # Returned order excludes the waiting lease, so this is ID 4.
+    lease4 = result["leases"][3]
+    assert lease4["address"] == "192.168.20.248"
+    assert lease4["host_name"] == ""
+    assert lease4["dynamic"] is True
+    assert "comment" not in lease4  # No comment for this entry
+
+    # Check last lease (new dynamic with hostname)
+    last = result["leases"][-1]
+    assert last["address"] == "192.168.30.241"
+    assert last["host_name"] == "SurfacePro7"
+    assert last["server"] == "dhcp-vlan30-home"
+    assert last["status"] == "bound"
+    assert last["dynamic"] is True
 
     assert result["transport"] == "ssh"
     assert result["fallback_used"] is True
@@ -283,21 +352,24 @@ async def test_get_dhcp_server_status_rest_normalizes_single_dict_and_includes_o
 
 
 @pytest.mark.asyncio
-async def test_get_dhcp_server_status_ssh_parses_flags_and_disabled(service):
+async def test_get_dhcp_server_status_ssh_parses_multiple_servers(service):
     svc, device_service = service
     device_service.rest_fails = True
 
-    async def execute_with_flags(command):
-        if command == "/ip/dhcp-server/print":
-            return """ #   NAME   INTERFACE  LEASE-TIME  ADDRESS-POOL
-X 0   dhcp1  bridge     10m         pool1"""
-        return await FakeSSHClient().execute(command)
-
-    device_service.ssh_client.execute = execute_with_flags
-
+    # Test with actual device output format
     result = await svc.get_dhcp_server_status("dev1")
-    assert result["total_count"] == 1
-    assert result["servers"][0]["disabled"] is True
+    
+    # Should parse 6 DHCP servers from FakeSSHClient
+    assert result["total_count"] == 6
+    assert len(result["servers"]) == 6
+    
+    # Verify each server has required fields
+    for server in result["servers"]:
+        assert "name" in server
+        assert "interface" in server
+        assert "address_pool" in server
+        assert "lease_time" in server
+        assert "disabled" in server
 
 
 @pytest.mark.asyncio

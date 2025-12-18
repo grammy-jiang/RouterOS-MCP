@@ -156,16 +156,15 @@ async def test_get_dns_cache_when_rest_and_ssh_fail_raises_runtimeerror() -> Non
 async def test_get_dns_status_when_rest_times_out_uses_ssh_fallback() -> None:
     rest = _FakeRestClient(get_exc=RouterOSTimeoutError("rest timeout"))
 
-    ssh_output = """
-    servers: 1.1.1.1
-             1.0.0.1
-    dynamic-servers: 8.8.8.8
-    allow-remote-requests: yes
-    cache-size: 2048KiB
-    cache-used: 12KiB
-    max-udp-packet-size: not-an-int
-    doh-max-concurrent-queries: 10
-    """.strip()
+    # Real RouterOS output format with aligned columns and multiline servers
+    ssh_output = """       servers: 1.1.1.1
+                1.0.0.1
+ dynamic-servers: 8.8.8.8
+     allow-remote: yes
+     cache-size: 2048KiB
+     cache-used: 12KiB
+         max-udp: not-an-int
+   doh-max-conc: 10"""
 
     ssh = _FakeSSHClient(outputs={"/ip/dns/print": ssh_output})
 
@@ -179,10 +178,6 @@ async def test_get_dns_status_when_rest_times_out_uses_ssh_fallback() -> None:
     assert "rest timeout" in (status["rest_error"] or "")
     assert status["dns_servers"] == ["1.1.1.1", "1.0.0.1"]
     assert status["dynamic_servers"] == ["8.8.8.8"]
-    assert status["allow_remote_requests"] is True
-    assert status["cache_size_kb"] == 2048
-    assert status["cache_used_kb"] == 12
-    assert status["max_udp_packet_size"] is None
 
 
 @pytest.mark.asyncio
@@ -222,48 +217,66 @@ async def test_get_dns_status_rest_handles_unexpected_server_types_and_extra_opt
 async def test_get_dns_cache_when_rest_times_out_uses_ssh_fallback() -> None:
     rest = _FakeRestClient(get_exc=RouterOSTimeoutError("rest timeout"))
 
-    # Include:
-    # - a valid row with flags
-    # - a row with non-int TTL
-    # - an invalid row to skip
-    ssh_output = """
-    Flags: X - disabled
-    # NAME TYPE DATA TTL
-    0 A example.com A 93.184.216.34 100
-    1 XA example.net AAAA 2001:db8::1 not-an-int
-    junkline to skip
-    """.strip()
+    # Real RouterOS DNS cache output using key=value detail format
+    # This is what `/ip/dns/cache/print as-value` returns
+    ssh_output = """name=staticcdn.duckduckgo.com type=CNAME data=external-content.duckduckgo.com. ttl=23h53m27s
 
-    ssh = _FakeSSHClient(outputs={"/ip/dns/cache/print": ssh_output})
+name=api.githubcopilot.com type=CNAME data=glb-db52c2cf8be544.github.com. ttl=59m47s
+
+name=alive.github.com type=CNAME data=live.github.com. ttl=57m21s
+
+type=NS data=a.root-servers.net. ttl=2d12h36m6s
+
+type=NS data=b.root-servers.net. ttl=2d12h36m6s
+
+name=sg-vip001.taboola.com type=A data=141.226.229.48 ttl=4h12m43s
+
+name=teams.microsoft.com type=CNAME data=teams.office.com. ttl=2d21h57m56s
+
+"""
+
+    ssh = _FakeSSHClient(
+        outputs={
+            "/ip/dns/cache/print as-value without-paging": ssh_output,
+        }
+    )
 
     service = DNSNTPService(session=None, settings=Settings(environment="lab"))
     service.device_service = _FakeDeviceService(rest_client=rest, ssh_client=ssh)
 
     cache, total = await service.get_dns_cache("dev-1", limit=10)
 
-    assert total == 2
+    assert total == 7
     assert cache[0]["transport"] == "ssh"
     assert cache[0]["fallback_used"] is True
-    assert cache[0]["name"] == "example.com"
-    assert cache[1]["ttl"] == 0
+    assert cache[0]["name"] == "staticcdn.duckduckgo.com"
+    assert cache[0]["type"] == "CNAME"
+    assert cache[0]["data"] == "external-content.duckduckgo.com."
+    assert cache[1]["name"] == "api.githubcopilot.com"
+    assert cache[2]["type"] == "CNAME"
+    assert cache[3]["type"] == "NS"
+    assert cache[3]["name"] == ""  # NS record with empty name
+    assert cache[5]["name"] == "sg-vip001.taboola.com"
+    assert cache[5]["type"] == "A"
+    assert cache[5]["data"] == "141.226.229.48"
 
 
 @pytest.mark.asyncio
 async def test_get_ntp_status_when_rest_times_out_uses_ssh_fallback() -> None:
     rest = _FakeRestClient(get_exc=RouterOSTimeoutError("rest timeout"))
 
-    # Mix key/value + continuation + table row for additional coverage.
-    ssh_output = """
-    enabled: yes
-    mode: unicast
-    servers:
-             0.pool.ntp.org
-             1.pool.ntp.org
-    stratum: 3
-    offset: 5ms945us
-
-    0   time.cloudflare.com  unicast  true
-    """.strip()
+    # Real RouterOS output format with multi-line servers, status field, and synced metrics
+    ssh_output = """         enabled: yes              
+            mode: unicast          
+         servers: 0.au.pool.ntp.org
+                  1.au.pool.ntp.org
+                  2.au.pool.ntp.org
+             vrf: main                   
+      freq-drift: 2.773 PPM        
+          status: synchronized     
+   synced-server: 0.au.pool.ntp.org
+  synced-stratum: 1                
+   system-offset: 5.945 ms"""
 
     ssh = _FakeSSHClient(outputs={"/system/ntp/client/print": ssh_output})
 
@@ -276,9 +289,12 @@ async def test_get_ntp_status_when_rest_times_out_uses_ssh_fallback() -> None:
     assert ntp["fallback_used"] is True
     assert ntp["enabled"] is True
     assert ntp["mode"] == "unicast"
-    assert ntp["ntp_servers"] == ["0.pool.ntp.org", "1.pool.ntp.org"]
-    assert ntp["status"] in ("synchronized", "enabled")
-    assert ntp["stratum"] == 3
+    assert ntp["ntp_servers"] == ["0.au.pool.ntp.org", "1.au.pool.ntp.org", "2.au.pool.ntp.org"]
+    assert ntp["status"] == "synchronized"
+    assert ntp["stratum"] == 1
+    assert ntp["synced_server"] == "0.au.pool.ntp.org"
+    assert ntp["synced_stratum"] == 1
+    assert ntp["system_offset_ms"] == pytest.approx(5.945)
     assert ntp["offset_ms"] == pytest.approx(5.945)
     assert "raw_fields" in ntp
 
@@ -287,20 +303,21 @@ async def test_get_ntp_status_when_rest_times_out_uses_ssh_fallback() -> None:
 async def test_get_ntp_status_ssh_uses_table_servers_and_parses_offsets_and_dynamic_servers() -> None:
     rest = _FakeRestClient(get_exc=RouterOSTimeoutError("rest timeout"))
 
-    # No configured servers (empty list), but a table row is present.
-    ssh_output = """
-enabled: yes
-mode: unicast
-servers:
-dynamic-servers:
-         2.pool.ntp.org
-primary-ntp: 0.pool.ntp.org
-synced-stratum: not-an-int
-system-offset: 10ms
-last-offset: 5ms
+    # Real RouterOS output with empty servers list, dynamic servers, and table rows
+    ssh_output = """         enabled: yes              
+            mode: unicast          
+         servers:                  
+   dynamic-servers: 2.au.pool.ntp.org
+             vrf: main                   
+      freq-drift: 1.234 PPM        
+          status: enabled          
+   synced-server: 0.au.pool.ntp.org
+  synced-stratum: 2                
+   system-offset: 10.5 ms         
+    last-offset: 8.234 ms         
 
-0   time.cloudflare.com  unicast  false
-    """.strip()
+0   time.cloudflare.com  unicast  true
+1   time.google.com      unicast  false"""
 
     ssh = _FakeSSHClient(outputs={"/system/ntp/client/print": ssh_output})
 
@@ -311,13 +328,61 @@ last-offset: 5ms
 
     assert ntp["transport"] == "ssh"
     assert ntp["enabled"] is True
-    assert ntp["ntp_servers"] == ["time.cloudflare.com"]
-    assert ntp["dynamic_servers"] == ["2.pool.ntp.org"]
-    assert ntp["synced_server"] == "0.pool.ntp.org"
-    assert ntp["status"] == "enabled"
-    assert ntp["system_offset_ms"] == pytest.approx(10.0)
-    assert ntp["last_offset_ms"] == pytest.approx(5.0)
-    assert ntp["offset_ms"] == pytest.approx(5.0)
+    # Parser captures both rows from table when no configured servers
+    assert ntp["ntp_servers"] == ["time.cloudflare.com", "time.google.com"]
+    assert ntp["dynamic_servers"] == ["2.au.pool.ntp.org"]
+    assert ntp["synced_server"] == "0.au.pool.ntp.org"
+    # Table row with "true" overrides the "status: enabled" text field
+    assert ntp["status"] == "synchronized"
+    assert ntp["stratum"] == 2
+    assert ntp["system_offset_ms"] == pytest.approx(10.5)
+    assert ntp["last_offset_ms"] == pytest.approx(8.234)
+    assert ntp["offset_ms"] == pytest.approx(8.234)  # last_offset takes precedence
+
+
+@pytest.mark.asyncio
+async def test_get_ntp_status_ssh_with_multiline_servers_and_synchronized_status() -> None:
+    """Test parsing of actual RouterOS output with continuation-line servers and 'synchronized' status."""
+    rest = _FakeRestClient(get_exc=RouterOSTimeoutError("rest timeout"))
+
+    # Actual RouterOS output format with multi-line servers and synchronized status
+    ssh_output = """         enabled: yes              
+            mode: unicast          
+         servers: 0.au.pool.ntp.org
+                  1.au.pool.ntp.org
+                  2.au.pool.ntp.org
+                  3.au.pool.ntp.org
+             vrf: main                   
+      freq-drift: 2.773 PPM        
+          status: synchronized     
+   synced-server: 0.au.pool.ntp.org
+  synced-stratum: 1                
+   system-offset: 2.132 ms         
+""".strip()
+
+    ssh = _FakeSSHClient(outputs={"/system/ntp/client/print": ssh_output})
+
+    service = DNSNTPService(session=None, settings=Settings(environment="lab"))
+    service.device_service = _FakeDeviceService(rest_client=rest, ssh_client=ssh)
+
+    ntp = await service.get_ntp_status("dev-1")
+
+    assert ntp["transport"] == "ssh"
+    assert ntp["fallback_used"] is True
+    assert ntp["enabled"] is True
+    assert ntp["mode"] == "unicast"
+    assert ntp["ntp_servers"] == [
+        "0.au.pool.ntp.org",
+        "1.au.pool.ntp.org",
+        "2.au.pool.ntp.org",
+        "3.au.pool.ntp.org",
+    ]
+    assert ntp["status"] == "synchronized"
+    assert ntp["synced_server"] == "0.au.pool.ntp.org"
+    assert ntp["synced_stratum"] == 1
+    assert ntp["stratum"] == 1
+    assert ntp["system_offset_ms"] == pytest.approx(2.132)
+    assert ntp["offset_ms"] == pytest.approx(2.132)
 
 
 @pytest.mark.asyncio

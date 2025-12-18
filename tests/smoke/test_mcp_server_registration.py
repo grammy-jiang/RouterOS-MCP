@@ -21,7 +21,7 @@ def test_mcp_server_initializes_with_tools() -> None:
     assert hasattr(server.mcp, "tool")
     assert callable(getattr(server.mcp, "tool"))
 
-    tools = asyncio.get_event_loop().run_until_complete(server.mcp.get_tools())
+    tools = asyncio.run(server.mcp.get_tools())
     # fastmcp returns a list of tool identifiers (strings)
     names = set(tools)
     assert "echo" in names
@@ -31,7 +31,7 @@ def test_mcp_server_initializes_with_tools() -> None:
 def test_create_mcp_server_factory_returns_instance() -> None:
     """Factory helper should asynchronously create a RouterOSMCPServer instance."""
 
-    server = asyncio.get_event_loop().run_until_complete(create_mcp_server(Settings()))
+    server = asyncio.run(create_mcp_server(Settings()))
     assert isinstance(server, RouterOSMCPServer)
     assert server.settings.environment == "lab"
 

@@ -28,6 +28,10 @@ class _FakeDeviceService:
 class _FakeWirelessService:
     """Fake wireless service for testing."""
 
+    async def has_capsman_managed_aps(self, device_id: str) -> bool:
+        # Default e2e behavior: no CAPsMAN-managed APs detected, so tools omit CAPsMAN hints.
+        return False
+
     async def get_wireless_interfaces(self, device_id: str):
         return [
             {

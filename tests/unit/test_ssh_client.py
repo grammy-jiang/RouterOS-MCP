@@ -81,11 +81,21 @@ class TestRouterOSSSHClient:
         assert "/ip/dns/print" in ALLOWED_SSH_COMMANDS
         assert "/system/ntp/client/print" in ALLOWED_SSH_COMMANDS
         assert "/ip/dns/cache/print" in ALLOWED_SSH_COMMANDS
+        assert "/interface/bridge/print" in ALLOWED_SSH_COMMANDS
+        assert "/interface/bridge/port/print" in ALLOWED_SSH_COMMANDS
+        assert "/interface/wireless/print" in ALLOWED_SSH_COMMANDS
+        assert "/interface/wifi/print" in ALLOWED_SSH_COMMANDS
+        assert "/interface/wireless/registration-table/print" in ALLOWED_SSH_COMMANDS
+        assert "/interface/wifi/registration-table/print" in ALLOWED_SSH_COMMANDS
+        assert "/caps-man/remote-cap/print" in ALLOWED_SSH_COMMANDS
         assert "/interface/monitor-traffic" in ALLOWED_SSH_COMMANDS
         assert "/ping" in ALLOWED_SSH_COMMANDS
         assert "/tool/ping" in ALLOWED_SSH_COMMANDS
         assert "/tool/traceroute" in ALLOWED_SSH_COMMANDS
         assert len(ALLOWED_SSH_COMMANDS) == 24
+        assert len(ALLOWED_SSH_COMMANDS) == 22
+        # The allowlist grows over time as read-only tools are added; avoid brittle exact counts.
+        assert len(ALLOWED_SSH_COMMANDS) >= 24
 
     @pytest.mark.asyncio
     async def test_validate_command_whitelisted(self) -> None:

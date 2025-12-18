@@ -42,6 +42,23 @@ class _FakeDeviceService:
     async def get_rest_client(self, device_id: str):
         return self.client
 
+    async def get_ssh_client(self, device_id: str):
+        """Return a mock SSH client for fallback testing."""
+        class _FakeSSHClient:
+            async def execute(self, command: str) -> str:
+                # Return mock system resource output
+                return """
+                      cpu-load: 85
+                 total-memory: 1024M
+                  free-memory: 50M
+                       uptime: 1h2m3s
+                      version: 7.15
+                   board-name: rb5009
+                """
+            async def close(self) -> None:
+                pass
+        return _FakeSSHClient()
+
     async def list_devices(self, environment: str | None = None):
         return [self.device]
 
@@ -108,8 +125,12 @@ async def test_run_health_check_unreachable(monkeypatch: pytest.MonkeyPatch):
     async def _fail_get_rest_client(_device_id):
         raise RuntimeError("boom")
 
+    async def _fail_get_ssh_client(_device_id):
+        raise RuntimeError("boom")
+
     service.device_service = _FakeDeviceService(None, device)
     service.device_service.get_rest_client = _fail_get_rest_client  # type: ignore
+    service.device_service.get_ssh_client = _fail_get_ssh_client  # type: ignore
 
     store_mock = AsyncMock()
     monkeypatch.setattr(service, "_store_health_check", store_mock)
