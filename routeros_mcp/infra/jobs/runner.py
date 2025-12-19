@@ -33,6 +33,8 @@ from routeros_mcp.infra.observability import metrics
 logger = logging.getLogger(__name__)
 
 # Concurrency limit for snapshot capture
+# Limits concurrent device captures to prevent overwhelming network/CPU
+# Value chosen based on typical network latency and resource constraints
 MAX_CONCURRENT_CAPTURES = 5
 
 

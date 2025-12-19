@@ -367,7 +367,7 @@ class SnapshotService:
         for cred in creds_orm:
             password = decrypt_string(
                 cred.encrypted_secret,
-                self.settings.encryption_key,  # Fixed: pass string, not bytes
+                self.settings.encryption_key,
             )
 
             credentials[cred.credential_type] = {
@@ -405,12 +405,12 @@ class SnapshotService:
         )
 
         try:
-            # Note: RouterOS REST API doesn't have a direct /export endpoint
-            # This is a placeholder - actual implementation may need to use
-            # /system/script or other endpoints
-            # For now, we'll raise NotImplementedError and rely on SSH fallback
+            # Note: RouterOS REST API doesn't provide a direct /export endpoint in v7.
+            # Future enhancement: explore /system/script or other methods for REST export.
+            # For now, raising NotImplementedError to trigger SSH fallback.
             raise NotImplementedError(
-                "REST API export not yet implemented for RouterOS v7"
+                "REST API configuration export not available in RouterOS v7. "
+                "Using SSH /export fallback."
             )
         finally:
             await client.close()

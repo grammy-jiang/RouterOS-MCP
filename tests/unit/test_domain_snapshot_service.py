@@ -73,10 +73,14 @@ async def db_session() -> AsyncSession:
 
 @pytest.fixture
 def settings():
-    """Create test settings."""
+    """Create test settings.
+    
+    Note: Uses a valid Fernet key for testing. This key is only for test purposes
+    and should never be used in production.
+    """
     return Settings(
         environment="lab",
-        encryption_key="IfCjOVHuCLs-lVSMKDJlyK8HINyPnvZODbw3YzIojhQ=",  # Valid Fernet key for tests
+        encryption_key="IfCjOVHuCLs-lVSMKDJlyK8HINyPnvZODbw3YzIojhQ=",  # Test-only key
         snapshot_max_size_bytes=10 * 1024 * 1024,  # 10MB
         snapshot_compression_level=6,
         snapshot_retention_count=5,
@@ -365,6 +369,9 @@ async def test_prune_old_snapshots(
     )
 
     assert deleted == 5
+
+    # Commit to persist the deletes
+    await db_session.commit()
 
     # Verify only 5 remain
     from sqlalchemy import select
