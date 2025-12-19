@@ -181,14 +181,14 @@ class PlanService:
         Raises:
             ValueError: If critical pre-checks fail
         """
-        pre_check_results = {
+        pre_check_results: dict[str, Any] = {
             "status": "passed",
             "warnings": [],
             "device_checks": {},
         }
 
         for device in devices:
-            device_result = {
+            device_result: dict[str, Any] = {
                 "device_id": device.id,
                 "environment": device.environment,
                 "status": "passed",
@@ -207,7 +207,8 @@ class PlanService:
 
             # Check 2: Environment restrictions for high-risk operations
             if risk_level == "high" and device.environment == "prod":
-                device_result["warnings"] = device_result.get("warnings", [])
+                if "warnings" not in device_result:
+                    device_result["warnings"] = []
                 device_result["warnings"].append({
                     "check": "environment_restriction",
                     "message": f"High-risk operation on production device {device.id} - proceed with extreme caution",
@@ -228,7 +229,8 @@ class PlanService:
 
             # Check 4: Device health status
             if device.status == "degraded":
-                device_result["warnings"] = device_result.get("warnings", [])
+                if "warnings" not in device_result:
+                    device_result["warnings"] = []
                 device_result["warnings"].append({
                     "check": "device_health",
                     "message": f"Device {device.id} is in degraded state",
