@@ -93,7 +93,7 @@ def register_wireless_tools(mcp: FastMCP, settings: Settings) -> None:
 
                 content = f"Found {len(interfaces)} wireless interface(s) on {device.name}"
                 if capsman_has_aps:
-                    content = f"{content}\n\n{capsman_hint}"
+                    content = f"{content}\n\n{capsman_hint.message}"
 
                 return format_tool_result(
                     content=content,
@@ -180,7 +180,7 @@ def register_wireless_tools(mcp: FastMCP, settings: Settings) -> None:
 
                 content = f"Found {len(clients)} connected wireless client(s) on {device.name}"
                 if capsman_has_aps:
-                    content = f"{content}\n\n{capsman_hint}"
+                    content = f"{content}\n\n{capsman_hint.message}"
 
                 return format_tool_result(
                     content=content,

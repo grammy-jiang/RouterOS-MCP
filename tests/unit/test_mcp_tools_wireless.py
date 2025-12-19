@@ -55,6 +55,8 @@ async def test_wireless_interfaces_tool_success_returns_formatted_result(monkeyp
     assert hints[0]["code"] == "capsman_detected"
     assert "CAPsMAN" in hints[0]["message"]
     assert result["_meta"]["total_count"] == 1
+    # Verify content field contains the hint message text
+    assert "CAPsMAN note:" in result["content"][0]["text"]
 
 
 @pytest.mark.asyncio
@@ -268,6 +270,8 @@ async def test_wireless_clients_tool_success_returns_formatted_result(monkeypatc
     assert hints[0]["code"] == "capsman_detected"
     assert "CAPsMAN" in hints[0]["message"]
     assert result["_meta"]["total_count"] == 1
+    # Verify content field contains the hint message text
+    assert "CAPsMAN note:" in result["content"][0]["text"]
 
 
 @pytest.mark.asyncio
