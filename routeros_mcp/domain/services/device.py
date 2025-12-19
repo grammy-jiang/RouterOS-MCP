@@ -156,6 +156,11 @@ class DeviceService:
             tags=device_data.tags,
             allow_advanced_writes=device_data.allow_advanced_writes,
             allow_professional_workflows=device_data.allow_professional_workflows,
+            allow_firewall_writes=device_data.allow_firewall_writes,
+            allow_routing_writes=device_data.allow_routing_writes,
+            allow_wireless_writes=device_data.allow_wireless_writes,
+            allow_dhcp_writes=device_data.allow_dhcp_writes,
+            allow_bridge_writes=device_data.allow_bridge_writes,
         )
 
         self.session.add(device_orm)
@@ -743,17 +748,6 @@ class DeviceService:
                 },
             )
             
-            # Record metric
-            metrics.increment_counter(
-                "device_capability_check_failed",
-                tags={
-                    "device_id": device_id,
-                    "environment": device.environment,
-                    "check_type": "environment",
-                    "operation": operation or "unknown",
-                },
-            )
-            
             raise EnvironmentNotAllowedError(
                 f"Operation '{operation or 'unknown'}' not allowed on device in '{device.environment}' environment. "
                 f"Allowed environments: {', '.join(allowed_environments)}",
@@ -787,18 +781,6 @@ class DeviceService:
                         },
                     )
                     
-                    # Record metric
-                    metrics.increment_counter(
-                        "device_capability_check_failed",
-                        tags={
-                            "device_id": device_id,
-                            "environment": device.environment,
-                            "check_type": "capability",
-                            "capability": capability_flag_name,
-                            "operation": operation or "unknown",
-                        },
-                    )
-                    
                     raise CapabilityNotAllowedError(
                         f"Operation '{operation or 'unknown'}' requires capability flag '{capability_flag_name}' "
                         f"to be enabled on device '{device.name}' ({device_id}). "
@@ -819,16 +801,6 @@ class DeviceService:
                 "operation": operation or "unknown",
                 "check_type": "all",
                 "result": "allowed",
-            },
-        )
-        
-        # Record success metric
-        metrics.increment_counter(
-            "device_capability_check_passed",
-            tags={
-                "device_id": device_id,
-                "environment": device.environment,
-                "operation": operation or "unknown",
             },
         )
         
