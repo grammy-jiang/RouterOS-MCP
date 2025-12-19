@@ -99,6 +99,11 @@ async def test_broadcast_health_update_without_sse_manager(
             status="healthy",
             timestamp=datetime.now(UTC),
             cpu_usage_percent=25.5,
+            memory_usage_percent=60.2,
+            uptime_seconds=86400,
+            issues=[],
+            warnings=[],
+            metadata={},
         )
 
         # Should not raise error
@@ -125,7 +130,11 @@ async def test_broadcast_health_update_handles_errors(
             status="degraded",
             timestamp=datetime.now(UTC),
             cpu_usage_percent=85.5,
+            memory_usage_percent=75.0,
+            uptime_seconds=3600,
             issues=["High CPU usage"],
+            warnings=[],
+            metadata={},
         )
 
         # Should not raise error (exception caught and logged)
@@ -150,7 +159,12 @@ async def test_broadcast_notification_data_format(
             device_id="dev-lab-01",
             status="unreachable",
             timestamp=datetime(2025, 1, 15, 14, 30, 0, tzinfo=UTC),
+            cpu_usage_percent=None,
+            memory_usage_percent=None,
+            uptime_seconds=None,
             issues=["Device unreachable"],
+            warnings=[],
+            metadata={},
         )
 
         await health_service._broadcast_health_update("dev-lab-01", result)
@@ -195,6 +209,11 @@ async def test_broadcast_multiple_subscribers(
             status="healthy",
             timestamp=datetime.now(UTC),
             cpu_usage_percent=15.0,
+            memory_usage_percent=45.0,
+            uptime_seconds=172800,
+            issues=[],
+            warnings=[],
+            metadata={},
         )
 
         await health_service._broadcast_health_update("dev-prod-01", result)
@@ -222,6 +241,12 @@ async def test_broadcast_zero_subscribers(
             device_id="dev-001",
             status="healthy",
             timestamp=datetime.now(UTC),
+            cpu_usage_percent=20.0,
+            memory_usage_percent=50.0,
+            uptime_seconds=43200,
+            issues=[],
+            warnings=[],
+            metadata={},
         )
 
         # Should still broadcast (manager handles no-subscribers case)

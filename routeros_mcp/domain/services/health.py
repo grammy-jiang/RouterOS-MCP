@@ -268,7 +268,7 @@ class HealthService:
             # Include only URI and version hint (last_check timestamp as etag)
             notification_data = {
                 "uri": resource_uri,
-                "etag": result.timestamp.isoformat() if result.timestamp else None,
+                "etag": result.timestamp.isoformat(),
                 "status_hint": result.status,  # Optional hint to avoid unnecessary re-reads
             }
 

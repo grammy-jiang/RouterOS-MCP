@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 _sse_manager = None
 
 
-def get_sse_manager():
+def get_sse_manager() -> "SSEManager | None":
     """Get the global SSE manager instance.
 
     Returns:
@@ -37,7 +37,7 @@ def get_sse_manager():
     return _sse_manager
 
 
-def set_sse_manager(manager):
+def set_sse_manager(manager: "SSEManager") -> None:
     """Set the global SSE manager instance.
 
     Args:
