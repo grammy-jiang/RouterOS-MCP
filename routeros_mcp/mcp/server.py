@@ -8,7 +8,7 @@ See docs/14-mcp-protocol-integration-and-transport-design.md
 
 import logging
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastmcp import FastMCP
 
@@ -22,10 +22,13 @@ from routeros_mcp.infra.db.session import (
 from routeros_mcp.mcp.errors import MCPError, map_exception_to_error
 from routeros_mcp.mcp.protocol.jsonrpc import format_tool_result
 
+if TYPE_CHECKING:
+    from routeros_mcp.mcp.transport.sse_manager import SSEManager
+
 logger = logging.getLogger(__name__)
 
 # Global SSE manager instance (initialized by HTTP/SSE transport)
-_sse_manager = None
+_sse_manager: "SSEManager | None" = None
 
 
 def get_sse_manager() -> "SSEManager | None":

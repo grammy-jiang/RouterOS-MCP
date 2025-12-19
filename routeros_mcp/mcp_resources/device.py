@@ -117,10 +117,10 @@ def register_device_resources(
                     data={"device_id": device_id, "error": str(e)},
                 )
 
-    @mcp.resource("device://{device_id}/health", subscribe=True)
+    @mcp.resource("device://{device_id}/health")
     @with_cache("device://{device_id}/health")
     async def device_health(device_id: str) -> str:
-        """Device health metrics and status (subscribable).
+        """Device health metrics and status.
 
         Provides current health status including:
         - Overall health state (healthy/warning/critical)
@@ -129,10 +129,6 @@ def register_device_resources(
         - Temperature and voltage (if available)
         - Last health check timestamp
         - Historical health metrics summary
-
-        This resource is subscribable via SSE. Clients can subscribe to receive
-        real-time notifications when health metrics change. Notifications are
-        lightweight and include only the resource URI and optional version hints.
 
         Args:
             device_id: Device identifier
