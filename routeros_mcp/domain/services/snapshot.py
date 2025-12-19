@@ -107,7 +107,6 @@ class SnapshotService:
                 device_id=device.id,
                 kind=kind,
                 duration=capture_duration,
-                success=False,
             )
             raise ValidationError(
                 f"No credentials found for device {device.id}",
@@ -191,7 +190,6 @@ class SnapshotService:
                 device_id=device.id,
                 kind=kind,
                 duration=capture_duration,
-                success=False,
             )
             raise RouterOSNetworkError(
                 f"Failed to capture config snapshot for device {device.id}: {error_message}"
@@ -206,7 +204,6 @@ class SnapshotService:
                 device_id=device.id,
                 kind=kind,
                 duration=capture_duration,
-                success=False,
             )
             raise ValidationError(
                 f"Snapshot size ({len(config_bytes)} bytes) exceeds limit "
@@ -274,7 +271,6 @@ class SnapshotService:
             device_id=device.id,
             kind=kind,
             duration=capture_duration,
-            success=True,
         )
         
         metrics.snapshot_capture_total.labels(

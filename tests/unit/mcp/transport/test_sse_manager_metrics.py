@@ -72,6 +72,7 @@ async def test_sse_connection_metrics_on_stream() -> None:
     try:
         await stream_task
     except asyncio.CancelledError:
+        # Expected when cancelling the background stream task during test cleanup
         pass
     
     # Give cleanup time to run
@@ -146,8 +147,8 @@ async def test_notification_metrics_on_broadcast() -> None:
     )
     
     # Create subscribers
-    sub1 = await manager.subscribe("client-1", "device://dev-001/health")
-    sub2 = await manager.subscribe("client-2", "device://dev-001/health")
+    await manager.subscribe("client-1", "device://dev-001/health")
+    await manager.subscribe("client-2", "device://dev-001/health")
     
     # Broadcast to subscribers
     await manager.broadcast(

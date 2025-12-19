@@ -11,6 +11,36 @@ from routeros_mcp.domain.services.snapshot import SnapshotService
 from routeros_mcp.infra.observability import metrics
 
 
+def get_metric_value(metric_name, labels=None):
+    """Helper to get current metric value from the custom registry.
+    
+    Args:
+        metric_name: Name of the metric
+        labels: Optional dictionary of label filters
+        
+    Returns:
+        Metric value or 0 if not found
+    """
+    registry = metrics.get_registry()
+    for metric in registry.collect():
+        if metric.name == metric_name:
+            for sample in metric.samples:
+                # Check if this is the right sample
+                if sample.name.startswith(metric_name):
+                    # Check labels match if provided
+                    if labels:
+                        matches = all(
+                            sample.labels.get(k) == v
+                            for k, v in labels.items()
+                        )
+                        if matches:
+                            return sample.value
+                    else:
+                        # No label filter, return first match
+                        return sample.value
+    return 0
+
+
 @pytest.fixture
 def mock_session():
     """Create mock database session."""
@@ -35,12 +65,19 @@ def settings():
 @pytest.fixture
 def test_device():
     """Create test device."""
+    from datetime import UTC, datetime
     return DeviceDomain(
         id="dev-test-001",
         name="Test Device",
         management_ip="192.168.1.1",
         management_port=8728,
         environment="lab",
+        status="healthy",
+        tags={},
+        allow_advanced_writes=False,
+        allow_professional_workflows=False,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
 
 
@@ -55,13 +92,6 @@ async def test_snapshot_capture_duration_metric_on_success(
     mock_creds_result = MagicMock()
     mock_creds_result.scalars.return_value.all.return_value = []
     mock_session.execute.return_value = mock_creds_result
-    
-    # Get initial metric samples count
-    duration_metric = metrics.snapshot_capture_duration_seconds.labels(
-        device_id=test_device.id,
-        kind="config",
-    )
-    initial_count = duration_metric._sum._value if hasattr(duration_metric, '_sum') else 0
     
     # Mock SSH client to return config
     with patch(
@@ -131,12 +161,6 @@ async def test_snapshot_age_metric_on_get_latest(mock_session, settings):
     mock_result.scalar_one_or_none.return_value = mock_snapshot
     mock_session.execute.return_value = mock_result
     
-    # Get snapshot age metric
-    age_metric = metrics.snapshot_age_seconds.labels(
-        device_id=device_id,
-        kind=kind,
-    )
-    
     # Get latest snapshot
     snapshot = await service.get_latest_snapshot(device_id, kind)
     
@@ -146,7 +170,10 @@ async def test_snapshot_age_metric_on_get_latest(mock_session, settings):
     
     # Age metric should be approximately 300 seconds (5 minutes)
     # Allow some variance for test execution time
-    recorded_age = age_metric._value._value
+    recorded_age = get_metric_value(
+        "routeros_mcp_snapshot_age_seconds",
+        labels={"device_id": device_id, "kind": kind}
+    )
     assert 295 <= recorded_age <= 305
 
 
@@ -164,11 +191,10 @@ async def test_missing_snapshot_metric_when_not_found(mock_session, settings):
     mock_session.execute.return_value = mock_result
     
     # Get initial missing count
-    missing_metric = metrics.snapshot_missing_total.labels(
-        device_id=device_id,
-        kind=kind,
+    initial_count = get_metric_value(
+        "routeros_mcp_snapshot_missing_total",
+        labels={"device_id": device_id, "kind": kind}
     )
-    initial_count = missing_metric._value._value
     
     # Get latest snapshot (should be None)
     snapshot = await service.get_latest_snapshot(device_id, kind)
@@ -177,7 +203,11 @@ async def test_missing_snapshot_metric_when_not_found(mock_session, settings):
     assert snapshot is None
     
     # Missing metric should be incremented
-    assert missing_metric._value._value == initial_count + 1
+    final_count = get_metric_value(
+        "routeros_mcp_snapshot_missing_total",
+        labels={"device_id": device_id, "kind": kind}
+    )
+    assert final_count == initial_count + 1
 
 
 @pytest.mark.asyncio
@@ -191,12 +221,6 @@ async def test_snapshot_capture_failure_records_duration(
     mock_result = MagicMock()
     mock_result.scalars.return_value.all.return_value = []
     mock_session.execute.return_value = mock_result
-    
-    # Get initial metric state
-    duration_metric = metrics.snapshot_capture_duration_seconds.labels(
-        device_id=test_device.id,
-        kind="config",
-    )
     
     # Try to capture (should fail due to missing credentials)
     from routeros_mcp.mcp.errors import ValidationError
@@ -227,12 +251,6 @@ async def test_snapshot_age_updated_after_capture(mock_session, settings, test_d
     mock_creds_result.scalars.return_value.all.return_value = [mock_cred]
     mock_session.execute.return_value = mock_creds_result
     
-    # Get age metric
-    age_metric = metrics.snapshot_age_seconds.labels(
-        device_id=test_device.id,
-        kind="config",
-    )
-    
     # Mock SSH client
     with patch(
         "routeros_mcp.domain.services.snapshot.RouterOSSSHClient"
@@ -251,5 +269,12 @@ async def test_snapshot_age_updated_after_capture(mock_session, settings, test_d
         ):
             snapshot_id = await service.capture_device_snapshot(test_device)
             
+            # Snapshot ID should be generated
+            assert snapshot_id is not None
+            
             # Age metric should be set to 0 (newly captured)
-            assert age_metric._value._value == 0.0
+            age = get_metric_value(
+                "routeros_mcp_snapshot_age_seconds",
+                labels={"device_id": test_device.id, "kind": "config"}
+            )
+            assert age == 0.0

@@ -546,7 +546,6 @@ def record_snapshot_capture(
     device_id: str,
     kind: str,
     duration: float,
-    success: bool,
 ) -> None:
     """Record snapshot capture duration metrics.
 
@@ -554,7 +553,6 @@ def record_snapshot_capture(
         device_id: Device identifier
         kind: Snapshot kind (e.g., "config")
         duration: Capture duration in seconds
-        success: Whether capture succeeded
     """
     snapshot_capture_duration_seconds.labels(
         device_id=device_id,
