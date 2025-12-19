@@ -635,6 +635,126 @@ class DeviceService:
 
 ---
 
+## Phase 2.1 implementation blueprint additions
+
+Phase 2.1 adds read-only features that require _new internal services_ and _tool/resource wiring_:
+
+- **DB-backed configuration snapshots** to power `device://{device_id}/config`
+- **CAPsMAN visibility** (controller-centric wireless read-only views)
+
+This section is intentionally implementation-oriented and references the current repository layout
+(`routeros_mcp/domain/services/*`, `routeros_mcp/mcp_resources/*`, `routeros_mcp/mcp_tools/*`).
+
+### Snapshot capture and retrieval
+
+**Primary goal:** ensure `device://{device_id}/config` is backed by a recent entry in the `Snapshot` table.
+The existing resource implementation already reads the latest `Snapshot(kind="config")` (see
+`routeros_mcp/mcp_resources/device.py`). Phase 2.1 supplies the missing capture path.
+
+#### `routeros_mcp/domain/services/snapshot.py` (new)
+
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from routeros_mcp.config import Settings
+from routeros_mcp.infra.db.models import Snapshot
+
+
+@dataclass(frozen=True)
+class SnapshotCaptureResult:
+    snapshot_id: str
+    device_id: str
+    kind: str
+    timestamp: datetime
+    size_bytes: int
+    redaction: str | None = None  # e.g. "hide-sensitive" / "unknown"
+
+
+class SnapshotService:
+    """Create and retrieve snapshots that are persisted in the database.
+
+    Phase 2.1 scope:
+    - Capture RouterOS configuration exports (read-only device access)
+    - Store compressed bytes in Snapshot.data
+    - Retrieve latest snapshots for MCP resources
+    """
+
+    def __init__(self, session: AsyncSession, settings: Settings) -> None:
+        self.session = session
+        self.settings = settings
+
+    async def capture_config_snapshot(self, device_id: str) -> SnapshotCaptureResult:
+        """Capture a RouterOS configuration export and persist it as Snapshot(kind="config").
+
+        Notes:
+        - Prefer REST when available; fall back to SSH for export collection.
+        - Sensitive values must be hidden/redacted where supported.
+        - Enforce a maximum snapshot size before persistence.
+        """
+        ...
+
+    async def get_latest_snapshot(self, device_id: str, kind: str = "config") -> Snapshot | None:
+        """Return the most recent snapshot for a device/kind."""
+        ...
+```
+
+#### Periodic capture job (Phase 2.1)
+
+Snapshots should be captured by a scheduler-driven job to avoid making `resources/read` expensive.
+
+```python
+class SnapshotCaptureJob:
+    """Periodic task: capture config snapshots for eligible devices."""
+
+    async def run(self) -> None:
+        # enumerate devices, filter by environment/tags
+        # capture snapshot per device (with rate limits)
+        # record per-device success/failure for observability
+        ...
+```
+
+### CAPsMAN visibility (read-only)
+
+Phase 2.1 adds controller-centric visibility for deployments where WiFi is managed via CAPsMAN.
+The current codebase already includes **CAPsMAN detection** and **user guidance hints** in the
+wireless tools (`routeros_mcp/mcp_tools/wireless.py`) via `WirelessService.has_capsman_managed_aps()`.
+
+#### `routeros_mcp/domain/services/wireless.py` (extend)
+
+Add read-only methods that expose CAPsMAN state when available:
+
+```python
+class WirelessService:
+    async def get_capsman_remote_caps(self, device_id: str) -> list[dict[str, Any]]:
+        """List CAP devices known to CAPsMAN (e.g., /caps-man/remote-cap)."""
+        ...
+
+    async def get_capsman_registrations(self, device_id: str) -> list[dict[str, Any]]:
+        """List active CAPsMAN registrations (best-effort endpoint per RouterOS package)."""
+        ...
+```
+
+#### `routeros_mcp/mcp_tools/wireless.py` (extend)
+
+Expose new tools (read-only, fundamental tier):
+
+- `wireless/get-capsman-remote-caps`
+- `wireless/get-capsman-registrations`
+
+Each tool should:
+
+- Reuse existing authz checks (fundamental/read-only)
+- Include the same CAPsMAN “architecture hint” pattern used by `wireless/get-interfaces` and
+  `wireless/get-clients`
+- Prefer REST and fall back to SSH in the service layer
+
+---
+
 ## MCP Tool Modules
 
 ### `mcp_tools/system.py`
@@ -884,7 +1004,7 @@ def register_device_resources(mcp: FastMCP):
 
 ### `mcp_prompts/workflows.py`
 
-```python
+````python
 from fastmcp import FastMCP
 from typing import Literal
 
@@ -952,12 +1072,14 @@ Rolling out DNS/NTP changes to **{device_count} devices** in {environment} envir
 {{
   "environment": "{environment}"
 }}
-```
+````
 
 ### 2. Create Rollout Plan
+
 **Tool:** `config.plan_dns_ntp_rollout`
 
 **Parameters:**
+
 ```json
 {{
   "device_ids": ["dev-001", "dev-002"],
@@ -968,18 +1090,22 @@ Rolling out DNS/NTP changes to **{device_count} devices** in {environment} envir
 ```
 
 ### 3. Review Plan Details
+
 **Resource:** `plan://{{plan_id}}/details`
 
 **Review checklist:**
+
 - [ ] All intended devices included
 - [ ] Current vs new values are correct
 - [ ] Risk levels acceptable
 - [ ] No precondition failures
 
 ### 4. Apply Changes
+
 **Tool:** `config.apply_dns_ntp_rollout`
 
 **Parameters:**
+
 ```json
 {{
   "plan_id": "<plan_id from step 2>",
@@ -989,12 +1115,14 @@ Rolling out DNS/NTP changes to **{device_count} devices** in {environment} envir
 ```
 
 ## Safety Notes
+
 - Always test in **lab** first
 - Use **staging** for final validation
 - Production requires **admin approval**
 - Monitor health checks post-change
-"""
-```
+  """
+
+````
 
 ---
 
@@ -1158,7 +1286,7 @@ def _generate_schema_from_signature(sig) -> dict[str, Any]:
         "properties": properties,
         "required": required
     }
-```
+````
 
 ### `mcp/middleware.py`
 

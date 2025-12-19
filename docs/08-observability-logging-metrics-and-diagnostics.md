@@ -11,22 +11,24 @@ Define how the system is observed in production, including structured logs, metr
 **Goals**
 
 - Quickly detect and diagnose:
-  - MCP service outages or performance degradation.  
-  - RouterOS connectivity or behavior issues.  
+  - MCP service outages or performance degradation.
+  - RouterOS connectivity or behavior issues.
   - Misbehaving or misused tools (especially writes).
 
 **Representative SLIs**
 
 - Request latency:
-  - 95th percentile latency for MCP tool invocations by type (read vs write).  
+
+  - 95th percentile latency for MCP tool invocations by type (read vs write).
   - Distinguish between internal (MCP) and external (RouterOS) latency contributions.
 
 - Error rate:
-  - Proportion of failed MCP tool calls, categorized by error code (e.g., `DEVICE_UNREACHABLE`, `UNAUTHORIZED`, `RATE_LIMITED`).  
+
+  - Proportion of failed MCP tool calls, categorized by error code (e.g., `DEVICE_UNREACHABLE`, `UNAUTHORIZED`, `RATE_LIMITED`).
   - RouterOS-specific error rate (REST failures).
 
 - Availability:
-  - MCP API uptime (e.g., 99.x%).  
+  - MCP API uptime (e.g., 99.x%).
   - Per-device health (percentage of devices classified as healthy).
 
 These SLIs can be rolled into SLOs appropriate for the environment (lab vs production).
@@ -36,6 +38,7 @@ These SLIs can be rolled into SLOs appropriate for the environment (lab vs produ
 ## Structured logging design (correlation IDs, device IDs, user IDs, tool names)
 
 - **Log format**:
+
   - All logs are structured (JSON) with consistent fields.
   - Example core fields:
     - `timestamp`
@@ -254,6 +257,7 @@ User calls dns/get-status tool
 ```
 
 **Benefits:**
+
 - **End-to-end tracing**: Search logs for `correlation_id=abc-123` to see entire request lifecycle
 - **Performance analysis**: Measure time spent in each layer for single request
 - **Error debugging**: Find all related logs when request fails
@@ -266,21 +270,22 @@ User calls dns/get-status tool
 To connect MCP activity with RouterOS operations:
 
 - **Logs**:
+
   - When MCP calls RouterOS:
-    - Log an event including `correlation_id`, `device_id`, REST endpoint, HTTP method.  
+    - Log an event including `correlation_id`, `device_id`, REST endpoint, HTTP method.
     - On failure, include RouterOS error payload (sanitized) in `details`.
 
 - **Metrics**:
   - Per-tool metrics:
-    - `mcp_tool_requests_total{tool_name, tool_tier, status}`.  
+    - `mcp_tool_requests_total{tool_name, tool_tier, status}`.
     - `mcp_tool_latency_seconds_bucket{tool_name, tool_tier}`.
   - Per-device metrics:
-    - `mcp_routeros_requests_total{device_id, topic, method, status}`.  
+    - `mcp_routeros_requests_total{device_id, topic, method, status}`.
     - `mcp_routeros_latency_seconds_bucket{device_id, topic}`.
 
 This standardization supports queries like:
 
-- “Show error rate for `dns` advanced writes on `prod` devices in the last 1h.”  
+- “Show error rate for `dns` advanced writes on `prod` devices in the last 1h.”
 - “Which devices have the highest RouterOS REST latency?”
 
 ---
@@ -290,6 +295,7 @@ This standardization supports queries like:
 Key metric families:
 
 - **MCP Protocol-Level** (Phase 1):
+
   - `mcp_requests_total{method, status}` - Total MCP JSON-RPC requests by method (`tools/call`, `tools/list`, `initialize`, etc.)
   - `mcp_request_duration_seconds{method}` - MCP request duration histogram
   - `mcp_initialize_total{client_name, client_version}` - Client type distribution (tracks tools-only vs full MCP clients)
@@ -297,6 +303,7 @@ Key metric families:
   - `mcp_error_total{error_code}` - MCP protocol errors by JSON-RPC error code
 
 - **MCP Tool-Level** (Phase 1):
+
   - `mcp_tool_requests_total{tool_name, tool_tier, status}` - Per-tool request counts
   - `mcp_tool_latency_seconds{tool_name, tool_tier}` - Per-tool latency histogram
   - `mcp_tool_response_size_bytes{tool_name}` - Response payload size (for token budget monitoring)
@@ -304,6 +311,7 @@ Key metric families:
   - `mcp_tool_token_budget_warnings_total{tool_name}` - Count of responses >5000 tokens
 
 - **MCP Resources-Level** (Phase 2):
+
   - `mcp_resources_list_calls_total` - Resource discovery calls
   - `mcp_resources_read_total{resource_uri_pattern, status}` - Resource reads by URI pattern (`device://*/health`, etc.)
   - `mcp_resource_cache_hits_total{resource_type}` - Cache hit rate for resources
@@ -311,18 +319,36 @@ Key metric families:
   - `mcp_resource_cache_ttl_expirations_total{resource_type}` - TTL expirations (requires refresh)
   - `mcp_resource_size_bytes{resource_uri_pattern}` - Resource payload size distribution
 
+- **Phase 2.1: Subscriptions and snapshots** (read-only enhancements):
+
+  - SSE/subscription health:
+    - `mcp_sse_connections_active` (gauge)
+    - `mcp_sse_connection_duration_seconds` (histogram)
+    - `mcp_resource_subscriptions_active{resource_uri_pattern}` (gauge)
+    - `mcp_resource_notifications_total{resource_uri_pattern}` (counter)
+    - `mcp_resource_notifications_dropped_total{reason}` (counter; e.g., backpressure, disconnect)
+  - Snapshot pipeline:
+    - `mcp_snapshots_captured_total{kind, status}` (counter)
+    - `mcp_snapshot_capture_duration_seconds{kind}` (histogram)
+    - `mcp_snapshot_size_bytes{kind}` (histogram)
+    - `mcp_snapshot_age_seconds{kind}` (gauge; age of latest snapshot per device aggregated)
+    - `mcp_snapshot_missing_total{kind}` (counter; when `device://*/config` has no backing snapshot)
+
 - **MCP Prompts-Level** (Phase 2):
+
   - `mcp_prompts_list_calls_total` - Prompt discovery calls
   - `mcp_prompts_get_total{prompt_name, status}` - Prompt invocations by name
   - `mcp_prompt_render_duration_seconds{prompt_name}` - Template rendering time
 
 - **RouterOS-level**:
+
   - REST call counts and latencies per device and topic.
   - SSH usage metrics:
     - `ssh_commands_total{device_id, command_id, status}`.
     - Useful for ensuring SSH is rarely used and monitored.
 
 - **Job/system-level**:
+
   - Jobs queued, running, succeeded, failed (by type).
   - Health check results per device.
 
@@ -486,25 +512,27 @@ async def handle_tool_call(params: dict) -> dict:
 ## Tracing model across MCP tools, service layers, and RouterOS calls
 
 - **Tracing framework**:
+
   - Use OpenTelemetry or similar to generate spans for:
-    - MCP request handling (tool invocation).  
-    - Domain service operations.  
+    - MCP request handling (tool invocation).
+    - Domain service operations.
     - RouterOS REST/SSH calls.
 
 - **Span structure**:
-  - Root span: MCP request (per tool call).  
+
+  - Root span: MCP request (per tool call).
   - Child spans:
-    - Authorization checks.  
-    - Domain service logic.  
+    - Authorization checks.
+    - Domain service logic.
     - Each RouterOS call (REST/SSH).
 
 - **Trace attributes**:
-  - `tool_name`, `tool_tier`, `user_role`, `device_id`, `topic`, `routeros_endpoint`.  
+  - `tool_name`, `tool_tier`, `user_role`, `device_id`, `topic`, `routeros_endpoint`.
   - Error flags and RouterOS error details (sanitized) on failing spans.
 
 Traces help answer questions like:
 
-- “Is latency dominated by MCP or RouterOS?”  
+- “Is latency dominated by MCP or RouterOS?”
 - “Where in the pipeline do failures occur?”
 
 ---
@@ -514,18 +542,20 @@ Traces help answer questions like:
 When RouterOS calls fail, diagnostics should be consistent and rich:
 
 - **Failure logging**:
+
   - Log entries include:
-    - `correlation_id`, `device_id`, `routeros_endpoint`, HTTP status.  
-    - RouterOS error body (where safe and useful).  
+    - `correlation_id`, `device_id`, `routeros_endpoint`, HTTP status.
+    - RouterOS error body (where safe and useful).
     - Retry behavior: attempted retries, backoff, final outcome.
 
 - **Error surfacing to clients**:
-  - MCP error responses map RouterOS errors to standardized error codes and messages.  
+
+  - MCP error responses map RouterOS errors to standardized error codes and messages.
   - Include `device_id` and a hint (e.g., “device unreachable”, “auth failure”, “validation error”).
 
 - **Diagnostic tools**:
   - Provide tools (read-only) to:
-    - Fetch recent RouterOS error history for a device.  
+    - Fetch recent RouterOS error history for a device.
     - Inspect health and metrics around the time of failures.
 
 Runbooks (in the operations doc) can rely on these diagnostics for triage.
@@ -535,15 +565,17 @@ Runbooks (in the operations doc) can rely on these diagnostics for triage.
 ## Audit vs operational logging (separation and storage)
 
 - **Audit logs**:
+
   - Focus on:
-    - Who did what, when, where, and what changed.  
-    - All writes and sensitive reads.  
-  - Immutable, append-only; may be stored in a separate audit store.  
+    - Who did what, when, where, and what changed.
+    - All writes and sensitive reads.
+  - Immutable, append-only; may be stored in a separate audit store.
   - Longer retention than operational logs.
 
 - **Operational logs**:
+
   - Focus on:
-    - Service health, errors, performance, diagnostics.  
+    - Service health, errors, performance, diagnostics.
   - Rotated more aggressively; primarily used for debugging and monitoring.
 
 - **Separation**:
@@ -554,18 +586,22 @@ Runbooks (in the operations doc) can rely on these diagnostics for triage.
 ## Integration with log/metrics backends and dashboards/alerts
 
 - **Backends**:
+
   - Logging: ELK/EFK stack, cloud logging services, or similar.
   - Metrics: Prometheus + Grafana or managed metrics service.
   - Tracing: Jaeger, Tempo, or managed tracing service.
 
 - **Dashboards**:
+
   - **MCP Protocol Overview**:
+
     - MCP client distribution (tools-only vs full MCP clients)
     - Request rate by MCP method (`tools/call`, `resources/read`, `prompts/get`)
     - MCP protocol error rate by error code
     - Initialize requests over time (client adoption tracking)
 
   - **MCP Tools Dashboard**:
+
     - Tool request rates by tier (fundamental, advanced, professional)
     - Tool latency distribution (p50, p95, p99)
     - Top 10 most-used tools
@@ -575,6 +611,7 @@ Runbooks (in the operations doc) can rely on these diagnostics for triage.
     - Tool usage distribution (which tools are LLMs actually calling?)
 
   - **MCP Resources Dashboard** (Phase 2):
+
     - Resource cache hit/miss ratio by resource type
     - Resource access patterns (which URIs are most popular?)
     - Resource cache TTL expirations
@@ -582,11 +619,13 @@ Runbooks (in the operations doc) can rely on these diagnostics for triage.
     - Background refresh job success rate
 
   - **MCP Prompts Dashboard** (Phase 2):
+
     - Prompt usage frequency
     - Prompt rendering duration
     - Most popular workflow prompts
 
   - **Plan/Apply Workflows Dashboard** (Professional Tier):
+
     - Plans created per hour
     - Plan execution success rate
     - Approval token lifecycle metrics (generated, expired, validated)
@@ -595,6 +634,7 @@ Runbooks (in the operations doc) can rely on these diagnostics for triage.
     - Blast radius (devices affected per plan)
 
   - **RouterOS fleet**:
+
     - Device health distribution.
     - REST error rates and latencies per device.
 
@@ -602,28 +642,34 @@ Runbooks (in the operations doc) can rely on these diagnostics for triage.
     - Job queue depth, success/failure rates by type.
 
 - **Alerts**:
+
   - **MCP Protocol Alerts**:
+
     - High MCP protocol error rate (>5% of requests failing with JSON-RPC errors)
     - MCP server unavailable (no initialize requests in 5 minutes)
     - Unknown MCP client detected (client_name not in allowlist)
 
   - **MCP Tool Alerts**:
+
     - High error rate for critical tools (>10% failure rate for fundamental tier)
     - Tool latency degradation (p95 latency >2x baseline for >5 minutes)
     - Token budget warnings spike (>50% of tool responses exceeding 5000 tokens)
     - Unauthorized tool access surge (>10 `AUTHZ_DENIED` events in 5 minutes)
 
   - **MCP Resource Alerts** (Phase 2):
+
     - Resource cache hit rate <80% (background refresh failing?)
     - Resource payload size exceeding 1MB (potential performance issue)
 
   - **Plan/Apply Workflow Alerts** (Professional Tier):
+
     - Rollback rate >10% (indicates unstable changes or bad health checks)
     - Approval token expiration rate >20% (tokens not being used within TTL)
     - Failed rollback detected (manual intervention required)
     - Plan affecting >50 devices (blast radius warning)
 
   - **RouterOS Fleet Alerts**:
+
     - Many devices becoming `unreachable` or `degraded`.
     - Abnormal SSH usage (e.g., more than expected in production).
 
@@ -735,15 +781,18 @@ sum(increase(mcp_plans_applied_total[24h]))
 ```
 
 **Health Status Values:**
+
 - `healthy`: All systems operational
 - `degraded`: Some non-critical issues (e.g., some devices unreachable)
 - `unhealthy`: Critical issues (e.g., database down, cannot serve requests)
 
 **HTTP Status Codes:**
+
 - `200 OK`: status = healthy or degraded
 - `503 Service Unavailable`: status = unhealthy
 
 **Load Balancer Configuration:**
+
 - Check interval: 10 seconds
 - Timeout: 5 seconds
 - Unhealthy threshold: 3 consecutive failures
@@ -828,6 +877,7 @@ with mcp_tool_duration_seconds.labels(tool_name="system/get-overview", tier="fun
 ```
 
 **Query for P95 latency:**
+
 ```promql
 histogram_quantile(
   0.95,
@@ -861,6 +911,7 @@ except McpError as e:
 ```
 
 **Alert on high error rate:**
+
 ```yaml
 - alert: HighToolErrorRate
   expr: |
@@ -941,6 +992,7 @@ async def handle_initialize(request: InitializeRequest):
 ```
 
 **Query client distribution:**
+
 ```promql
 sum by (client_name) (mcp_initialize_total)
 ```
@@ -1070,10 +1122,10 @@ This observability design provides comprehensive monitoring for MCP-based Router
 ---
 
 **Cross-References:**
+
 - **[Doc 02: Security & Access Control](02-security-oauth-integration-and-access-control.md)** - Audit logging requirements
 - **[Doc 04: MCP Tools Interface](04-mcp-tools-interface-and-json-schema-specification.md)** - Tool metadata for observability
 - **[Doc 05: Domain Model & Persistence](05-domain-model-persistence-and-task-job-model.md)** - Correlation ID in entities
 - **[Doc 06: Metrics Collection](06-system-information-and-metrics-collection-module-design.md)** - Health check metrics
 - **[Doc 07: High-Risk Operations](07-device-control-and-high-risk-operations-safeguards.md)** - Plan/apply workflow observability
 - **[Doc 19: Error Codes](19-json-rpc-error-codes-and-mcp-protocol-specification.md)** - Error code tracking in metrics
-

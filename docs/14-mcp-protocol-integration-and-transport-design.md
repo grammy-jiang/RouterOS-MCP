@@ -834,6 +834,51 @@ async def on_health_check_complete(device_id: str):
     await mcp.notify_resource_updated(f"device://{device_id}/health")
 ```
 
+#### Phase 2.1 implementation details: subscriptions over HTTP/SSE
+
+In RouterOS-MCP, subscriptions are an optimization layer for clients that want to react to change without polling.
+The subscription signal is deliberately lightweight: **the server notifies that a resource changed**, and the client
+then re-reads the resource (`resources/read`) to fetch the current snapshot.
+
+**Subscribable resources (Phase 2.1 baseline):**
+
+- `device://{device_id}/health` (primary)
+- `fleet://health-summary` (optional; only if we already compute and cache it)
+
+**Update triggers:**
+
+- Periodic health checks (scheduler-driven)
+- Device reachability state transitions (healthy → unreachable, etc.)
+- Explicit refreshes (e.g., an operator-triggered health probe)
+
+**Notification payload contract:**
+
+- Notifications MUST include the updated resource URI (e.g., `device://core-RB5009/health`).
+- Notifications SHOULD include best-effort version hints when available:
+  - `etag` (content hash)
+  - `last_modified` (ISO 8601)
+- Notifications MUST NOT include large resource bodies; the body is retrieved via a subsequent `resources/read`.
+
+**Coalescing / debounce:**
+
+- Multiple updates within a short window SHOULD be coalesced to a single notification per resource.
+- Recommended debounce window: 250–1000ms (enough to avoid “storm” behavior when many metrics update at once).
+
+**Backpressure and limits (safety defaults):**
+
+- Per-connection maximum subscriptions (recommended): 200
+- Per-device maximum active subscriptions (recommended): 100
+- If a client exceeds limits, the server returns a protocol error to the subscribe request and MUST NOT create
+  the subscription.
+- If a client connection cannot keep up (write buffer grows), the server SHOULD disconnect the SSE stream to
+  protect service health.
+
+**Heartbeat / keepalive:**
+
+- SSE streams SHOULD emit periodic keepalive messages (e.g., comment lines) so intermediaries (proxies/tunnels)
+  do not close idle connections.
+- Recommended heartbeat interval: 15–30s.
+
 ---
 
 ## Prompt Templates for Common Workflows

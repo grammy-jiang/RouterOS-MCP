@@ -10,22 +10,22 @@ Define the complete database schema, SQLAlchemy ORM models, and migration strate
 
 ### Supported Databases
 
-| Database | Driver | URL Format | Use Case |
-|----------|--------|------------|----------|
-| **SQLite** | aiosqlite | `sqlite:///path/to/db.db` | Development, testing, single-user |
-| **PostgreSQL** | asyncpg (preferred) | `postgresql+asyncpg://user:pass@host/db` | Production, multi-user |
-| **PostgreSQL** | psycopg (fallback) | `postgresql+psycopg://user:pass@host/db` | Production alternative |
+| Database       | Driver              | URL Format                               | Use Case                          |
+| -------------- | ------------------- | ---------------------------------------- | --------------------------------- |
+| **SQLite**     | aiosqlite           | `sqlite:///path/to/db.db`                | Development, testing, single-user |
+| **PostgreSQL** | asyncpg (preferred) | `postgresql+asyncpg://user:pass@host/db` | Production, multi-user            |
+| **PostgreSQL** | psycopg (fallback)  | `postgresql+psycopg://user:pass@host/db` | Production alternative            |
 
 ### Database Feature Matrix
 
-| Feature | SQLite | PostgreSQL |
-|---------|--------|------------|
-| Async support | ✅ (aiosqlite) | ✅ (asyncpg/psycopg) |
-| JSON fields | ✅ (JSON1 extension) | ✅ (Native JSONB) |
-| Full-text search | ⚠️ (Limited) | ✅ (Native) |
-| Concurrent writes | ⚠️ (Limited) | ✅ (Excellent) |
-| Scalability | Single file | Horizontal scaling |
-| Deployment | Embedded | Client-server |
+| Feature           | SQLite               | PostgreSQL           |
+| ----------------- | -------------------- | -------------------- |
+| Async support     | ✅ (aiosqlite)       | ✅ (asyncpg/psycopg) |
+| JSON fields       | ✅ (JSON1 extension) | ✅ (Native JSONB)    |
+| Full-text search  | ⚠️ (Limited)         | ✅ (Native)          |
+| Concurrent writes | ⚠️ (Limited)         | ✅ (Excellent)       |
+| Scalability       | Single file          | Horizontal scaling   |
+| Deployment        | Embedded             | Client-server        |
 
 ---
 
@@ -508,6 +508,17 @@ class Snapshot(Base):
         Index("idx_snapshot_kind", "kind"),
     )
 ```
+
+**Phase 2.1 conventions (implementation notes):**
+
+- `kind="config"` is reserved for RouterOS configuration exports backing `device://{device_id}/config`.
+- `data` stores compressed bytes. The compression algorithm SHOULD be recorded in `metadata` (e.g.,
+  `{"compression": "gzip"}`).
+- `metadata` SHOULD include best-effort integrity and provenance fields:
+  - `checksum` (e.g., SHA-256 of the uncompressed content)
+  - `size_bytes_uncompressed` / `size_bytes_compressed`
+  - `redaction` (e.g., `"hide-sensitive"`, `"none"`, `"unknown"`)
+  - `source` (e.g., `"rest"` vs `"ssh"`)
 
 ### Plan Model
 
@@ -1718,6 +1729,7 @@ async def get_device_with_credentials(self, device_id: str) -> Optional[DeviceDo
 #### 3. Connection Pooling Configuration
 
 **SQLite:**
+
 ```python
 # For SQLite, use minimal pooling
 if settings.is_sqlite:
@@ -1727,6 +1739,7 @@ if settings.is_sqlite:
 ```
 
 **PostgreSQL:**
+
 ```python
 # For PostgreSQL, optimize pool size
 if settings.is_postgresql:

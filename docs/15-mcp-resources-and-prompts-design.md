@@ -141,6 +141,9 @@ device://{device_id}/ntp
 device://{device_id}/dhcp-server
 device://{device_id}/wireless
 device://{device_id}/wireless/clients
+device://{device_id}/capsman
+device://{device_id}/capsman/remote-caps
+device://{device_id}/capsman/registrations
 ```
 
 **Diagnostics and Logs**
@@ -1741,6 +1744,44 @@ After review, verify:
 ---
 
 ## Resource Versioning and Caching
+
+### Phase 2.1 implementation details: DB-backed configuration snapshots
+
+Phase 2.1 formalizes `device://{device_id}/config` as a **DB-backed snapshot** of the RouterOS configuration.
+The resource SHOULD return the latest snapshot stored in the `snapshots` table (see
+[Doc 18](18-database-schema-and-orm-specification.md) `Snapshot` model) and MUST NOT require live collection
+on every read.
+
+**Snapshot capture pipeline (conceptual):**
+
+1. A periodic job (scheduler) captures configuration for eligible devices.
+2. The capture operation uses a read-only RouterOS export (REST when available, SSH fallback).
+3. Sensitive values are redacted where supported (prefer RouterOS export modes that hide secrets).
+4. The snapshot is compressed before storage (e.g., gzip) and stored as `Snapshot.data`.
+5. The resource reads the latest `Snapshot(kind="config")`, decodes/decompresses, and returns it.
+
+**Resource response contract (recommended):**
+
+- MIME type: `application/json` (wrapper with metadata)
+- Body contains:
+  - `config`: RouterOS export text
+  - `_meta`:
+    - `snapshot_id`, `snapshot_kind`, `snapshot_timestamp`
+    - `etag`/hash (optional but recommended)
+    - `redaction`: whether sensitive fields were hidden
+
+**Operational safeguards:**
+
+- Reads should be fast and cacheable (ETag/Last-Modified patterns below).
+- If no snapshot exists, the server should return a clear “snapshot not found” error rather than blocking on
+  a slow on-demand export.
+- Limit snapshot size (hard cap) and truncate with an explicit warning if needed to protect MCP clients from
+  oversized payloads.
+
+**Retention (Phase 2.1 baseline):**
+
+- Keep at least the latest snapshot per device, and optionally an hourly/daily history window.
+- Retention policy must be explicit and configurable (e.g., `snapshots.max_per_device`).
 
 ### ETag-Based Resource Versioning
 
