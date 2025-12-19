@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import AsyncIterator
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -606,3 +607,75 @@ async def test_handle_subscribe_success_returns_event_source_response() -> None:
     assert isinstance(response, EventSourceResponse)
     assert response.headers.get("X-Correlation-ID") == "corr-sse"
     assert response.headers.get("Cache-Control") == "no-cache"
+
+
+@pytest.mark.asyncio
+async def test_subscription_route_registered_and_invokes_handler() -> None:
+    """SSE subscription handler should be exposed via FastMCP custom_route."""
+
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+    mock_mcp.run_http_async = AsyncMock()
+
+    registration: dict[str, object] = {}
+
+    def _custom_route(path, methods=None, name=None, include_in_schema=True):  # type: ignore[override] # noqa: ANN001
+        def decorator(fn):
+            registration["path"] = path
+            registration["methods"] = methods
+            registration["handler"] = fn
+            return fn
+
+        return decorator
+
+    mock_mcp.custom_route = _custom_route
+
+    transport = HTTPSSETransport(settings, mock_mcp)
+
+    assert registration["path"] == "/mcp/subscribe"
+    assert registration["methods"] == ["POST"]
+
+    handler = registration["handler"]
+
+    request = MagicMock(spec=Request)
+    request.json = AsyncMock(return_value={"resource_uri": "device://dev-001/health"})
+    request.state = SimpleNamespace(user=None)
+
+    # Mock sse_manager methods that handle_subscribe uses
+    subscription = MagicMock()
+    subscription.subscription_id = "sub-test"
+    subscription.resource_uri = "device://dev-001/health"
+
+    transport.sse_manager.subscribe = AsyncMock(return_value=subscription)
+
+    async def _stream_events(_sub) -> AsyncIterator[dict]:
+        yield {"event": "connected", "data": {"subscription_id": "sub-test"}}
+
+    transport.sse_manager.stream_events = _stream_events
+
+    with patch("routeros_mcp.mcp.transport.http_sse.get_correlation_id", return_value="corr-sub"):
+        response = await handler(request)
+
+    assert isinstance(response, EventSourceResponse)
+
+
+@pytest.mark.asyncio
+async def test_subscription_route_fallback_when_custom_route_unavailable() -> None:
+    """SSE subscription should log warning when FastMCP lacks custom_route support."""
+
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+    mock_mcp.run_http_async = AsyncMock()
+
+    # Mock MCP instance where custom_route is not callable / effectively unavailable
+    mock_mcp.custom_route = None
+
+    with patch("routeros_mcp.mcp.transport.http_sse.logger") as mock_logger:
+        HTTPSSETransport(settings, mock_mcp)
+
+        # Verify warning was logged
+        mock_logger.warning.assert_called_once()
+        call = mock_logger.warning.call_args
+        message = call.args[0]
+        assert "does not support custom routes" in message
+        assert "SSE subscriptions unavailable" in message
