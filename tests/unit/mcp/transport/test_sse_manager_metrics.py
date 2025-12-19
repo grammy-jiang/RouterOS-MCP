@@ -134,6 +134,40 @@ async def test_subscription_metrics_on_subscribe() -> None:
 
 
 @pytest.mark.asyncio
+async def test_subscription_metrics_aggregated_across_resources() -> None:
+    """Ensure subscription gauge aggregates counts across same resource pattern."""
+    manager = SSEManager()
+
+    resource_pattern = "device://*/health"
+    initial_count = get_metric_value(
+        "routeros_mcp_resource_subscriptions_active",
+        labels={"resource_uri_pattern": resource_pattern},
+    )
+
+    sub1 = await manager.subscribe("client-1", "device://dev-001/health")
+    sub2 = await manager.subscribe("client-2", "device://dev-002/health")
+
+    assert get_metric_value(
+        "routeros_mcp_resource_subscriptions_active",
+        labels={"resource_uri_pattern": resource_pattern},
+    ) == initial_count + 2
+
+    await manager.unsubscribe(sub1.subscription_id)
+
+    assert get_metric_value(
+        "routeros_mcp_resource_subscriptions_active",
+        labels={"resource_uri_pattern": resource_pattern},
+    ) == initial_count + 1
+
+    await manager.unsubscribe(sub2.subscription_id)
+
+    assert get_metric_value(
+        "routeros_mcp_resource_subscriptions_active",
+        labels={"resource_uri_pattern": resource_pattern},
+    ) == initial_count
+
+
+@pytest.mark.asyncio
 async def test_notification_metrics_on_broadcast() -> None:
     """Test that notification metrics are recorded when broadcasting."""
     manager = SSEManager(update_batch_interval_seconds=0.1)
@@ -214,4 +248,3 @@ async def test_resource_pattern_extraction() -> None:
     
     pattern = manager._get_resource_pattern("")
     assert pattern == "unknown"
-

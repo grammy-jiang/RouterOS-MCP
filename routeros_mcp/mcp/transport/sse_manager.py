@@ -96,6 +96,7 @@ class SSEManager:
         self._subscriptions: dict[str, SSESubscription] = {}
         self._subscriptions_by_resource: dict[str, set[str]] = defaultdict(set)
         self._subscriptions_by_client: dict[str, set[str]] = defaultdict(set)
+        self._resource_patterns: dict[str, str] = {}
 
         # Lock to prevent race conditions during subscription creation
         self._subscription_lock = asyncio.Lock()
@@ -163,10 +164,8 @@ class SSEManager:
 
             # Update metrics for subscription count
             resource_pattern = self._get_resource_pattern(resource_uri)
-            metrics.update_resource_subscriptions(
-                resource_uri_pattern=resource_pattern,
-                count=len(self._subscriptions_by_resource[resource_uri]),
-            )
+            self._resource_patterns[resource_uri] = resource_pattern
+            self._update_subscription_metrics(resource_pattern)
 
             logger.info(
                 "Client subscribed to resource",
@@ -199,23 +198,13 @@ class SSEManager:
         resource_uri = subscription.resource_uri
         self._subscriptions_by_resource[resource_uri].discard(subscription_id)
         
-        # Update metrics before removing resource tracking
         resource_pattern = self._get_resource_pattern(resource_uri)
-        remaining_count = len(self._subscriptions_by_resource[resource_uri])
-        
+
         if not self._subscriptions_by_resource[resource_uri]:
             del self._subscriptions_by_resource[resource_uri]
-            # Set to 0 when no more subscriptions
-            metrics.update_resource_subscriptions(
-                resource_uri_pattern=resource_pattern,
-                count=0,
-            )
-        else:
-            # Update to remaining count
-            metrics.update_resource_subscriptions(
-                resource_uri_pattern=resource_pattern,
-                count=remaining_count,
-            )
+            self._resource_patterns.pop(resource_uri, None)
+
+        self._update_subscription_metrics(resource_pattern)
 
         # Remove from client tracking
         self._subscriptions_by_client[subscription.client_id].discard(subscription_id)
@@ -513,6 +502,27 @@ class SSEManager:
 
         # For other schemes, just use wildcard
         return f"{scheme}://*"
+
+    def _update_subscription_metrics(self, resource_pattern: str) -> None:
+        """Update aggregated subscription metrics for a resource pattern."""
+        total_count = self._get_pattern_subscription_count(resource_pattern)
+        metrics.update_resource_subscriptions(
+            resource_uri_pattern=resource_pattern,
+            count=total_count,
+        )
+
+    def _get_pattern_subscription_count(self, resource_pattern: str) -> int:
+        """Calculate total subscriptions across resources sharing a pattern."""
+        total = 0
+        for resource_uri, subscription_ids in self._subscriptions_by_resource.items():
+            pattern = self._resource_patterns.get(resource_uri)
+            if pattern is None:
+                pattern = self._get_resource_pattern(resource_uri)
+                self._resource_patterns[resource_uri] = pattern
+
+            if pattern == resource_pattern:
+                total += len(subscription_ids)
+        return total
 
 
 __all__ = ["SSEManager", "SSESubscription"]
