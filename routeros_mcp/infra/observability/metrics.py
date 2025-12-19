@@ -223,6 +223,63 @@ snapshot_retention_pruned = Counter(
     registry=_registry,
 )
 
+snapshot_capture_duration_seconds = Histogram(
+    "routeros_mcp_snapshot_capture_duration_seconds",
+    "Duration of snapshot capture operations in seconds",
+    ["device_id", "kind"],
+    buckets=(0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0),
+    registry=_registry,
+)
+
+snapshot_age_seconds = Gauge(
+    "routeros_mcp_snapshot_age_seconds",
+    "Age of latest snapshot in seconds (time since capture)",
+    ["device_id", "kind"],
+    registry=_registry,
+)
+
+snapshot_missing_total = Counter(
+    "routeros_mcp_snapshot_missing_total",
+    "Number of times a snapshot was requested but not found",
+    ["device_id", "kind"],
+    registry=_registry,
+)
+
+# SSE/Subscription Metrics (Phase 2.1)
+sse_connections_active = Gauge(
+    "routeros_mcp_sse_connections_active",
+    "Number of active SSE connections",
+    registry=_registry,
+)
+
+sse_connection_duration_seconds = Histogram(
+    "routeros_mcp_sse_connection_duration_seconds",
+    "Duration of SSE connections in seconds",
+    buckets=(1.0, 10.0, 60.0, 300.0, 600.0, 1800.0, 3600.0),
+    registry=_registry,
+)
+
+resource_subscriptions_active = Gauge(
+    "routeros_mcp_resource_subscriptions_active",
+    "Number of active resource subscriptions",
+    ["resource_uri_pattern"],
+    registry=_registry,
+)
+
+resource_notifications_total = Counter(
+    "routeros_mcp_resource_notifications_total",
+    "Total number of resource notifications sent",
+    ["resource_uri_pattern"],
+    registry=_registry,
+)
+
+resource_notifications_dropped_total = Counter(
+    "routeros_mcp_resource_notifications_dropped_total",
+    "Number of resource notifications dropped",
+    ["reason"],
+    registry=_registry,
+)
+
 # Authentication/Authorization Metrics
 auth_checks_total = Counter(
     "routeros_mcp_auth_checks_total",
@@ -485,6 +542,114 @@ def record_cache_invalidation(service: str, reason: str = "state_change") -> Non
     cache_invalidations_total.labels(service=service, reason=reason).inc()
 
 
+def record_snapshot_capture(
+    device_id: str,
+    kind: str,
+    duration: float,
+) -> None:
+    """Record snapshot capture duration metrics.
+
+    Args:
+        device_id: Device identifier
+        kind: Snapshot kind (e.g., "config")
+        duration: Capture duration in seconds
+    """
+    snapshot_capture_duration_seconds.labels(
+        device_id=device_id,
+        kind=kind,
+    ).observe(duration)
+
+
+def update_snapshot_age(
+    device_id: str,
+    kind: str,
+    age_seconds: float,
+) -> None:
+    """Update snapshot age gauge.
+
+    Args:
+        device_id: Device identifier
+        kind: Snapshot kind (e.g., "config")
+        age_seconds: Age of snapshot in seconds (time since capture)
+    """
+    snapshot_age_seconds.labels(
+        device_id=device_id,
+        kind=kind,
+    ).set(age_seconds)
+
+
+def record_snapshot_missing(
+    device_id: str,
+    kind: str,
+) -> None:
+    """Record when a snapshot is requested but not found.
+
+    Args:
+        device_id: Device identifier
+        kind: Snapshot kind (e.g., "config")
+    """
+    snapshot_missing_total.labels(
+        device_id=device_id,
+        kind=kind,
+    ).inc()
+
+
+def record_sse_connection_start() -> None:
+    """Record when an SSE connection is established."""
+    sse_connections_active.inc()
+
+
+def record_sse_connection_end(duration: float) -> None:
+    """Record when an SSE connection is closed.
+
+    Args:
+        duration: Connection duration in seconds
+    """
+    sse_connections_active.dec()
+    sse_connection_duration_seconds.observe(duration)
+
+
+def update_resource_subscriptions(
+    resource_uri_pattern: str,
+    count: int,
+) -> None:
+    """Update active subscription count for a resource URI pattern.
+
+    Args:
+        resource_uri_pattern: Resource URI pattern (e.g., "device://*/health")
+        count: Current number of active subscriptions
+    """
+    resource_subscriptions_active.labels(
+        resource_uri_pattern=resource_uri_pattern,
+    ).set(count)
+
+
+def record_resource_notification(
+    resource_uri_pattern: str,
+) -> None:
+    """Record a resource notification sent to subscribers.
+
+    Args:
+        resource_uri_pattern: Resource URI pattern (e.g., "device://*/health")
+    """
+    resource_notifications_total.labels(
+        resource_uri_pattern=resource_uri_pattern,
+    ).inc()
+
+
+def record_resource_notification_dropped(
+    reason: str,
+) -> None:
+    """Record a dropped resource notification.
+
+    Args:
+        reason: Reason for drop (e.g., "queue_full", "client_disconnected", "backpressure")
+    """
+    resource_notifications_dropped_total.labels(
+        reason=reason,
+    ).inc()
+
+
 __all__ = [
     "get_registry",
     "get_metrics_text",
@@ -502,4 +667,12 @@ __all__ = [
     "record_cache_fetch",
     "update_cache_size",
     "record_cache_invalidation",
+    "record_snapshot_capture",
+    "update_snapshot_age",
+    "record_snapshot_missing",
+    "record_sse_connection_start",
+    "record_sse_connection_end",
+    "update_resource_subscriptions",
+    "record_resource_notification",
+    "record_resource_notification_dropped",
 ]

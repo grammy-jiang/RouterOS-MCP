@@ -16,6 +16,8 @@ from typing import Any
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
+from routeros_mcp.infra.observability import metrics
+
 logger = logging.getLogger(__name__)
 
 
@@ -94,6 +96,7 @@ class SSEManager:
         self._subscriptions: dict[str, SSESubscription] = {}
         self._subscriptions_by_resource: dict[str, set[str]] = defaultdict(set)
         self._subscriptions_by_client: dict[str, set[str]] = defaultdict(set)
+        self._resource_patterns: dict[str, str] = {}
 
         # Lock to prevent race conditions during subscription creation
         self._subscription_lock = asyncio.Lock()
@@ -159,12 +162,18 @@ class SSEManager:
             self._subscriptions_by_resource[resource_uri].add(subscription.subscription_id)
             self._subscriptions_by_client[client_id].add(subscription.subscription_id)
 
+            # Update metrics for subscription count
+            resource_pattern = self._get_resource_pattern(resource_uri)
+            self._resource_patterns[resource_uri] = resource_pattern
+            self._update_subscription_metrics(resource_pattern)
+
             logger.info(
                 "Client subscribed to resource",
                 extra={
                     "subscription_id": subscription.subscription_id,
                     "client_id": client_id,
                     "resource_uri": resource_uri,
+                    "resource_uri_pattern": resource_pattern,
                     "total_subscriptions": len(self._subscriptions),
                 },
             )
@@ -186,9 +195,16 @@ class SSEManager:
             return
 
         # Remove from resource tracking
-        self._subscriptions_by_resource[subscription.resource_uri].discard(subscription_id)
-        if not self._subscriptions_by_resource[subscription.resource_uri]:
-            del self._subscriptions_by_resource[subscription.resource_uri]
+        resource_uri = subscription.resource_uri
+        self._subscriptions_by_resource[resource_uri].discard(subscription_id)
+        
+        resource_pattern = self._get_resource_pattern(resource_uri)
+
+        if not self._subscriptions_by_resource[resource_uri]:
+            del self._subscriptions_by_resource[resource_uri]
+            self._resource_patterns.pop(resource_uri, None)
+
+        self._update_subscription_metrics(resource_pattern)
 
         # Remove from client tracking
         self._subscriptions_by_client[subscription.client_id].discard(subscription_id)
@@ -200,7 +216,8 @@ class SSEManager:
             extra={
                 "subscription_id": subscription_id,
                 "client_id": subscription.client_id,
-                "resource_uri": subscription.resource_uri,
+                "resource_uri": resource_uri,
+                "resource_uri_pattern": resource_pattern,
                 "total_subscriptions": len(self._subscriptions),
             },
         )
@@ -269,6 +286,9 @@ class SSEManager:
 
             # Send to all subscribers
             sent_count = 0
+            dropped_count = 0
+            resource_pattern = self._get_resource_pattern(resource_uri)
+            
             for sub_id in list(subscriber_ids):  # Copy to avoid modification during iteration
                 subscription = self._subscriptions.get(sub_id)
                 if not subscription:
@@ -280,22 +300,36 @@ class SSEManager:
                     sent_count += 1
                     self._total_events_sent += 1
                 except asyncio.QueueFull:
+                    dropped_count += 1
                     logger.warning(
                         "Subscription queue full, dropping event",
                         extra={
                             "subscription_id": sub_id,
                             "resource_uri": resource_uri,
+                            "resource_uri_pattern": resource_pattern,
+                            "reason": "queue_full",
                         },
                     )
+                    # Record dropped notification metric
+                    metrics.record_resource_notification_dropped(reason="queue_full")
 
             self._total_broadcasts += 1
+
+            # Record notification metrics for successfully sent notifications
+            if sent_count > 0:
+                # Use Counter.inc(amount) to increment by sent_count in one operation
+                metrics.resource_notifications_total.labels(
+                    resource_uri_pattern=resource_pattern,
+                ).inc(sent_count)
 
             logger.info(
                 "Broadcast event to subscribers",
                 extra={
                     "resource_uri": resource_uri,
+                    "resource_uri_pattern": resource_pattern,
                     "event_type": update.get("event", "update"),
                     "subscriber_count": sent_count,
+                    "dropped_count": dropped_count,
                     "total_broadcasts": self._total_broadcasts,
                 },
             )
@@ -322,6 +356,10 @@ class SSEManager:
         Yields:
             Event dictionaries with 'event' and 'data' keys
         """
+        # Record SSE connection start
+        metrics.record_sse_connection_start()
+        connection_start_time = datetime.now(UTC)
+        
         try:
             # Send initial connection confirmation
             yield {
@@ -329,7 +367,7 @@ class SSEManager:
                 "data": {
                     "subscription_id": subscription.subscription_id,
                     "resource_uri": subscription.resource_uri,
-                    "timestamp": datetime.now(UTC).isoformat(),
+                    "timestamp": connection_start_time.isoformat(),
                 },
             }
 
@@ -375,6 +413,10 @@ class SSEManager:
             )
             raise
         finally:
+            # Record SSE connection end with duration
+            connection_duration = (datetime.now(UTC) - connection_start_time).total_seconds()
+            metrics.record_sse_connection_end(duration=connection_duration)
+            
             # Cleanup subscription on disconnect
             await self.unsubscribe(subscription.subscription_id)
 
@@ -424,6 +466,63 @@ class SSEManager:
             return parts[2]
 
         return None
+
+    @staticmethod
+    def _get_resource_pattern(resource_uri: str) -> str:
+        """Get resource URI pattern for metrics (generalized form).
+
+        Converts specific URIs to patterns for aggregated metrics:
+        - "device://dev-001/health" -> "device://*/health"
+        - "device://dev-002/config" -> "device://*/config"
+        - "fleet://prod" -> "fleet://*"
+
+        Args:
+            resource_uri: Specific resource URI
+
+        Returns:
+            Generalized resource URI pattern for metrics
+        """
+        if not resource_uri:
+            return "unknown"
+
+        # Parse URI scheme
+        if "://" not in resource_uri:
+            return "unknown"
+
+        scheme, rest = resource_uri.split("://", 1)
+
+        # For device:// URIs, replace device ID with wildcard
+        if scheme == "device":
+            parts = rest.split("/")
+            if len(parts) >= 2:
+                # device://dev-001/health -> device://*/health
+                return f"{scheme}://*/{'/'.join(parts[1:])}"
+            else:
+                return f"{scheme}://*"
+
+        # For other schemes, just use wildcard
+        return f"{scheme}://*"
+
+    def _update_subscription_metrics(self, resource_pattern: str) -> None:
+        """Update aggregated subscription metrics for a resource pattern."""
+        total_count = self._get_pattern_subscription_count(resource_pattern)
+        metrics.update_resource_subscriptions(
+            resource_uri_pattern=resource_pattern,
+            count=total_count,
+        )
+
+    def _get_pattern_subscription_count(self, resource_pattern: str) -> int:
+        """Calculate total subscriptions across resources sharing a pattern."""
+        total = 0
+        for resource_uri, subscription_ids in self._subscriptions_by_resource.items():
+            pattern = self._resource_patterns.get(resource_uri)
+            if pattern is None:
+                pattern = self._get_resource_pattern(resource_uri)
+                self._resource_patterns[resource_uri] = pattern
+
+            if pattern == resource_pattern:
+                total += len(subscription_ids)
+        return total
 
 
 __all__ = ["SSEManager", "SSESubscription"]

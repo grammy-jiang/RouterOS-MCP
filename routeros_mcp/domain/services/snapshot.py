@@ -17,6 +17,7 @@ See docs/15-mcp-resources-and-prompts-design.md (Phase 2.1 implementation detail
 import gzip
 import hashlib
 import logging
+import time
 import uuid
 from datetime import UTC, datetime
 
@@ -94,9 +95,19 @@ class SnapshotService:
             ValidationError: If snapshot exceeds size limit
             RouterOSNetworkError: If device is unreachable
         """
+        # Track capture start time for duration metrics
+        capture_start_time = time.time()
+        
         # Get device credentials
         credentials = await self._get_device_credentials(device.id)
         if not credentials:
+            # Record failure and update metrics
+            capture_duration = time.time() - capture_start_time
+            metrics.record_snapshot_capture(
+                device_id=device.id,
+                kind=kind,
+                duration=capture_duration,
+            )
             raise ValidationError(
                 f"No credentials found for device {device.id}",
                 data={"device_id": device.id},
@@ -121,13 +132,23 @@ class SnapshotService:
                 source = "rest"
                 logger.info(
                     f"Captured config snapshot via REST for device {device.id}",
-                    extra={"device_id": device.id, "source": "rest"},
+                    extra={
+                        "device_id": device.id,
+                        "source": "rest",
+                        "kind": kind,
+                    },
                 )
             except Exception as e:
                 error_message = str(e)
                 logger.warning(
                     f"REST config export failed for device {device.id}: {e}",
-                    extra={"device_id": device.id, "error": str(e)},
+                    extra={
+                        "device_id": device.id,
+                        "kind": kind,
+                        "source": "rest",
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                    },
                 )
 
         # Fallback to SSH if REST failed and fallback is enabled
@@ -142,17 +163,34 @@ class SnapshotService:
                 redacted = True
                 logger.info(
                     f"Captured config snapshot via SSH for device {device.id}",
-                    extra={"device_id": device.id, "source": "ssh"},
+                    extra={
+                        "device_id": device.id,
+                        "source": "ssh",
+                        "kind": kind,
+                    },
                 )
             except Exception as e:
                 error_message = str(e)
                 logger.error(
                     f"SSH config export failed for device {device.id}: {e}",
-                    extra={"device_id": device.id, "error": str(e)},
+                    extra={
+                        "device_id": device.id,
+                        "kind": kind,
+                        "source": "ssh",
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                    },
                 )
 
         # Check if we got config
         if config_text is None:
+            # Record failure and update metrics
+            capture_duration = time.time() - capture_start_time
+            metrics.record_snapshot_capture(
+                device_id=device.id,
+                kind=kind,
+                duration=capture_duration,
+            )
             raise RouterOSNetworkError(
                 f"Failed to capture config snapshot for device {device.id}: {error_message}"
             )
@@ -160,6 +198,13 @@ class SnapshotService:
         # Enforce size limit
         config_bytes = config_text.encode("utf-8")
         if len(config_bytes) > self.settings.snapshot_max_size_bytes:
+            # Record failure and update metrics
+            capture_duration = time.time() - capture_start_time
+            metrics.record_snapshot_capture(
+                device_id=device.id,
+                kind=kind,
+                duration=capture_duration,
+            )
             raise ValidationError(
                 f"Snapshot size ({len(config_bytes)} bytes) exceeds limit "
                 f"({self.settings.snapshot_max_size_bytes} bytes)",
@@ -220,6 +265,14 @@ class SnapshotService:
         )
 
         # Update metrics
+        # Record capture duration
+        capture_duration = time.time() - capture_start_time
+        metrics.record_snapshot_capture(
+            device_id=device.id,
+            kind=kind,
+            duration=capture_duration,
+        )
+        
         metrics.snapshot_capture_total.labels(
             device_id=device.id,
             kind=kind,
@@ -238,6 +291,13 @@ class SnapshotService:
                 device_id=device.id,
                 kind=kind,
             ).observe(len(compressed_data) / len(config_bytes))
+
+        # Update snapshot age (0 seconds for newly captured)
+        metrics.update_snapshot_age(
+            device_id=device.id,
+            kind=kind,
+            age_seconds=0.0,
+        )
 
         return snapshot_id
 
@@ -261,7 +321,24 @@ class SnapshotService:
             .order_by(desc(SnapshotORM.timestamp))
             .limit(1)
         )
-        return result.scalar_one_or_none()
+        snapshot = result.scalar_one_or_none()
+        
+        # Update snapshot age metrics
+        if snapshot:
+            age_seconds = (datetime.now(UTC) - snapshot.timestamp).total_seconds()
+            metrics.update_snapshot_age(
+                device_id=device_id,
+                kind=kind,
+                age_seconds=age_seconds,
+            )
+        else:
+            # No snapshot found - record missing snapshot
+            metrics.record_snapshot_missing(
+                device_id=device_id,
+                kind=kind,
+            )
+        
+        return snapshot
 
     async def decode_snapshot(
         self,
