@@ -738,6 +738,30 @@ class WirelessService:
             await ssh_client.close()
 
     @staticmethod
+    def _get_data_column_start_index(parts: list[str]) -> int:
+        """Determine the starting index for data columns, skipping flags if present.
+        
+        RouterOS table output may have a flags column after the row ID.
+        Flags are typically 1-3 alphabetic characters (e.g., 'A', 'DR', 'X').
+        This helper determines whether parts[1] is a flags column or actual data.
+        
+        Args:
+            parts: Split line parts from RouterOS table output
+            
+        Returns:
+            Index where data columns start (1 if no flags, 2 if flags present)
+        """
+        if (
+            len(parts) > 1
+            and len(parts[1]) <= 3
+            and all(c.isalpha() for c in parts[1])
+            and "-" not in parts[1]
+            and not any(c.isdigit() for c in parts[1])
+        ):
+            return 2  # Skip flags column
+        return 1  # No flags column
+
+    @staticmethod
     def _parse_capsman_remote_caps_output(output: str) -> list[dict[str, Any]]:
         """Parse /caps-man/remote-cap/print output into CAP list."""
         caps: list[dict[str, Any]] = []
@@ -760,21 +784,8 @@ class WirelessService:
 
             try:
                 # Format: [id] [flags*] [name] [address] [identity] [state] ...
-                idx = 0
                 cap_id = parts[0]
-                idx = 1
-
-                # Check for flags (single letters like A, D, R, S, X)
-                # Flags are typically 1-3 characters, all alphabetic, and UPPERCASE or lowercase letters only
-                # Skip parts that look like names (contain dashes or numbers, or >3 chars)
-                if (
-                    len(parts) > 1
-                    and len(parts[1]) <= 3
-                    and all(c.isalpha() or c.isspace() for c in parts[1])
-                    and "-" not in parts[1]
-                    and not any(c.isdigit() for c in parts[1])
-                ):
-                    idx = 2
+                idx = WirelessService._get_data_column_start_index(parts)
 
                 # Extract fields
                 name = parts[idx] if idx < len(parts) else ""
@@ -904,21 +915,8 @@ class WirelessService:
                 continue
 
             try:
-                idx = 0
                 reg_id = parts[0]
-                idx = 1
-
-                # Check for flags (single letters like D, R, S, X, A)
-                # Flags are typically 1-3 characters, all alphabetic, and UPPERCASE or lowercase letters only
-                # Skip parts that look like interface names (contain dashes or numbers, or >3 chars)
-                if (
-                    len(parts) > 1
-                    and len(parts[1]) <= 3
-                    and all(c.isalpha() or c.isspace() for c in parts[1])
-                    and "-" not in parts[1]
-                    and not any(c.isdigit() for c in parts[1])
-                ):
-                    idx = 2
+                idx = WirelessService._get_data_column_start_index(parts)
 
                 # Extract fields (format varies by RouterOS version)
                 interface = parts[idx] if idx < len(parts) else ""
