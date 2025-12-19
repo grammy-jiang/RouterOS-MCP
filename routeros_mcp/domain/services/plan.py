@@ -550,14 +550,23 @@ class PlanService:
             ValueError: If plan not found or invalid status transition
         """
         try:
+            def normalize_status(status_value: str) -> PlanStatus:
+                """Normalize legacy statuses to current enum values."""
+                legacy_aliases = {
+                    "applied": PlanStatus.COMPLETED,
+                }
+                try:
+                    return PlanStatus(status_value)
+                except ValueError:
+                    if status_value in legacy_aliases:
+                        return legacy_aliases[status_value]
+                    valid_values = [s.value for s in PlanStatus] + list(legacy_aliases.keys())
+                    raise ValueError(
+                        f"Invalid status: {status_value}. Must be one of: {', '.join(valid_values)}"
+                    )
+
             # Validate status is a valid enum value
-            try:
-                new_status = PlanStatus(status)
-            except ValueError:
-                valid_values = [s.value for s in PlanStatus]
-                raise ValueError(
-                    f"Invalid status: {status}. Must be one of: {', '.join(valid_values)}"
-                )
+            new_status = normalize_status(status)
 
             stmt = select(PlanModel).where(PlanModel.id == plan_id)
             result = await self.session.execute(stmt)
@@ -567,13 +576,12 @@ class PlanService:
                 raise ValueError(f"Plan not found: {plan_id}")
 
             # Validate state transition
-            current_status = PlanStatus(plan.status)
+            current_status = normalize_status(plan.status)
             if new_status not in self.VALID_TRANSITIONS.get(current_status, set()):
                 raise ValueError(
                     f"Invalid status transition from {current_status.value} to {new_status.value}"
                 )
 
-            plan.status = new_status.value
             plan.status = new_status.value
 
             # Log audit event (part of same transaction)
