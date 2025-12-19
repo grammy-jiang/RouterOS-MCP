@@ -62,6 +62,9 @@ async def test_run_health_check_with_issues(monkeypatch: pytest.MonkeyPatch):
 
     store_mock = AsyncMock()
     monkeypatch.setattr(service, "_store_health_check", store_mock)
+    
+    broadcast_mock = AsyncMock()
+    monkeypatch.setattr(service, "_broadcast_health_update", broadcast_mock)
 
     result: HealthCheckResult = await service.run_health_check("dev-issue")
     assert result.status == "degraded"
@@ -87,6 +90,9 @@ async def test_run_health_check_memory_warning(monkeypatch: pytest.MonkeyPatch):
 
     store_mock = AsyncMock()
     monkeypatch.setattr(service, "_store_health_check", store_mock)
+    
+    broadcast_mock = AsyncMock()
+    monkeypatch.setattr(service, "_broadcast_health_update", broadcast_mock)
 
     result: HealthCheckResult = await service.run_health_check("dev-mem")
     assert result.status == "degraded"
@@ -107,6 +113,9 @@ async def test_run_health_check_unreachable(monkeypatch: pytest.MonkeyPatch):
 
     store_mock = AsyncMock()
     monkeypatch.setattr(service, "_store_health_check", store_mock)
+    
+    broadcast_mock = AsyncMock()
+    monkeypatch.setattr(service, "_broadcast_health_update", broadcast_mock)
 
     result = await service.run_health_check("dev-down")
     assert result.status == "unreachable"
