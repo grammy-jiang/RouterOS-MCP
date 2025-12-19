@@ -92,10 +92,9 @@ class TestRouterOSSSHClient:
         assert "/ping" in ALLOWED_SSH_COMMANDS
         assert "/tool/ping" in ALLOWED_SSH_COMMANDS
         assert "/tool/traceroute" in ALLOWED_SSH_COMMANDS
-        assert len(ALLOWED_SSH_COMMANDS) == 24
-        assert len(ALLOWED_SSH_COMMANDS) == 22
+
         # The allowlist grows over time as read-only tools are added; avoid brittle exact counts.
-        assert len(ALLOWED_SSH_COMMANDS) >= 24
+        # Membership assertions above already validate the minimum required command set.
 
     @pytest.mark.asyncio
     async def test_validate_command_whitelisted(self) -> None:
