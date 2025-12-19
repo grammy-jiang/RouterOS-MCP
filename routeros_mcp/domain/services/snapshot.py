@@ -109,6 +109,7 @@ class SnapshotService:
         config_text = None
         source = None
         error_message = None
+        redacted = False
 
         if rest_creds:
             try:
@@ -138,6 +139,7 @@ class SnapshotService:
                     password=ssh_creds["password"],
                 )
                 source = "ssh"
+                redacted = True
                 logger.info(
                     f"Captured config snapshot via SSH for device {device.id}",
                     extra={"device_id": device.id, "source": "ssh"},
@@ -185,7 +187,7 @@ class SnapshotService:
             "checksum": checksum,
             "checksum_algorithm": "sha256",
             "source": source,
-            "redacted": False,  # Phase 2.1: redaction not yet implemented
+            "redacted": redacted,
         }
 
         # Generate snapshot ID and capture timestamp
@@ -445,9 +447,9 @@ class SnapshotService:
         )
 
         try:
-            # Use compact export for smaller size
+            # Use compact export with sensitive data redacted
             # This command is whitelisted in ssh_client.py
-            config = await client.execute("/export compact")
+            config = await client.execute("/export hide-sensitive compact")
             return config
         finally:
             await client.close()

@@ -166,7 +166,7 @@ async def test_capture_snapshot_via_ssh_success(
     )
 
     assert snapshot_id.startswith("snap-")
-    assert fake_ssh.executed_commands == ["/export compact"]
+    assert fake_ssh.executed_commands == ["/export hide-sensitive compact"]
     assert fake_ssh.closed
 
     # Verify snapshot in database
@@ -182,7 +182,7 @@ async def test_capture_snapshot_via_ssh_success(
     assert snapshot.meta["source"] == "ssh"
     assert snapshot.meta["compression"] == "gzip"
     assert "checksum" in snapshot.meta
-    assert snapshot.meta["redacted"] is False
+    assert snapshot.meta["redacted"] is True
 
     # Verify data is gzip compressed (small text might be larger due to header overhead)
     # Just verify it's not the same as uncompressed

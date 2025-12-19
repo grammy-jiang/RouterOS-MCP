@@ -13,6 +13,8 @@ Design principles:
 Whitelisted commands:
 - /export (configuration export)
 - /export compact (compact configuration export)
+- /export hide-sensitive (redacted configuration export)
+- /export hide-sensitive compact (redacted compact configuration export)
 
 See docs/03-routeros-integration-and-platform-constraints-rest-and-ssh.md
 """
@@ -36,6 +38,8 @@ logger = logging.getLogger(__name__)
 ALLOWED_SSH_COMMANDS: Final[set[str]] = {
     "/export",  # Full configuration export
     "/export compact",  # Compact configuration export
+    "/export hide-sensitive",  # Redacted configuration export
+    "/export hide-sensitive compact",  # Redacted compact configuration export
     "/system/resource/print",  # Read-only health probe (standard format: key: value)
     "/system/package/print",  # Package listing (standard table format)
     "/system/clock/print",  # Clock info (standard format: key: value)
