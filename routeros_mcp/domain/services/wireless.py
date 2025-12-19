@@ -168,6 +168,118 @@ class WirelessService:
         finally:
             await ssh_client.close()
 
+    async def get_capsman_remote_caps(self, device_id: str) -> list[dict[str, Any]]:
+        """List remote CAP devices managed by CAPsMAN with REST→SSH fallback.
+
+        Returns information about remote CAP (Controlled Access Point) devices
+        known to the CAPsMAN controller on this device. Returns empty list
+        when CAPsMAN is not present or no CAPs are registered.
+
+        Args:
+            device_id: Device identifier
+
+        Returns:
+            List of remote CAP dictionaries with device info, status, and capabilities
+
+        Raises:
+            DeviceNotFoundError: If device doesn't exist
+        """
+        await self.device_service.get_device(device_id)
+
+        try:
+            caps = await self._get_capsman_remote_caps_via_rest(device_id)
+            for cap in caps:
+                cap["transport"] = "rest"
+                cap["fallback_used"] = False
+                cap["rest_error"] = None
+            return caps
+        except (
+            RouterOSTimeoutError,
+            RouterOSNetworkError,
+            RouterOSServerError,
+            RouterOSClientError,
+            Exception,
+        ) as rest_exc:
+            logger.warning(
+                f"REST CAPsMAN remote-cap listing failed, attempting SSH fallback: {rest_exc}",
+                extra={"device_id": device_id},
+            )
+            # Try SSH fallback
+            try:
+                caps = await self._get_capsman_remote_caps_via_ssh(device_id)
+                for cap in caps:
+                    cap["transport"] = "ssh"
+                    cap["fallback_used"] = True
+                    cap["rest_error"] = str(rest_exc)
+                return caps
+            except Exception as ssh_exc:
+                logger.error(
+                    "Both REST and SSH CAPsMAN remote-cap listing failed",
+                    exc_info=ssh_exc,
+                    extra={"device_id": device_id, "rest_error": str(rest_exc)},
+                )
+                raise RuntimeError(
+                    f"CAPsMAN remote-cap listing failed via REST and SSH: "
+                    f"rest_error={rest_exc}, ssh_error={ssh_exc}"
+                ) from ssh_exc
+
+    async def get_capsman_registrations(self, device_id: str) -> list[dict[str, Any]]:
+        """List active CAPsMAN registrations with REST→SSH fallback.
+
+        Returns information about active client registrations managed by CAPsMAN.
+        Returns empty list when CAPsMAN is not present or no registrations exist.
+
+        Note: The exact endpoint for registrations varies by RouterOS package.
+        We use a best-effort approach to query available registration tables.
+
+        Args:
+            device_id: Device identifier
+
+        Returns:
+            List of registration dictionaries with client info and status
+
+        Raises:
+            DeviceNotFoundError: If device doesn't exist
+        """
+        await self.device_service.get_device(device_id)
+
+        try:
+            registrations = await self._get_capsman_registrations_via_rest(device_id)
+            for reg in registrations:
+                reg["transport"] = "rest"
+                reg["fallback_used"] = False
+                reg["rest_error"] = None
+            return registrations
+        except (
+            RouterOSTimeoutError,
+            RouterOSNetworkError,
+            RouterOSServerError,
+            RouterOSClientError,
+            Exception,
+        ) as rest_exc:
+            logger.warning(
+                f"REST CAPsMAN registration listing failed, attempting SSH fallback: {rest_exc}",
+                extra={"device_id": device_id},
+            )
+            # Try SSH fallback
+            try:
+                registrations = await self._get_capsman_registrations_via_ssh(device_id)
+                for reg in registrations:
+                    reg["transport"] = "ssh"
+                    reg["fallback_used"] = True
+                    reg["rest_error"] = str(rest_exc)
+                return registrations
+            except Exception as ssh_exc:
+                logger.error(
+                    "Both REST and SSH CAPsMAN registration listing failed",
+                    exc_info=ssh_exc,
+                    extra={"device_id": device_id, "rest_error": str(rest_exc)},
+                )
+                raise RuntimeError(
+                    f"CAPsMAN registration listing failed via REST and SSH: "
+                    f"rest_error={rest_exc}, ssh_error={ssh_exc}"
+                ) from ssh_exc
+
     @staticmethod
     def _routeros_table_has_data_rows(output: str) -> bool:
         """Best-effort check for at least one data row in RouterOS 'print' table output."""
@@ -557,3 +669,261 @@ class WirelessService:
             return ""
 
         return str(value).strip()
+
+    async def _get_capsman_remote_caps_via_rest(
+        self, device_id: str
+    ) -> list[dict[str, Any]]:
+        """Fetch CAPsMAN remote CAPs via REST API."""
+        client = await self.device_service.get_rest_client(device_id)
+
+        try:
+            caps_data = await client.get("/rest/caps-man/remote-cap")
+
+            # Normalize CAP data
+            result: list[dict[str, Any]] = []
+            if isinstance(caps_data, list):
+                for cap in caps_data:
+                    if isinstance(cap, dict):
+                        result.append({
+                            "id": cap.get(".id", ""),
+                            "name": cap.get("name", ""),
+                            "address": cap.get("address", ""),
+                            "identity": cap.get("identity", ""),
+                            "version": cap.get("version", ""),
+                            "state": cap.get("state", ""),
+                            "base_mac": cap.get("base-mac", ""),
+                            "radio_mac": cap.get("radio-mac", ""),
+                            "board": cap.get("board", ""),
+                            "rx_signal": cap.get("rx-signal", ""),
+                            "uptime": cap.get("uptime", ""),
+                        })
+
+            return result
+
+        except Exception as e:
+            # If CAPsMAN not present, return empty list instead of error
+            msg = str(e).lower()
+            if "no such command" in msg or "bad command" in msg or "not found" in msg:
+                logger.debug(
+                    "CAPsMAN not available on device, returning empty list",
+                    extra={"device_id": device_id},
+                )
+                return []
+            raise
+
+        finally:
+            await client.close()
+
+    async def _get_capsman_remote_caps_via_ssh(
+        self, device_id: str
+    ) -> list[dict[str, Any]]:
+        """Fetch CAPsMAN remote CAPs via SSH CLI."""
+        ssh_client = await self.device_service.get_ssh_client(device_id)
+
+        try:
+            try:
+                output = await ssh_client.execute("/caps-man/remote-cap/print without-paging")
+                return self._parse_capsman_remote_caps_output(output)
+            except Exception as e:
+                msg = str(e).lower()
+                # CAPsMAN not available on this RouterOS build/config
+                if "no such command" in msg or "bad command" in msg:
+                    logger.debug(
+                        "CAPsMAN not available on device, returning empty list",
+                        extra={"device_id": device_id},
+                    )
+                    return []
+                raise
+        finally:
+            await ssh_client.close()
+
+    @staticmethod
+    def _parse_capsman_remote_caps_output(output: str) -> list[dict[str, Any]]:
+        """Parse /caps-man/remote-cap/print output into CAP list."""
+        caps: list[dict[str, Any]] = []
+
+        lines = output.strip().split("\n")
+        for line in lines:
+            # Skip header/metadata lines
+            if (
+                not line.strip()
+                or line.startswith("Flags:")
+                or line.startswith("Columns:")
+                or line.startswith("#")
+            ):
+                continue
+
+            # Parse data lines (start with number)
+            parts = line.split()
+            if not parts or not parts[0][0].isdigit():
+                continue
+
+            try:
+                # Format: [id] [flags*] [name] [address] [identity] [state] ...
+                idx = 0
+                cap_id = parts[0]
+                idx = 1
+
+                # Check for flags
+                if len(parts) > 1 and all(c in "DRSXdrsx " for c in parts[1]):
+                    idx = 2
+
+                # Extract fields
+                name = parts[idx] if idx < len(parts) else ""
+                address = parts[idx + 1] if idx + 1 < len(parts) else ""
+                identity = parts[idx + 2] if idx + 2 < len(parts) else ""
+                state = parts[idx + 3] if idx + 3 < len(parts) else ""
+
+                caps.append({
+                    "id": cap_id,
+                    "name": name,
+                    "address": address,
+                    "identity": identity,
+                    "version": "",
+                    "state": state,
+                    "base_mac": "",
+                    "radio_mac": "",
+                    "board": "",
+                    "rx_signal": "",
+                    "uptime": "",
+                })
+            except (IndexError, ValueError) as e:
+                logger.debug(f"Failed to parse CAPsMAN remote-cap line: {line}", exc_info=e)
+                continue
+
+        return caps
+
+    async def _get_capsman_registrations_via_rest(
+        self, device_id: str
+    ) -> list[dict[str, Any]]:
+        """Fetch CAPsMAN registrations via REST API."""
+        client = await self.device_service.get_rest_client(device_id)
+
+        try:
+            # Try registration-table first (most common endpoint)
+            try:
+                regs_data = await client.get("/rest/caps-man/registration-table")
+            except Exception:
+                # Try alternative endpoints that may exist in different RouterOS versions
+                try:
+                    regs_data = await client.get("/rest/caps-man/interface")
+                except Exception:
+                    # No registrations endpoint available
+                    return []
+
+            # Normalize registration data
+            result: list[dict[str, Any]] = []
+            if isinstance(regs_data, list):
+                for reg in regs_data:
+                    if isinstance(reg, dict):
+                        result.append({
+                            "id": reg.get(".id", ""),
+                            "interface": reg.get("interface", ""),
+                            "mac_address": reg.get("mac-address", ""),
+                            "ssid": reg.get("ssid", ""),
+                            "ap": reg.get("ap", ""),
+                            "radio_name": reg.get("radio-name", ""),
+                            "rx_signal": reg.get("rx-signal", ""),
+                            "tx_signal": reg.get("tx-signal", ""),
+                            "uptime": reg.get("uptime", ""),
+                            "packets": reg.get("packets", ""),
+                            "bytes": reg.get("bytes", ""),
+                        })
+
+            return result
+
+        except Exception as e:
+            # If CAPsMAN not present, return empty list instead of error
+            msg = str(e).lower()
+            if "no such command" in msg or "bad command" in msg or "not found" in msg:
+                logger.debug(
+                    "CAPsMAN registrations not available on device, returning empty list",
+                    extra={"device_id": device_id},
+                )
+                return []
+            raise
+
+        finally:
+            await client.close()
+
+    async def _get_capsman_registrations_via_ssh(
+        self, device_id: str
+    ) -> list[dict[str, Any]]:
+        """Fetch CAPsMAN registrations via SSH CLI."""
+        ssh_client = await self.device_service.get_ssh_client(device_id)
+
+        try:
+            # Try registration-table first
+            try:
+                output = await ssh_client.execute("/caps-man/registration-table/print without-paging")
+                return self._parse_capsman_registrations_output(output)
+            except Exception as e1:
+                # Try interface as alternative
+                try:
+                    output = await ssh_client.execute("/caps-man/interface/print without-paging")
+                    return self._parse_capsman_registrations_output(output)
+                except Exception as e2:
+                    msg = f"{e1} | {e2}"
+                    if "no such command" in msg.lower() or "bad command" in msg.lower():
+                        logger.debug(
+                            "CAPsMAN registrations not available on device, returning empty list",
+                            extra={"device_id": device_id},
+                        )
+                        return []
+                    raise
+        finally:
+            await ssh_client.close()
+
+    @staticmethod
+    def _parse_capsman_registrations_output(output: str) -> list[dict[str, Any]]:
+        """Parse /caps-man/registration-table/print output into registration list."""
+        registrations: list[dict[str, Any]] = []
+
+        lines = output.strip().split("\n")
+        for line in lines:
+            # Skip header/metadata lines
+            if (
+                not line.strip()
+                or line.startswith("Flags:")
+                or line.startswith("Columns:")
+                or line.startswith("#")
+            ):
+                continue
+
+            # Parse data lines
+            parts = line.split()
+            if not parts or not parts[0][0].isdigit():
+                continue
+
+            try:
+                idx = 0
+                reg_id = parts[0]
+                idx = 1
+
+                # Check for flags
+                if len(parts) > 1 and all(c in "DRSXdrsx " for c in parts[1]):
+                    idx = 2
+
+                # Extract fields (format varies by RouterOS version)
+                interface = parts[idx] if idx < len(parts) else ""
+                mac_address = parts[idx + 1] if idx + 1 < len(parts) else ""
+                ssid = parts[idx + 2] if idx + 2 < len(parts) else ""
+
+                registrations.append({
+                    "id": reg_id,
+                    "interface": interface,
+                    "mac_address": mac_address,
+                    "ssid": ssid,
+                    "ap": "",
+                    "radio_name": "",
+                    "rx_signal": "",
+                    "tx_signal": "",
+                    "uptime": "",
+                    "packets": "",
+                    "bytes": "",
+                })
+            except (IndexError, ValueError) as e:
+                logger.debug(f"Failed to parse CAPsMAN registration line: {line}", exc_info=e)
+                continue
+
+        return registrations
