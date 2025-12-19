@@ -9,6 +9,7 @@ from typing import Any
 from fastmcp import FastMCP
 
 from routeros_mcp.config import Settings
+from routeros_mcp.domain.models import ToolHint
 from routeros_mcp.domain.services.device import DeviceService
 from routeros_mcp.domain.services.wireless import WirelessService
 from routeros_mcp.infra.db.session import get_session_factory
@@ -28,11 +29,15 @@ def register_wireless_tools(mcp: FastMCP, settings: Settings) -> None:
     """
     session_factory = get_session_factory(settings)
 
-    capsman_hint = (
-        "CAPsMAN note: This router appears to manage one or more CAP devices (APs) via CAPsMAN. "
-        "These results only reflect wireless interfaces/clients local to this device. "
-        "To view SSIDs/clients on CAP-managed APs, inspect CAPsMAN state (e.g., the CAPsMAN "
-        "registration table) or query the CAP device(s) directly."
+    # Standard CAPsMAN guidance hint
+    capsman_hint = ToolHint(
+        code="capsman_detected",
+        message=(
+            "CAPsMAN note: This router appears to manage one or more CAP devices (APs) via CAPsMAN. "
+            "These results only reflect wireless interfaces/clients local to this device. "
+            "To view SSIDs/clients on CAP-managed APs, inspect CAPsMAN state (e.g., the CAPsMAN "
+            "registration table) or query the CAP device(s) directly."
+        ),
     )
 
     @mcp.tool()
@@ -97,7 +102,11 @@ def register_wireless_tools(mcp: FastMCP, settings: Settings) -> None:
                             "device_id": device_id,
                             "interfaces": interfaces,
                             "total_count": len(interfaces),
-                            **({"hints": [capsman_hint]} if capsman_has_aps else {}),
+                            **(
+                                {"hints": [capsman_hint.model_dump()]}
+                                if capsman_has_aps
+                                else {}
+                            ),
                         }
                     ),
                 )
@@ -180,7 +189,11 @@ def register_wireless_tools(mcp: FastMCP, settings: Settings) -> None:
                             "device_id": device_id,
                             "clients": clients,
                             "total_count": len(clients),
-                            **({"hints": [capsman_hint]} if capsman_has_aps else {}),
+                            **(
+                                {"hints": [capsman_hint.model_dump()]}
+                                if capsman_has_aps
+                                else {}
+                            ),
                         }
                     ),
                 )
