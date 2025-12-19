@@ -150,6 +150,9 @@ class HealthService:
         # Store health check result
         await self._store_health_check(result)
 
+        # Broadcast health update notification to SSE subscribers (if HTTP/SSE transport active)
+        await self._broadcast_health_update(device_id, result)
+
         return result
 
     async def get_fleet_health(
@@ -234,6 +237,65 @@ class HealthService:
 
         self.session.add(health_check_orm)
         await self.session.commit()
+
+    async def _broadcast_health_update(
+        self, device_id: str, result: HealthCheckResult
+    ) -> None:
+        """Broadcast health update notification to SSE subscribers.
+
+        This sends a lightweight notification to subscribers of the
+        device://{device_id}/health resource. The notification includes
+        the resource URI and optional version hints, but NOT the full payload.
+
+        Clients subscribed to health updates should re-read the resource
+        to get the latest data after receiving the notification.
+
+        Args:
+            device_id: Device identifier
+            result: Health check result (used for version hint)
+        """
+        try:
+            from routeros_mcp.mcp.server import get_sse_manager
+
+            sse_manager = get_sse_manager()
+            if sse_manager is None:
+                # SSE not active (stdio mode or not initialized yet)
+                return
+
+            resource_uri = f"device://{device_id}/health"
+
+            # Create lightweight notification (no full payload!)
+            # Include only URI and version hint (last_check timestamp as etag)
+            notification_data = {
+                "uri": resource_uri,
+                "etag": result.timestamp.isoformat() if result.timestamp else None,
+                "status_hint": result.status,  # Optional hint to avoid unnecessary re-reads
+            }
+
+            # Broadcast to subscribers
+            subscriber_count = await sse_manager.broadcast(
+                resource_uri=resource_uri,
+                data=notification_data,
+                event_type="resource_updated",
+            )
+
+            if subscriber_count > 0:
+                logger.info(
+                    "Health update notification sent",
+                    extra={
+                        "device_id": device_id,
+                        "resource_uri": resource_uri,
+                        "subscriber_count": subscriber_count,
+                        "status": result.status,
+                    },
+                )
+
+        except Exception as e:
+            # Don't fail health check if notification fails
+            logger.warning(
+                "Failed to broadcast health update notification",
+                extra={"device_id": device_id, "error": str(e)},
+            )
 
     def _parse_cpu_usage(self, resource_data: dict) -> float:
         """Parse CPU usage from RouterOS resource data.

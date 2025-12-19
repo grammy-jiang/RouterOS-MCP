@@ -115,6 +115,10 @@ class HTTPSSETransport:
             update_batch_interval_seconds=settings.sse_update_batch_interval_seconds,
         )
 
+        # Register SSE manager globally so health service can broadcast updates
+        from routeros_mcp.mcp.server import set_sse_manager
+        set_sse_manager(self.sse_manager)
+
         logger.info(
             "Initialized HTTP/SSE transport",
             extra={

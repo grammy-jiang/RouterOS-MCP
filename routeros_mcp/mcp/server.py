@@ -24,6 +24,28 @@ from routeros_mcp.mcp.protocol.jsonrpc import format_tool_result
 
 logger = logging.getLogger(__name__)
 
+# Global SSE manager instance (initialized by HTTP/SSE transport)
+_sse_manager = None
+
+
+def get_sse_manager():
+    """Get the global SSE manager instance.
+
+    Returns:
+        SSEManager instance if HTTP/SSE transport is active, None otherwise
+    """
+    return _sse_manager
+
+
+def set_sse_manager(manager):
+    """Set the global SSE manager instance.
+
+    Args:
+        manager: SSEManager instance to use
+    """
+    global _sse_manager
+    _sse_manager = manager
+
 
 class RouterOSMCPServer:
     """RouterOS MCP server wrapper around FastMCP.
