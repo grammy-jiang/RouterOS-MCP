@@ -78,7 +78,7 @@ class PlanService:
         # Create message to sign: plan_id:created_by:timestamp
         message = f"{plan_id}:{created_by}:{timestamp}"
         
-        # Use encryption key as HMAC secret (or fallback to secure random)
+        # Use encryption key as HMAC secret (or fallback for lab/test environments)
         secret_key = self.settings.encryption_key or "INSECURE_LAB_KEY_DO_NOT_USE_IN_PRODUCTION"
         
         # Generate HMAC signature
@@ -135,7 +135,7 @@ class PlanService:
         if not secrets.compare_digest(token_signature, expected_signature):
             raise ValueError("Invalid approval token")
 
-    async def _log_audit_event(
+    def _log_audit_event(
         self,
         action: str,
         user_sub: str,
@@ -146,6 +146,10 @@ class PlanService:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         """Log audit event for plan operations.
+        
+        Note: This method adds the audit event to the session but does NOT commit.
+        The caller is responsible for committing the transaction to ensure
+        atomicity between the business operation and its audit log.
 
         Args:
             action: Action type (e.g., PLAN_CREATED, PLAN_APPROVED)
@@ -177,7 +181,6 @@ class PlanService:
         )
         
         self.session.add(audit_event)
-        await self.session.commit()
 
     async def _run_pre_checks(
         self, devices: list[DeviceModel], tool_name: str, risk_level: str
@@ -257,8 +260,7 @@ class PlanService:
                 if result["status"] == "failed"
             ]
             raise ValueError(
-                f"Pre-checks failed for devices: {', '.join(failed_devices)}. "
-                f"See pre_check_results for details."
+                f"Pre-checks failed for devices: {', '.join(failed_devices)}."
             )
 
         return pre_check_results
@@ -324,11 +326,9 @@ class PlanService:
             )
 
             self.session.add(plan)
-            await self.session.commit()
-            await self.session.refresh(plan)
-
-            # Log audit event
-            await self._log_audit_event(
+            
+            # Log audit event (part of same transaction)
+            self._log_audit_event(
                 action="PLAN_CREATED",
                 user_sub=created_by,
                 plan_id=plan_id,
@@ -340,6 +340,10 @@ class PlanService:
                     "device_ids": device_ids,
                 },
             )
+            
+            # Commit both plan creation and audit event atomically
+            await self.session.commit()
+            await self.session.refresh(plan)
 
             logger.info(
                 f"Created plan {plan_id}",
@@ -364,15 +368,19 @@ class PlanService:
             }
 
         except Exception as e:
-            # Log failed plan creation
-            await self._log_audit_event(
-                action="PLAN_CREATED",
-                user_sub=created_by,
-                tool_name=tool_name,
-                result="FAILURE",
-                error_message=str(e),
-                metadata={"device_ids": device_ids, "risk_level": risk_level},
-            )
+            # Log failed plan creation (best effort - don't mask original error)
+            try:
+                self._log_audit_event(
+                    action="PLAN_CREATED",
+                    user_sub=created_by,
+                    tool_name=tool_name,
+                    result="FAILURE",
+                    error_message=str(e),
+                    metadata={"device_ids": device_ids, "risk_level": risk_level},
+                )
+                await self.session.commit()
+            except Exception as audit_error:
+                logger.warning(f"Failed to log audit event for plan creation failure: {audit_error}")
             raise
 
     async def _validate_devices(self, device_ids: list[str]) -> list[DeviceModel]:
@@ -471,30 +479,26 @@ class PlanService:
                     f"Plan {plan_id} cannot be approved from status {plan.status}"
                 )
 
-            # Validate approval token
-            stored_token = plan.changes.get("approval_token")
-            if not stored_token or not secrets.compare_digest(stored_token, approval_token):
-                raise ValueError("Invalid approval token")
-
-            # Check token expiration and validate signature
+            # Validate approval token signature and expiration
+            # We rely solely on HMAC validation rather than exact token comparison
+            # to avoid storing the full token unnecessarily
             expires_at_str = plan.changes.get("approval_expires_at")
             token_timestamp = plan.changes.get("approval_token_timestamp")
-            if expires_at_str and token_timestamp:
-                expires_at = datetime.fromisoformat(expires_at_str)
-                self._validate_approval_token(
-                    plan_id, plan.created_by, stored_token, expires_at, token_timestamp
-                )
+            if not expires_at_str or not token_timestamp:
+                raise ValueError("Invalid approval token metadata")
+            
+            expires_at = datetime.fromisoformat(expires_at_str)
+            self._validate_approval_token(
+                plan_id, plan.created_by, approval_token, expires_at, token_timestamp
+            )
 
             # Update plan status
             plan.status = PlanStatus.APPROVED.value
             plan.approved_by = approved_by
             plan.approved_at = datetime.now(UTC)
 
-            await self.session.commit()
-            await self.session.refresh(plan)
-
-            # Log audit event
-            await self._log_audit_event(
+            # Log audit event (part of same transaction)
+            self._log_audit_event(
                 action="PLAN_APPROVED",
                 user_sub=approved_by,
                 plan_id=plan_id,
@@ -502,6 +506,10 @@ class PlanService:
                 result="SUCCESS",
                 metadata={"device_count": len(plan.device_ids)},
             )
+            
+            # Commit both approval and audit event atomically
+            await self.session.commit()
+            await self.session.refresh(plan)
 
             logger.info(
                 f"Approved plan {plan_id}",
@@ -514,14 +522,18 @@ class PlanService:
             return await self.get_plan(plan_id)
 
         except Exception as e:
-            # Log failed approval
-            await self._log_audit_event(
-                action="PLAN_APPROVED",
-                user_sub=approved_by,
-                plan_id=plan_id,
-                result="FAILURE",
-                error_message=str(e),
-            )
+            # Log failed approval (best effort - don't mask original error)
+            try:
+                self._log_audit_event(
+                    action="PLAN_APPROVED",
+                    user_sub=approved_by,
+                    plan_id=plan_id,
+                    result="FAILURE",
+                    error_message=str(e),
+                )
+                await self.session.commit()
+            except Exception as audit_error:
+                logger.warning(f"Failed to log audit event for plan approval failure: {audit_error}")
             raise
 
     async def update_plan_status(
@@ -562,10 +574,10 @@ class PlanService:
                 )
 
             plan.status = new_status.value
-            await self.session.commit()
+            plan.status = new_status.value
 
-            # Log audit event
-            await self._log_audit_event(
+            # Log audit event (part of same transaction)
+            self._log_audit_event(
                 action="PLAN_STATUS_UPDATE",
                 user_sub=updated_by,
                 plan_id=plan_id,
@@ -576,6 +588,9 @@ class PlanService:
                     "new_status": new_status.value,
                 },
             )
+            
+            # Commit both status update and audit event atomically
+            await self.session.commit()
 
             logger.info(
                 f"Updated plan {plan_id} status to {status}",
@@ -586,15 +601,19 @@ class PlanService:
             )
 
         except Exception as e:
-            # Log failed status update
-            await self._log_audit_event(
-                action="PLAN_STATUS_UPDATE",
-                user_sub=updated_by,
-                plan_id=plan_id,
-                result="FAILURE",
-                error_message=str(e),
-                metadata={"attempted_status": status},
-            )
+            # Log failed status update (best effort - don't mask original error)
+            try:
+                self._log_audit_event(
+                    action="PLAN_STATUS_UPDATE",
+                    user_sub=updated_by,
+                    plan_id=plan_id,
+                    result="FAILURE",
+                    error_message=str(e),
+                    metadata={"attempted_status": status},
+                )
+                await self.session.commit()
+            except Exception as audit_error:
+                logger.warning(f"Failed to log audit event for plan status update failure: {audit_error}")
             raise
 
     async def list_plans(

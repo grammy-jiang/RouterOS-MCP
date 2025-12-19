@@ -8,18 +8,15 @@ Tests cover:
 - Token expiration (15 minutes)
 """
 
-import secrets
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from routeros_mcp.config import Settings
 from routeros_mcp.domain.models import PlanStatus
 from routeros_mcp.domain.services.plan import PlanService
-from routeros_mcp.infra.db.models import AuditEvent, Base, Device, Plan
+from routeros_mcp.infra.db.models import AuditEvent, Base, Device
 
 
 @pytest.fixture
