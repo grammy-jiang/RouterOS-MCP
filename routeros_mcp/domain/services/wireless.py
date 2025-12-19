@@ -819,16 +819,18 @@ class WirelessService:
         client = await self.device_service.get_rest_client(device_id)
 
         try:
-            # Try registration-table first (most common endpoint)
+            # Try registration-table endpoint. If it fails, allow SSH fallback to run.
             try:
                 regs_data = await client.get("/rest/caps-man/registration-table")
-            except Exception as e1:
-                # Try alternative endpoints that may exist in different RouterOS versions
-                try:
-                    regs_data = await client.get("/rest/caps-man/interface")
-                except Exception as e2:
-                    # Both endpoints failed - raise for SSH fallback
-                    raise RuntimeError(f"Both REST endpoints failed: {e1}, {e2}") from e2
+            except Exception as e:
+                msg = str(e).lower()
+                if "no such command" in msg or "bad command" in msg or "not found" in msg:
+                    logger.debug(
+                        "CAPsMAN registrations not available on device, returning empty list",
+                        extra={"device_id": device_id},
+                    )
+                    return []
+                raise
 
             # Normalize registration data
             result: list[dict[str, Any]] = []
@@ -872,24 +874,20 @@ class WirelessService:
         ssh_client = await self.device_service.get_ssh_client(device_id)
 
         try:
-            # Try registration-table first
+            # Try registration-table; return empty when not available.
             try:
                 output = await ssh_client.execute("/caps-man/registration-table/print without-paging")
-                return self._parse_capsman_registrations_output(output)
-            except Exception as e1:
-                # Try interface as alternative
-                try:
-                    output = await ssh_client.execute("/caps-man/interface/print without-paging")
-                    return self._parse_capsman_registrations_output(output)
-                except Exception as e2:
-                    msg = f"{e1} | {e2}"
-                    if "no such command" in msg.lower() or "bad command" in msg.lower():
-                        logger.debug(
-                            "CAPsMAN registrations not available on device, returning empty list",
-                            extra={"device_id": device_id},
-                        )
-                        return []
-                    raise
+            except Exception as e:
+                msg = str(e).lower()
+                if "no such command" in msg or "bad command" in msg or "not found" in msg:
+                    logger.debug(
+                        "CAPsMAN registrations not available on device, returning empty list",
+                        extra={"device_id": device_id},
+                    )
+                    return []
+                raise
+
+            return self._parse_capsman_registrations_output(output)
         finally:
             await ssh_client.close()
 
