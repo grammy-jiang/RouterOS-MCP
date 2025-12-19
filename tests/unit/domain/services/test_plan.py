@@ -246,6 +246,32 @@ class TestPlanServiceEnhancements:
             await service.update_plan_status(plan_id, PlanStatus.FAILED.value, "test-user")
 
     @pytest.mark.asyncio
+    async def test_update_plan_status_accepts_legacy_applied(
+        self, db_session: AsyncSession, test_devices: list[str]
+    ) -> None:
+        """Ensure legacy 'applied' status maps to COMPLETED for compatibility."""
+        service = PlanService(db_session)
+
+        plan = await service.create_plan(
+            tool_name="test-tool",
+            created_by="test-user",
+            device_ids=[test_devices[0]],
+            summary="Test plan",
+            changes={},
+            risk_level="low",
+        )
+        plan_id = plan["plan_id"]
+
+        # Move through required transitions
+        await service.update_plan_status(plan_id, PlanStatus.APPROVED.value, "test-user")
+        await service.update_plan_status(plan_id, PlanStatus.EXECUTING.value, "test-user")
+
+        # Use legacy status value
+        await service.update_plan_status(plan_id, "applied", "test-user")
+        updated = await service.get_plan(plan_id)
+        assert updated["status"] == PlanStatus.COMPLETED.value
+
+    @pytest.mark.asyncio
     async def test_pre_checks_professional_workflows_required(
         self, db_session: AsyncSession, test_devices: list[str]
     ) -> None:
