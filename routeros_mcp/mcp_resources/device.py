@@ -1,5 +1,6 @@
 """MCP resources for device data (device:// URI scheme)."""
 
+import gzip
 import logging
 from datetime import UTC, datetime
 from typing import Optional
@@ -227,6 +228,15 @@ def register_device_resources(
                         "snapshot_id": snapshot.id,
                         "snapshot_kind": snapshot.kind,
                         "snapshot_timestamp": snapshot.timestamp.isoformat(),
+                        "snapshot_compression": (snapshot.meta or {}).get("compression"),
+                        "snapshot_compression_level": (snapshot.meta or {}).get(
+                            "compression_level"
+                        ),
+                        "snapshot_redacted": (snapshot.meta or {}).get("redacted"),
+                        "snapshot_checksum": (snapshot.meta or {}).get("checksum"),
+                        "snapshot_checksum_algorithm": (snapshot.meta or {}).get(
+                            "checksum_algorithm"
+                        ),
                     },
                 )
 
@@ -314,8 +324,20 @@ def _decode_snapshot_data(snapshot: Snapshot) -> str:
     """Decode snapshot bytes into text content."""
 
     try:
-        return snapshot.data.decode("utf-8")
-    except Exception:
+        data = snapshot.data or b""
+        meta = snapshot.meta or {}
+
+        if meta.get("compression") == "gzip":
+            data = gzip.decompress(data)
+
+        return data.decode("utf-8")
+    except Exception as exc:
+        logger.error(
+            "Failed to decode snapshot %s: %s",
+            getattr(snapshot, "id", "unknown"),
+            exc,
+            exc_info=True,
+        )
         # Fallback to repr to ensure no placeholder content is returned
         return repr(snapshot.data)
 

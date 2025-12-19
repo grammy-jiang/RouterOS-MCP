@@ -63,6 +63,8 @@ class TestRouterOSSSHClient:
         """Test that ALLOWED_SSH_COMMANDS contains expected commands."""
         assert "/export" in ALLOWED_SSH_COMMANDS
         assert "/export compact" in ALLOWED_SSH_COMMANDS
+        assert "/export hide-sensitive" in ALLOWED_SSH_COMMANDS
+        assert "/export hide-sensitive compact" in ALLOWED_SSH_COMMANDS
         assert "/system/resource/print" in ALLOWED_SSH_COMMANDS
         assert "/system/package/print" in ALLOWED_SSH_COMMANDS
         assert "/system/clock/print" in ALLOWED_SSH_COMMANDS
@@ -83,7 +85,7 @@ class TestRouterOSSSHClient:
         assert "/ping" in ALLOWED_SSH_COMMANDS
         assert "/tool/ping" in ALLOWED_SSH_COMMANDS
         assert "/tool/traceroute" in ALLOWED_SSH_COMMANDS
-        assert len(ALLOWED_SSH_COMMANDS) == 22
+        assert len(ALLOWED_SSH_COMMANDS) == 24
 
     @pytest.mark.asyncio
     async def test_validate_command_whitelisted(self) -> None:
