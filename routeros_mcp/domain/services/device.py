@@ -13,10 +13,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from routeros_mcp.config import Settings
+from routeros_mcp.domain.exceptions import (
+    CapabilityNotAllowedError,
+    EnvironmentNotAllowedError,
+)
 from routeros_mcp.domain.models import (
     CredentialCreate,
+    DeviceCapability,
     DeviceCreate,
     DeviceUpdate,
+    PHASE3_DEFAULT_ALLOWED_ENVIRONMENTS,
 )
 from routeros_mcp.domain.models import (
     Device as DeviceDomain,
@@ -663,6 +669,170 @@ class DeviceService:
         )
 
         return False, meta
+
+    async def check_device_capabilities(
+        self,
+        device_id: str,
+        required_capabilities: list[DeviceCapability] | None = None,
+        allowed_environments: list[str] | None = None,
+        operation: str | None = None,
+    ) -> DeviceDomain:
+        """Check device capability flags and environment tags for Phase 3 safety guardrails.
+        
+        This method enforces two layers of safety:
+        1. Environment validation: Ensure device is in an allowed environment
+        2. Capability validation: Ensure required capability flags are enabled
+        
+        Args:
+            device_id: Device identifier
+            required_capabilities: List of capability flags required for the operation.
+                                 If None or empty, only environment check is performed.
+            allowed_environments: List of environments where operation is permitted.
+                                If None, defaults to PHASE3_DEFAULT_ALLOWED_ENVIRONMENTS
+                                (lab/staging only).
+            operation: Optional operation name for audit logging and error messages.
+        
+        Returns:
+            Device domain model if all checks pass
+        
+        Raises:
+            DeviceNotFoundError: If device doesn't exist
+            EnvironmentNotAllowedError: If device environment is not in allowed list
+            CapabilityNotAllowedError: If required capability flag is not enabled
+        
+        Example:
+            # Check firewall write capability on lab/staging devices only
+            device = await service.check_device_capabilities(
+                device_id="dev-lab-01",
+                required_capabilities=[DeviceCapability.FIREWALL_WRITES],
+                allowed_environments=["lab", "staging"],
+                operation="firewall_write"
+            )
+            
+            # Check professional workflows (defaults to lab/staging only)
+            device = await service.check_device_capabilities(
+                device_id="dev-prod-01",
+                required_capabilities=[DeviceCapability.PROFESSIONAL_WORKFLOWS],
+                operation="plan_apply"
+            )
+        """
+        # Get device
+        device = await self.get_device(device_id)
+        
+        # Default to Phase 3 allowed environments (lab/staging only)
+        if allowed_environments is None:
+            allowed_environments = PHASE3_DEFAULT_ALLOWED_ENVIRONMENTS
+        
+        # 1. Environment validation (MANDATORY - cannot bypass)
+        if device.environment not in allowed_environments:
+            error_context = {
+                "device_id": device_id,
+                "device_name": device.name,
+                "device_environment": device.environment,
+                "allowed_environments": allowed_environments,
+                "operation": operation or "unknown",
+            }
+            
+            # Audit log for environment restriction
+            logger.warning(
+                "Device environment restriction enforced",
+                extra={
+                    **error_context,
+                    "check_type": "environment_validation",
+                    "result": "denied",
+                },
+            )
+            
+            # Record metric
+            metrics.increment_counter(
+                "device_capability_check_failed",
+                tags={
+                    "device_id": device_id,
+                    "environment": device.environment,
+                    "check_type": "environment",
+                    "operation": operation or "unknown",
+                },
+            )
+            
+            raise EnvironmentNotAllowedError(
+                f"Operation '{operation or 'unknown'}' not allowed on device in '{device.environment}' environment. "
+                f"Allowed environments: {', '.join(allowed_environments)}",
+                context=error_context,
+            )
+        
+        # 2. Capability flag validation (if capabilities specified)
+        if required_capabilities:
+            for capability in required_capabilities:
+                # Get capability flag value from device (defaults to False if not set)
+                capability_flag_name = capability.value
+                capability_enabled = getattr(device, capability_flag_name, False)
+                
+                if not capability_enabled:
+                    error_context = {
+                        "device_id": device_id,
+                        "device_name": device.name,
+                        "device_environment": device.environment,
+                        "required_capability": capability_flag_name,
+                        "current_value": capability_enabled,
+                        "operation": operation or "unknown",
+                    }
+                    
+                    # Audit log for capability restriction
+                    logger.warning(
+                        "Device capability flag restriction enforced",
+                        extra={
+                            **error_context,
+                            "check_type": "capability_validation",
+                            "result": "denied",
+                        },
+                    )
+                    
+                    # Record metric
+                    metrics.increment_counter(
+                        "device_capability_check_failed",
+                        tags={
+                            "device_id": device_id,
+                            "environment": device.environment,
+                            "check_type": "capability",
+                            "capability": capability_flag_name,
+                            "operation": operation or "unknown",
+                        },
+                    )
+                    
+                    raise CapabilityNotAllowedError(
+                        f"Operation '{operation or 'unknown'}' requires capability flag '{capability_flag_name}' "
+                        f"to be enabled on device '{device.name}' ({device_id}). "
+                        f"Current value: {capability_enabled}. "
+                        f"Please enable this capability flag to proceed.",
+                        context=error_context,
+                    )
+        
+        # All checks passed - audit log success
+        logger.info(
+            "Device capability check passed",
+            extra={
+                "device_id": device_id,
+                "device_name": device.name,
+                "device_environment": device.environment,
+                "required_capabilities": [c.value for c in (required_capabilities or [])],
+                "allowed_environments": allowed_environments,
+                "operation": operation or "unknown",
+                "check_type": "all",
+                "result": "allowed",
+            },
+        )
+        
+        # Record success metric
+        metrics.increment_counter(
+            "device_capability_check_passed",
+            tags={
+                "device_id": device_id,
+                "environment": device.environment,
+                "operation": operation or "unknown",
+            },
+        )
+        
+        return device
 
     async def _invalidate_device_cache(self, device_id: str, reason: str = "state_change") -> None:
         """Invalidate device-related cache entries.
