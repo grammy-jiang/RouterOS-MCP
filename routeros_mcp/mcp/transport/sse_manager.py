@@ -328,10 +328,10 @@ class SSEManager:
 
             # Record notification metrics for successfully sent notifications
             if sent_count > 0:
-                for _ in range(sent_count):
-                    metrics.record_resource_notification(
-                        resource_uri_pattern=resource_pattern,
-                    )
+                # Use Counter.inc(amount) to increment by sent_count in one operation
+                metrics.resource_notifications_total.labels(
+                    resource_uri_pattern=resource_pattern,
+                ).inc(sent_count)
 
             logger.info(
                 "Broadcast event to subscribers",

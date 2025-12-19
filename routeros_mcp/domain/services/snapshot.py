@@ -17,6 +17,7 @@ See docs/15-mcp-resources-and-prompts-design.md (Phase 2.1 implementation detail
 import gzip
 import hashlib
 import logging
+import time
 import uuid
 from datetime import UTC, datetime
 
@@ -95,7 +96,6 @@ class SnapshotService:
             RouterOSNetworkError: If device is unreachable
         """
         # Track capture start time for duration metrics
-        import time
         capture_start_time = time.time()
         
         # Get device credentials
