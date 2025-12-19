@@ -119,6 +119,9 @@ class HTTPSSETransport:
         from routeros_mcp.mcp.server import set_sse_manager
         set_sse_manager(self.sse_manager)
 
+        # Expose subscription endpoint so clients can register for updates
+        self._register_subscription_route()
+
         logger.info(
             "Initialized HTTP/SSE transport",
             extra={
@@ -413,18 +416,33 @@ class HTTPSSETransport:
         logger.info("Stopping HTTP/SSE transport server")
         # FastMCP handles cleanup in run_http_async
 
+    def _register_subscription_route(self) -> None:
+        """Register SSE subscription endpoint with FastMCP if supported."""
+        subscribe_path = f"{self.settings.mcp_http_base_path.rstrip('/')}/subscribe"
+
+        custom_route = getattr(self.mcp_instance, "custom_route", None)
+        if not callable(custom_route):
+            logger.warning(
+                "FastMCP instance does not support custom routes; SSE subscriptions unavailable",
+                extra={"path": subscribe_path},
+            )
+            return
+
+        @custom_route(subscribe_path, methods=["POST"])
+        async def _subscription_handler(
+            request: Request,
+        ) -> EventSourceResponse | JSONResponse:
+            return await self.handle_subscribe(request)
+
+        logger.info(
+            "Registered SSE subscription route",
+            extra={"path": subscribe_path},
+        )
+
     async def handle_subscribe(
         self, request: Request
     ) -> EventSourceResponse | JSONResponse:
         """Handle SSE subscription request.
-
-        NOTE: This method is not currently registered as a route in FastMCP.
-        To enable SSE subscriptions, this endpoint needs to be registered with
-        FastMCP's router or a custom Starlette application. This is a placeholder
-        for future integration when custom routes are supported.
-
-        TODO: Wire this handler to POST /mcp/subscribe route once FastMCP supports
-        custom route registration or when using a custom Starlette application.
 
         POST /mcp/subscribe with JSON body:
         {
