@@ -233,6 +233,48 @@ class Settings(BaseSettings):
     )
 
     # ========================================
+    # Snapshot Configuration (Phase 2.1)
+    # ========================================
+
+    snapshot_capture_enabled: bool = Field(
+        default=True,
+        description="Enable periodic configuration snapshot capture",
+    )
+
+    snapshot_capture_interval_seconds: int = Field(
+        default=3600,
+        ge=300,
+        le=86400,
+        description="Interval between snapshot captures (5 min to 24 hours)",
+    )
+
+    snapshot_max_size_bytes: int = Field(
+        default=10 * 1024 * 1024,  # 10MB
+        ge=1024 * 1024,  # 1MB minimum
+        le=100 * 1024 * 1024,  # 100MB maximum
+        description="Maximum snapshot size (uncompressed)",
+    )
+
+    snapshot_retention_count: int = Field(
+        default=5,
+        ge=1,
+        le=100,
+        description="Number of snapshots to retain per device (latest N)",
+    )
+
+    snapshot_compression_level: int = Field(
+        default=6,
+        ge=0,
+        le=9,
+        description="GZIP compression level (0=none, 9=max, 6=balanced)",
+    )
+
+    snapshot_use_ssh_fallback: bool = Field(
+        default=True,
+        description="Fallback to SSH export if REST API export fails",
+    )
+
+    # ========================================
     # Validators
     # ========================================
 

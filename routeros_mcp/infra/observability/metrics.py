@@ -192,6 +192,37 @@ cache_size_entries = Gauge(
     registry=_registry,
 )
 
+# Snapshot Metrics (Phase 2.1)
+snapshot_capture_total = Counter(
+    "routeros_mcp_snapshot_capture_total",
+    "Total number of snapshot capture attempts",
+    ["device_id", "kind", "source", "status"],
+    registry=_registry,
+)
+
+snapshot_size_bytes = Histogram(
+    "routeros_mcp_snapshot_size_bytes",
+    "Size of captured snapshots in bytes (uncompressed)",
+    ["device_id", "kind"],
+    buckets=(1024, 10240, 102400, 1048576, 10485760),  # 1KB to 10MB
+    registry=_registry,
+)
+
+snapshot_compression_ratio = Histogram(
+    "routeros_mcp_snapshot_compression_ratio",
+    "Snapshot compression ratio (compressed_size / original_size)",
+    ["device_id", "kind"],
+    buckets=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+    registry=_registry,
+)
+
+snapshot_retention_pruned = Counter(
+    "routeros_mcp_snapshot_retention_pruned",
+    "Number of snapshots pruned by retention policy",
+    ["device_id", "kind"],
+    registry=_registry,
+)
+
 # Authentication/Authorization Metrics
 auth_checks_total = Counter(
     "routeros_mcp_auth_checks_total",
