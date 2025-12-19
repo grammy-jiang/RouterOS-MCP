@@ -764,8 +764,16 @@ class WirelessService:
                 cap_id = parts[0]
                 idx = 1
 
-                # Check for flags
-                if len(parts) > 1 and all(c in "DRSXdrsx " for c in parts[1]):
+                # Check for flags (single letters like A, D, R, S, X)
+                # Flags are typically 1-3 characters, all alphabetic, and UPPERCASE or lowercase letters only
+                # Skip parts that look like names (contain dashes or numbers, or >3 chars)
+                if (
+                    len(parts) > 1
+                    and len(parts[1]) <= 3
+                    and all(c.isalpha() or c.isspace() for c in parts[1])
+                    and "-" not in parts[1]
+                    and not any(c.isdigit() for c in parts[1])
+                ):
                     idx = 2
 
                 # Extract fields
@@ -803,13 +811,13 @@ class WirelessService:
             # Try registration-table first (most common endpoint)
             try:
                 regs_data = await client.get("/rest/caps-man/registration-table")
-            except Exception:
+            except Exception as e1:
                 # Try alternative endpoints that may exist in different RouterOS versions
                 try:
                     regs_data = await client.get("/rest/caps-man/interface")
-                except Exception:
-                    # No registrations endpoint available
-                    return []
+                except Exception as e2:
+                    # Both endpoints failed - raise for SSH fallback
+                    raise RuntimeError(f"Both REST endpoints failed: {e1}, {e2}") from e2
 
             # Normalize registration data
             result: list[dict[str, Any]] = []
@@ -900,8 +908,16 @@ class WirelessService:
                 reg_id = parts[0]
                 idx = 1
 
-                # Check for flags
-                if len(parts) > 1 and all(c in "DRSXdrsx " for c in parts[1]):
+                # Check for flags (single letters like D, R, S, X, A)
+                # Flags are typically 1-3 characters, all alphabetic, and UPPERCASE or lowercase letters only
+                # Skip parts that look like interface names (contain dashes or numbers, or >3 chars)
+                if (
+                    len(parts) > 1
+                    and len(parts[1]) <= 3
+                    and all(c.isalpha() or c.isspace() for c in parts[1])
+                    and "-" not in parts[1]
+                    and not any(c.isdigit() for c in parts[1])
+                ):
                     idx = 2
 
                 # Extract fields (format varies by RouterOS version)
