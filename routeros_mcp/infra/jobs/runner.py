@@ -68,6 +68,9 @@ async def run_snapshot_capture_job(
         "skipped": 0,
         "errors": [],
     }
+    
+    # Lock for synchronizing concurrent updates to results dict
+    results_lock = asyncio.Lock()
 
     # Get eligible devices
     async with session_factory.session() as session:
@@ -89,6 +92,7 @@ async def run_snapshot_capture_job(
                 session_factory=session_factory,
                 settings=settings,
                 results=results,
+                results_lock=results_lock,
             )
 
     # Execute captures
@@ -214,6 +218,7 @@ async def _capture_device_snapshot(
     session_factory: DatabaseSessionManager,
     settings: Settings,
     results: dict,
+    results_lock: asyncio.Lock,
 ) -> None:
     """Capture snapshot for a single device.
 
@@ -222,6 +227,7 @@ async def _capture_device_snapshot(
         session_factory: Database session factory
         settings: Application settings
         results: Results dict to update
+        results_lock: Lock for synchronizing results updates
     """
     try:
         # Use separate session per device for isolation
@@ -244,7 +250,8 @@ async def _capture_device_snapshot(
 
             await session.commit()
 
-            results["success"] += 1
+            async with results_lock:
+                results["success"] += 1
 
             logger.info(
                 f"Captured snapshot for device {device.id}",
@@ -255,9 +262,10 @@ async def _capture_device_snapshot(
             )
 
     except Exception as e:
-        results["failed"] += 1
-        error_msg = f"Failed to capture snapshot for device {device.id}: {e}"
-        results["errors"].append(error_msg)
+        async with results_lock:
+            results["failed"] += 1
+            error_msg = f"Failed to capture snapshot for device {device.id}: {e}"
+            results["errors"].append(error_msg)
 
         logger.error(
             error_msg,

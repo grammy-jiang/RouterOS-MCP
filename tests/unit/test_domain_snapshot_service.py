@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, Mock
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -299,16 +298,17 @@ async def test_get_latest_snapshot(
     """Test retrieving the latest snapshot."""
     service = SnapshotService(db_session, settings)
 
-    # Create multiple snapshots
+    # Create multiple snapshots with incrementing timestamps
     config_text = "# RouterOS config\n"
     compressed_data = gzip.compress(config_text.encode("utf-8"), compresslevel=6)
     checksum = hashlib.sha256(config_text.encode("utf-8")).hexdigest()
 
+    base_time = datetime.now(UTC)
     for i in range(3):
         snapshot = SnapshotORM(
             id=f"snap-00{i}",
             device_id=device_domain.id,
-            timestamp=datetime.now(UTC),
+            timestamp=base_time + timedelta(seconds=i),  # Increment by 1 second each
             kind="config",
             data=compressed_data,
             meta={
@@ -338,16 +338,17 @@ async def test_prune_old_snapshots(
     """Test pruning old snapshots based on retention policy."""
     service = SnapshotService(db_session, settings)
 
-    # Create 10 snapshots
+    # Create 10 snapshots with incrementing timestamps
     config_text = "# RouterOS config\n"
     compressed_data = gzip.compress(config_text.encode("utf-8"), compresslevel=6)
     checksum = hashlib.sha256(config_text.encode("utf-8")).hexdigest()
 
+    base_time = datetime.now(UTC)
     for i in range(10):
         snapshot = SnapshotORM(
             id=f"snap-{i:03d}",
             device_id=device_domain.id,
-            timestamp=datetime.now(UTC),
+            timestamp=base_time + timedelta(seconds=i),  # Increment by 1 second each
             kind="config",
             data=compressed_data,
             meta={

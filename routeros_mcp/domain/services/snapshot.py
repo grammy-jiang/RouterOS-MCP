@@ -19,7 +19,6 @@ import hashlib
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import Any
 
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,12 +27,7 @@ from routeros_mcp.config import Settings
 from routeros_mcp.domain.models import Device as DeviceDomain
 from routeros_mcp.infra.db.models import Snapshot as SnapshotORM
 from routeros_mcp.infra.observability import metrics
-from routeros_mcp.infra.routeros.exceptions import (
-    RouterOSClientError,
-    RouterOSNetworkError,
-    RouterOSSSHError,
-    RouterOSTimeoutError,
-)
+from routeros_mcp.infra.routeros.exceptions import RouterOSNetworkError
 from routeros_mcp.infra.routeros.rest_client import RouterOSRestClient
 from routeros_mcp.infra.routeros.ssh_client import RouterOSSSHClient
 from routeros_mcp.mcp.errors import ValidationError
@@ -194,14 +188,15 @@ class SnapshotService:
             "redacted": False,  # Phase 2.1: redaction not yet implemented
         }
 
-        # Generate snapshot ID
-        snapshot_id = f"snap-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
+        # Generate snapshot ID and capture timestamp
+        now_utc = datetime.now(UTC)
+        snapshot_id = f"snap-{now_utc.strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
 
         # Create snapshot record
         snapshot = SnapshotORM(
             id=snapshot_id,
             device_id=device.id,
-            timestamp=datetime.now(UTC),
+            timestamp=now_utc,
             kind=kind,
             data=compressed_data,
             meta=metadata,
@@ -234,6 +229,13 @@ class SnapshotService:
             device_id=device.id,
             kind=kind,
         ).observe(len(config_bytes))
+
+        # Observe compression ratio (compressed size / original size) when original size is non-zero
+        if len(config_bytes) > 0:
+            metrics.snapshot_compression_ratio.labels(
+                device_id=device.id,
+                kind=kind,
+            ).observe(len(compressed_data) / len(config_bytes))
 
         return snapshot_id
 

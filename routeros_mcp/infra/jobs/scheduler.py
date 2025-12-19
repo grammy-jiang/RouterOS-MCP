@@ -16,7 +16,6 @@ observability requirements.
 """
 
 import logging
-from datetime import datetime, UTC
 from typing import Callable
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
