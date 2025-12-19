@@ -76,15 +76,33 @@ def register_wireless_tools(mcp: FastMCP, settings: Settings) -> None:
                 # Get wireless interfaces
                 interfaces = await wireless_service.get_wireless_interfaces(device_id)
 
+                # Detect CAPsMAN and add hint if present
+                capsman_detected = await wireless_service.detect_capsman(device_id)
+                
                 content = f"Found {len(interfaces)} wireless interface(s) on {device.name}"
+
+                meta: dict[str, Any] = {
+                    "device_id": device_id,
+                    "interfaces": interfaces,
+                    "total_count": len(interfaces),
+                }
+
+                # Add standardized hint if CAPsMAN is detected
+                if capsman_detected:
+                    meta["hints"] = [
+                        {
+                            "code": "capsman_detected",
+                            "message": (
+                                "CAPsMAN (Centralized AP Manager) detected. "
+                                "Local wireless interfaces may be centrally managed. "
+                                "For complete wireless configuration, check the CAPsMAN controller."
+                            ),
+                        }
+                    ]
 
                 return format_tool_result(
                     content=content,
-                    meta={
-                        "device_id": device_id,
-                        "interfaces": interfaces,
-                        "total_count": len(interfaces),
-                    },
+                    meta=meta,
                 )
 
         except MCPError as e:
@@ -151,15 +169,33 @@ def register_wireless_tools(mcp: FastMCP, settings: Settings) -> None:
                 # Get wireless clients
                 clients = await wireless_service.get_wireless_clients(device_id)
 
+                # Detect CAPsMAN and add hint if present
+                capsman_detected = await wireless_service.detect_capsman(device_id)
+
                 content = f"Found {len(clients)} connected wireless client(s) on {device.name}"
+
+                meta: dict[str, Any] = {
+                    "device_id": device_id,
+                    "clients": clients,
+                    "total_count": len(clients),
+                }
+
+                # Add standardized hint if CAPsMAN is detected
+                if capsman_detected:
+                    meta["hints"] = [
+                        {
+                            "code": "capsman_detected",
+                            "message": (
+                                "CAPsMAN (Centralized AP Manager) detected. "
+                                "Local wireless client data may be incomplete. "
+                                "For complete client information, check the CAPsMAN controller."
+                            ),
+                        }
+                    ]
 
                 return format_tool_result(
                     content=content,
-                    meta={
-                        "device_id": device_id,
-                        "clients": clients,
-                        "total_count": len(clients),
-                    },
+                    meta=meta,
                 )
 
         except MCPError as e:

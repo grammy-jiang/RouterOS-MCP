@@ -466,3 +466,59 @@ class WirelessService:
             return ""
 
         return str(value).strip()
+
+    async def detect_capsman(self, device_id: str) -> bool:
+        """Detect if CAPsMAN is active on the device.
+
+        CAPsMAN (Centralized Access Point system MANager) is a RouterOS feature
+        where a controller manages multiple CAP (Controlled Access Point) devices.
+        When CAPsMAN is active, local wireless configurations may be centrally
+        managed and local outputs may not reflect the full picture.
+
+        Args:
+            device_id: Device identifier
+
+        Returns:
+            True if CAPsMAN is detected as active, False otherwise
+        """
+        try:
+            # Try REST API first
+            client = await self.device_service.get_rest_client(device_id)
+            try:
+                # Check /caps-man/interface for CAPsMAN interfaces
+                capsman_interfaces = await client.get("/rest/caps-man/interface")
+                if isinstance(capsman_interfaces, list) and len(capsman_interfaces) > 0:
+                    return True
+
+                # Check /caps-man/manager/interface for controller mode
+                capsman_manager = await client.get("/rest/caps-man/manager/interface")
+                if isinstance(capsman_manager, list) and len(capsman_manager) > 0:
+                    return True
+
+                return False
+            finally:
+                await client.close()
+        except Exception as rest_exc:
+            logger.debug(
+                f"REST CAPsMAN detection failed, trying SSH fallback: {rest_exc}",
+                extra={"device_id": device_id},
+            )
+            # Try SSH fallback
+            try:
+                ssh_client = await self.device_service.get_ssh_client(device_id)
+                try:
+                    # Check if caps-man package is enabled and interfaces exist
+                    output = await ssh_client.execute("/caps-man/interface/print count-only")
+                    count = output.strip()
+                    if count.isdigit() and int(count) > 0:
+                        return True
+                    return False
+                finally:
+                    await ssh_client.close()
+            except Exception as ssh_exc:
+                logger.debug(
+                    f"SSH CAPsMAN detection failed: {ssh_exc}",
+                    extra={"device_id": device_id},
+                )
+                # If both fail, assume CAPsMAN is not active
+                return False

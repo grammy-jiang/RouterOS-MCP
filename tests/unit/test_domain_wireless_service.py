@@ -83,6 +83,8 @@ class _FakeRestClient:
                     "rx-packets": 3000,
                 },
             ],
+            "/rest/caps-man/interface": [],
+            "/rest/caps-man/manager/interface": [],
         }
 
     async def get(self, path: str, params: dict | None = None):
@@ -98,6 +100,7 @@ class _FakeSSHClient:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
+        self.caps_man_count = "0"  # Default: no CAPsMAN interfaces
 
     async def execute(self, command: str) -> str:
         self.calls.append(("execute", command))
@@ -116,6 +119,8 @@ Columns: INTERFACE, MAC-ADDRESS, SIGNAL-STRENGTH
  0     wlan1      11:22:33:44:55:66  -65
  1     wlan1      77:88:99:aa:bb:cc  -72
 """
+        elif "caps-man/interface/print count-only" in command:
+            return self.caps_man_count
         return ""
 
     async def close(self):
@@ -316,6 +321,141 @@ def test_parse_snr():
     assert WirelessService._parse_snr(28) == 28
     assert WirelessService._parse_snr("") == 0
     assert WirelessService._parse_snr(None) == 0
+
+
+def test_parse_rate():
+    """Test rate parsing."""
+    assert WirelessService._parse_rate("54Mbps") == "54Mbps"
+    assert WirelessService._parse_rate("144.4Mbps") == "144.4Mbps"
+    assert WirelessService._parse_rate("") == ""
+    assert WirelessService._parse_rate(None) == ""
+
+
+@pytest.mark.asyncio
+async def test_detect_capsman_when_capsman_interfaces_exist():
+    """Test CAPsMAN detection when CAPsMAN interfaces exist."""
+    rest_client = _FakeRestClient()
+    ssh_client = _FakeSSHClient()
+    device_service = _FakeDeviceService(rest_client, ssh_client)
+
+    # Add CAPsMAN interfaces to the store
+    rest_client.store["/rest/caps-man/interface"] = [
+        {".id": "*1", "name": "cap1", "master-interface": "wlan1"}
+    ]
+
+    service = WirelessService(AsyncMock(), Settings())
+    service.device_service = device_service
+
+    # Detect CAPsMAN
+    capsman_detected = await service.detect_capsman("dev-1")
+
+    # Verify CAPsMAN was detected
+    assert capsman_detected is True
+    assert ("get", "/rest/caps-man/interface", None) in rest_client.calls
+
+
+@pytest.mark.asyncio
+async def test_detect_capsman_when_capsman_manager_exists():
+    """Test CAPsMAN detection when CAPsMAN manager interfaces exist."""
+    rest_client = _FakeRestClient()
+    ssh_client = _FakeSSHClient()
+    device_service = _FakeDeviceService(rest_client, ssh_client)
+
+    # Add CAPsMAN manager interfaces to the store
+    rest_client.store["/rest/caps-man/interface"] = []
+    rest_client.store["/rest/caps-man/manager/interface"] = [
+        {".id": "*1", "interface": "wlan1"}
+    ]
+
+    service = WirelessService(AsyncMock(), Settings())
+    service.device_service = device_service
+
+    # Detect CAPsMAN
+    capsman_detected = await service.detect_capsman("dev-1")
+
+    # Verify CAPsMAN was detected
+    assert capsman_detected is True
+
+
+@pytest.mark.asyncio
+async def test_detect_capsman_when_not_present():
+    """Test CAPsMAN detection when CAPsMAN is not present."""
+    rest_client = _FakeRestClient()
+    ssh_client = _FakeSSHClient()
+    device_service = _FakeDeviceService(rest_client, ssh_client)
+
+    # Set empty CAPsMAN data
+    rest_client.store["/rest/caps-man/interface"] = []
+    rest_client.store["/rest/caps-man/manager/interface"] = []
+
+    service = WirelessService(AsyncMock(), Settings())
+    service.device_service = device_service
+
+    # Detect CAPsMAN
+    capsman_detected = await service.detect_capsman("dev-1")
+
+    # Verify CAPsMAN was not detected
+    assert capsman_detected is False
+
+
+@pytest.mark.asyncio
+async def test_detect_capsman_via_ssh_fallback():
+    """Test CAPsMAN detection via SSH when REST fails."""
+    rest_client = _FakeRestClient()
+    ssh_client = _FakeSSHClient()
+    device_service = _FakeDeviceService(rest_client, ssh_client)
+
+    # Make REST fail
+    original_get = rest_client.get
+
+    async def failing_get(path: str, params: dict | None = None):
+        if "/caps-man" in path:
+            raise Exception("REST API failed")
+        return await original_get(path, params)
+
+    rest_client.get = failing_get
+
+    # Set SSH to report CAPsMAN interfaces
+    ssh_client.caps_man_count = "3"
+
+    service = WirelessService(AsyncMock(), Settings())
+    service.device_service = device_service
+
+    # Detect CAPsMAN - should fallback to SSH
+    capsman_detected = await service.detect_capsman("dev-1")
+
+    # Verify CAPsMAN was detected via SSH
+    assert capsman_detected is True
+    assert ("execute", "/caps-man/interface/print count-only") in ssh_client.calls
+
+
+@pytest.mark.asyncio
+async def test_detect_capsman_via_ssh_when_not_present():
+    """Test CAPsMAN detection via SSH when not present."""
+    rest_client = _FakeRestClient()
+    ssh_client = _FakeSSHClient()
+    device_service = _FakeDeviceService(rest_client, ssh_client)
+
+    # Make REST fail
+    original_get = rest_client.get
+
+    async def failing_get(path: str, params: dict | None = None):
+        if "/caps-man" in path:
+            raise Exception("REST API failed")
+        return await original_get(path, params)
+
+    rest_client.get = failing_get
+
+    # Set SSH to report no CAPsMAN interfaces (default is "0")
+
+    service = WirelessService(AsyncMock(), Settings())
+    service.device_service = device_service
+
+    # Detect CAPsMAN - should fallback to SSH
+    capsman_detected = await service.detect_capsman("dev-1")
+
+    # Verify CAPsMAN was not detected
+    assert capsman_detected is False
 
 
 def test_parse_rate():
