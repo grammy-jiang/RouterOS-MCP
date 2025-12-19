@@ -158,8 +158,7 @@ class SnapshotService:
         # Check if we got config
         if config_text is None:
             raise RouterOSNetworkError(
-                f"Failed to capture config snapshot for device {device.id}: {error_message}",
-                data={"device_id": device.id, "error": error_message},
+                f"Failed to capture config snapshot for device {device.id}: {error_message}"
             )
 
         # Enforce size limit
@@ -368,7 +367,7 @@ class SnapshotService:
         for cred in creds_orm:
             password = decrypt_string(
                 cred.encrypted_secret,
-                self.settings.encryption_key.encode(),
+                self.settings.encryption_key,  # Fixed: pass string, not bytes
             )
 
             credentials[cred.credential_type] = {

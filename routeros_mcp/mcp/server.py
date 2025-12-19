@@ -76,6 +76,7 @@ class RouterOSMCPServer:
         """
         self.settings = settings
         self.session_factory = None  # Will be initialized in start()
+        self.scheduler = None  # Will be initialized in start()
 
         # Create FastMCP instance
         self.mcp = FastMCP(
@@ -337,6 +338,39 @@ require appropriate device capabilities and permissions.
         except Exception as e:
             logger.error(f"Failed to register resources: {e}", exc_info=True)
 
+        # Initialize and start job scheduler (Phase 2.1)
+        if self.settings.snapshot_capture_enabled:
+            from routeros_mcp.infra.jobs.scheduler import JobScheduler
+            from routeros_mcp.infra.jobs.runner import (
+                run_snapshot_capture_job,
+                run_retention_cleanup_job,
+            )
+
+            self.scheduler = JobScheduler(self.settings)
+            await self.scheduler.start()
+            logger.info("Job scheduler started")
+
+            # Register periodic snapshot capture job
+            async def snapshot_capture_job():
+                await run_snapshot_capture_job(self.session_factory, self.settings)
+
+            self.scheduler.add_snapshot_capture_job(snapshot_capture_job)
+            logger.info(
+                "Snapshot capture job registered",
+                extra={
+                    "interval_seconds": self.settings.snapshot_capture_interval_seconds,
+                },
+            )
+
+            # Register retention cleanup job (hourly)
+            async def retention_cleanup_job():
+                await run_retention_cleanup_job(self.session_factory, self.settings)
+
+            self.scheduler.add_retention_cleanup_job(retention_cleanup_job)
+            logger.info("Retention cleanup job registered")
+        else:
+            logger.info("Snapshot capture disabled, scheduler not started")
+
         if self.settings.mcp_transport == "stdio":
             # Configure logging to stderr only for stdio mode
             # This is critical - stdout is reserved for JSON-RPC messages
@@ -387,6 +421,12 @@ require appropriate device capabilities and permissions.
     async def stop(self) -> None:
         """Stop the MCP server gracefully."""
         logger.info("Stopping MCP server")
+        
+        # Stop job scheduler if running
+        if self.scheduler:
+            await self.scheduler.shutdown(wait=True)
+            logger.info("Job scheduler stopped")
+        
         # FastMCP handles cleanup automatically
 
 
