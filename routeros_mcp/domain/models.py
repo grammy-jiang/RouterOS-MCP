@@ -7,9 +7,30 @@ between domain and infrastructure layers.
 
 import ipaddress
 from datetime import datetime
+from enum import Enum
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
+
+
+class PlanStatus(str, Enum):
+    """Plan status state machine.
+    
+    Valid transitions:
+    - pending → approved
+    - pending → cancelled
+    - approved → executing
+    - approved → cancelled
+    - executing → completed
+    - executing → failed
+    - executing → cancelled
+    """
+    PENDING = "pending"
+    APPROVED = "approved"
+    EXECUTING = "executing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class ToolHint(BaseModel):

@@ -288,7 +288,7 @@ Per-device changes:
                 if results.get("status") == "failed":
                     await plan_service.update_plan_status(plan_id, "failed")
                 else:
-                    await plan_service.update_plan_status(plan_id, "applied")
+                    await plan_service.update_plan_status(plan_id, "completed")
 
                 success_count = sum(
                     1
@@ -351,7 +351,7 @@ View full execution log with plan://{plan_id}/execution-log resource.
                 # Get plan
                 plan = await plan_service.get_plan(plan_id)
 
-                if plan["status"] not in ["applied", "failed"]:
+                if plan["status"] not in ["completed", "applied", "failed"]:
                     raise ValueError(f"Plan {plan_id} cannot be rolled back (status: {plan['status']})")
 
                 # Extract previous configuration

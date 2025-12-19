@@ -76,7 +76,8 @@ class TestPlanService:
         assert plan["approval_token"].startswith("approve-")
         assert plan["device_count"] == len(test_devices)
         assert plan["risk_level"] == "medium"
-        assert plan["status"] == "draft"
+        assert plan["status"] == "pending"  # Updated from "draft" to "pending"
+        assert "pre_check_results" in plan  # New field
 
     @pytest.mark.asyncio
     async def test_create_plan_no_devices(self, db_session: AsyncSession) -> None:
@@ -127,7 +128,7 @@ class TestPlanService:
         plan = await service.get_plan(created_plan["plan_id"])
 
         assert plan["plan_id"] == created_plan["plan_id"]
-        assert plan["status"] == "draft"
+        assert plan["status"] == "pending"  # Updated from "draft" to "pending"
         assert plan["device_ids"] == test_devices
 
     @pytest.mark.asyncio
@@ -223,11 +224,11 @@ class TestPlanService:
         )
 
         # Update status
-        await service.update_plan_status(plan["plan_id"], "applied")
+        await service.update_plan_status(plan["plan_id"], "approved", "test-user")  # Added updated_by parameter
 
         # Verify update
         updated_plan = await service.get_plan(plan["plan_id"])
-        assert updated_plan["status"] == "applied"
+        assert updated_plan["status"] == "approved"
 
     @pytest.mark.asyncio
     async def test_list_plans(self, db_session: AsyncSession, test_devices: list[str]) -> None:
