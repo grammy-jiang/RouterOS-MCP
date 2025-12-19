@@ -12,6 +12,21 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 
+class ToolHint(BaseModel):
+    """Structured hint for tool responses.
+
+    Hints provide actionable guidance to users based on detected device capabilities
+    or configurations. They are designed to be both machine-readable and user-friendly.
+
+    Attributes:
+        code: Machine-readable identifier for the hint type (e.g., 'capsman_detected')
+        message: Human-readable guidance message
+    """
+
+    code: str = Field(..., description="Stable machine-readable hint identifier")
+    message: str = Field(..., description="Human-readable guidance message")
+
+
 class DeviceCreate(BaseModel):
     """DTO for creating a new device."""
 
