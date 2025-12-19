@@ -668,7 +668,8 @@ async def test_subscription_route_fallback_when_custom_route_unavailable() -> No
     mock_mcp.run_http_async = AsyncMock()
 
     # Mock MCP instance without custom_route attribute
-    delattr(mock_mcp, "custom_route") if hasattr(mock_mcp, "custom_route") else None
+    if hasattr(mock_mcp, "custom_route"):
+        delattr(mock_mcp, "custom_route")
 
     with patch("routeros_mcp.mcp.transport.http_sse.logger") as mock_logger:
         HTTPSSETransport(settings, mock_mcp)
