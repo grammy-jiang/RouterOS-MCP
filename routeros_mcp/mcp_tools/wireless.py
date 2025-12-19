@@ -212,4 +212,165 @@ def register_wireless_tools(mcp: FastMCP, settings: Settings) -> None:
                 meta=error.data,
             )
 
+    @mcp.tool()
+    async def get_capsman_remote_caps(device_id: str) -> dict[str, Any]:
+        """List remote CAP devices managed by CAPsMAN controller.
+
+        Use when:
+        - User asks "show me CAPsMAN remote CAPs" or "what CAP devices are connected?"
+        - Checking CAPsMAN-managed Access Points inventory
+        - Monitoring CAPsMAN controller topology
+        - Troubleshooting CAP connectivity to controller
+        - Auditing wireless infrastructure in CAPsMAN deployments
+
+        Returns: List of remote CAP devices with identity, address, state, version,
+        board info, and connection metrics. Returns empty list when CAPsMAN is not
+        present on the device.
+
+        Note:
+        - This shows CAP devices (managed APs) registered with the CAPsMAN controller
+        - Different from local wireless interfaces (which show only this router's radios)
+        - State indicates CAP connection status (e.g., "authorized", "provisioning")
+        - Empty list is normal if device is not a CAPsMAN controller
+
+        Args:
+            device_id: Device identifier (e.g., 'dev-lab-01')
+
+        Returns:
+            Formatted tool result with remote CAP list
+        """
+        try:
+            async with session_factory.session() as session:
+                device_service = DeviceService(session, settings)
+                wireless_service = WirelessService(session, settings)
+
+                # Get device first to validate it exists
+                device = await device_service.get_device(device_id)
+
+                # Authorization check - fundamental tier, read-only
+                check_tool_authorization(
+                    device_environment=device.environment,
+                    service_environment=settings.environment,
+                    tool_tier=ToolTier.FUNDAMENTAL,
+                    allow_advanced_writes=device.allow_advanced_writes,
+                    allow_professional_workflows=device.allow_professional_workflows,
+                    device_id=device_id,
+                    tool_name="wireless/get-capsman-remote-caps",
+                )
+
+                # Get CAPsMAN remote CAPs
+                caps = await wireless_service.get_capsman_remote_caps(device_id)
+
+                if len(caps) == 0:
+                    content = (
+                        f"No remote CAPs found on {device.name}. "
+                        "This device may not be a CAPsMAN controller, or no CAP devices are currently registered."
+                    )
+                else:
+                    content = f"Found {len(caps)} remote CAP device(s) managed by CAPsMAN on {device.name}"
+
+                return format_tool_result(
+                    content=content,
+                    meta={
+                        "device_id": device_id,
+                        "remote_caps": caps,
+                        "total_count": len(caps),
+                    },
+                )
+
+        except MCPError as e:
+            return format_tool_result(
+                content=e.message,
+                is_error=True,
+                meta=e.data,
+            )
+        except Exception as e:
+            error = map_exception_to_error(e)
+            return format_tool_result(
+                content=error.message,
+                is_error=True,
+                meta=error.data,
+            )
+
+    @mcp.tool()
+    async def get_capsman_registrations(device_id: str) -> dict[str, Any]:
+        """List active CAPsMAN client registrations.
+
+        Use when:
+        - User asks "show me CAPsMAN registrations" or "what clients are on CAPsMAN?"
+        - Monitoring client connections in CAPsMAN deployments
+        - Troubleshooting wireless client connectivity via CAPsMAN
+        - Reviewing which CAP/radio clients are connected to
+        - Getting accurate WiFi client counts across CAPsMAN infrastructure
+
+        Returns: List of active CAPsMAN registrations with interface, MAC address,
+        SSID, AP name, signal strength, and traffic statistics. Returns empty list
+        when CAPsMAN is not present or no clients are registered.
+
+        Note:
+        - This shows clients registered via CAPsMAN controller
+        - More accurate than local registration-table in CAPsMAN deployments
+        - Includes clients on all managed CAP devices
+        - Signal strength in RSSI (negative dBm, e.g., -65 dBm)
+        - Empty list is normal if no clients connected or device is not a CAPsMAN controller
+
+        Args:
+            device_id: Device identifier (e.g., 'dev-lab-01')
+
+        Returns:
+            Formatted tool result with registration list
+        """
+        try:
+            async with session_factory.session() as session:
+                device_service = DeviceService(session, settings)
+                wireless_service = WirelessService(session, settings)
+
+                # Get device first to validate it exists
+                device = await device_service.get_device(device_id)
+
+                # Authorization check - fundamental tier, read-only
+                check_tool_authorization(
+                    device_environment=device.environment,
+                    service_environment=settings.environment,
+                    tool_tier=ToolTier.FUNDAMENTAL,
+                    allow_advanced_writes=device.allow_advanced_writes,
+                    allow_professional_workflows=device.allow_professional_workflows,
+                    device_id=device_id,
+                    tool_name="wireless/get-capsman-registrations",
+                )
+
+                # Get CAPsMAN registrations
+                registrations = await wireless_service.get_capsman_registrations(device_id)
+
+                if len(registrations) == 0:
+                    content = (
+                        f"No CAPsMAN registrations found on {device.name}. "
+                        "This device may not be a CAPsMAN controller, or no clients are currently connected."
+                    )
+                else:
+                    content = f"Found {len(registrations)} active CAPsMAN registration(s) on {device.name}"
+
+                return format_tool_result(
+                    content=content,
+                    meta={
+                        "device_id": device_id,
+                        "registrations": registrations,
+                        "total_count": len(registrations),
+                    },
+                )
+
+        except MCPError as e:
+            return format_tool_result(
+                content=e.message,
+                is_error=True,
+                meta=e.data,
+            )
+        except Exception as e:
+            error = map_exception_to_error(e)
+            return format_tool_result(
+                content=error.message,
+                is_error=True,
+                meta=error.data,
+            )
+
     logger.info("Registered wireless management tools")
