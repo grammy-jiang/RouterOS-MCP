@@ -667,15 +667,15 @@ async def test_subscription_route_fallback_when_custom_route_unavailable() -> No
     mock_mcp = MagicMock()
     mock_mcp.run_http_async = AsyncMock()
 
-    # Mock MCP instance without custom_route attribute
-    if hasattr(mock_mcp, "custom_route"):
-        delattr(mock_mcp, "custom_route")
+    # Mock MCP instance where custom_route is not callable / effectively unavailable
+    mock_mcp.custom_route = None
 
     with patch("routeros_mcp.mcp.transport.http_sse.logger") as mock_logger:
         HTTPSSETransport(settings, mock_mcp)
 
         # Verify warning was logged
         mock_logger.warning.assert_called_once()
-        call_args = mock_logger.warning.call_args
-        assert "does not support custom routes" in call_args[0][0]
-        assert "SSE subscriptions unavailable" in call_args[0][0]
+        call = mock_logger.warning.call_args
+        message = call.args[0]
+        assert "does not support custom routes" in message
+        assert "SSE subscriptions unavailable" in message
