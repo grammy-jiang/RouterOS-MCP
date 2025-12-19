@@ -64,18 +64,18 @@ class PlanService:
         self.session = session
         self.settings = settings or Settings()
 
-    def _generate_approval_token(self, plan_id: str, created_by: str) -> str:
+    def _generate_approval_token(self, plan_id: str, created_by: str, timestamp: str) -> str:
         """Generate cryptographically signed approval token using HMAC.
 
         Args:
             plan_id: Plan identifier
             created_by: User who created the plan
+            timestamp: ISO format timestamp for token generation
 
         Returns:
             HMAC-signed approval token
         """
         # Create message to sign: plan_id:created_by:timestamp
-        timestamp = datetime.now(UTC).isoformat()
         message = f"{plan_id}:{created_by}:{timestamp}"
         
         # Use encryption key as HMAC secret (or fallback to secure random)
@@ -93,7 +93,7 @@ class PlanService:
         return f"approve-{signature}-{random_suffix}"
 
     def _validate_approval_token(
-        self, plan_id: str, created_by: str, token: str, expires_at: datetime
+        self, plan_id: str, created_by: str, token: str, expires_at: datetime, token_timestamp: str
     ) -> None:
         """Validate approval token signature and expiration.
 
@@ -102,6 +102,7 @@ class PlanService:
             created_by: User who created the plan
             token: Token to validate
             expires_at: Token expiration timestamp
+            token_timestamp: Timestamp used when generating the token
 
         Raises:
             ValueError: If token is invalid or expired
@@ -110,16 +111,29 @@ class PlanService:
         if datetime.now(UTC) > expires_at:
             raise ValueError("Approval token has expired")
         
-        # For HMAC tokens, we can't regenerate exact token due to random suffix
-        # Instead, verify it starts with correct prefix and has valid format
+        # Regenerate expected signature using stored timestamp
+        message = f"{plan_id}:{created_by}:{token_timestamp}"
+        secret_key = self.settings.encryption_key or "INSECURE_LAB_KEY_DO_NOT_USE_IN_PRODUCTION"
+        expected_signature = hmac.new(
+            secret_key.encode(),
+            message.encode(),
+            hashlib.sha256
+        ).hexdigest()[:16]
+        
+        # Extract signature from token
+        # Token format: approve-{signature}-{random}
         if not token.startswith("approve-"):
             raise ValueError("Invalid approval token format")
         
-        # Token format: approve-{signature}-{random}
-        # Note: URL-safe base64 can contain hyphens, so we check for at least 2 parts after "approve-"
         parts = token.split("-", 2)  # Split on first 2 hyphens only
         if len(parts) < 3 or not parts[1] or not parts[2]:
             raise ValueError("Invalid approval token format")
+        
+        token_signature = parts[1]
+        
+        # Verify signature using constant-time comparison
+        if not secrets.compare_digest(token_signature, expected_signature):
+            raise ValueError("Invalid approval token")
 
     async def _log_audit_event(
         self,
@@ -193,6 +207,7 @@ class PlanService:
                 "environment": device.environment,
                 "status": "passed",
                 "checks": [],
+                "warnings": [],  # Initialize warnings list from start
             }
 
             # Check 1: Professional workflows capability
@@ -207,8 +222,6 @@ class PlanService:
 
             # Check 2: Environment restrictions for high-risk operations
             if risk_level == "high" and device.environment == "prod":
-                if "warnings" not in device_result:
-                    device_result["warnings"] = []
                 device_result["warnings"].append({
                     "check": "environment_restriction",
                     "message": f"High-risk operation on production device {device.id} - proceed with extreme caution",
@@ -229,8 +242,6 @@ class PlanService:
 
             # Check 4: Device health status
             if device.status == "degraded":
-                if "warnings" not in device_result:
-                    device_result["warnings"] = []
                 device_result["warnings"].append({
                     "check": "device_health",
                     "message": f"Device {device.id} is in degraded state",
@@ -286,7 +297,10 @@ class PlanService:
 
             # Generate plan ID and approval token
             plan_id = f"plan-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
-            approval_token = self._generate_approval_token(plan_id, created_by)
+            
+            # Generate token timestamp (stored with token for validation)
+            token_timestamp = datetime.now(UTC).isoformat()
+            approval_token = self._generate_approval_token(plan_id, created_by, token_timestamp)
             
             # Token expires in 15 minutes (not 1 hour)
             expires_at = datetime.now(UTC) + timedelta(minutes=self.TOKEN_EXPIRATION_MINUTES)
@@ -303,6 +317,7 @@ class PlanService:
                     **changes,
                     "risk_level": risk_level,
                     "approval_token": approval_token,
+                    "approval_token_timestamp": token_timestamp,  # Store timestamp for validation
                     "approval_expires_at": expires_at.isoformat(),
                     "pre_check_results": pre_check_results,
                 },
@@ -461,12 +476,13 @@ class PlanService:
             if not stored_token or not secrets.compare_digest(stored_token, approval_token):
                 raise ValueError("Invalid approval token")
 
-            # Check token expiration
+            # Check token expiration and validate signature
             expires_at_str = plan.changes.get("approval_expires_at")
-            if expires_at_str:
+            token_timestamp = plan.changes.get("approval_token_timestamp")
+            if expires_at_str and token_timestamp:
                 expires_at = datetime.fromisoformat(expires_at_str)
                 self._validate_approval_token(
-                    plan_id, plan.created_by, stored_token, expires_at
+                    plan_id, plan.created_by, stored_token, expires_at, token_timestamp
                 )
 
             # Update plan status
