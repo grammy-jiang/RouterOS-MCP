@@ -1021,3 +1021,193 @@ async def test_capability_checks_with_empty_capabilities_list(
     
     assert device.id == "dev-lab-06"
 
+
+# ============================================================================
+# Audit Logging Tests for Capability Checks
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_capability_checks_logs_success_when_checks_pass(
+    db_session: AsyncSession, settings: Settings, caplog
+):
+    """Test that successful capability checks are logged with correct context."""
+    import logging
+    from routeros_mcp.domain.models import DeviceCapability
+
+    caplog.set_level(logging.INFO)
+    
+    service = DeviceService(db_session, settings)
+    
+    # Create lab device with capability enabled
+    await service.register_device(
+        DeviceCreate(
+            id="dev-lab-log-01",
+            name="router-lab-log-01",
+            management_ip="192.0.2.20",
+            environment="lab",
+            allow_firewall_writes=True,
+        )
+    )
+    
+    # Check should pass and log success
+    await service.check_device_capabilities(
+        device_id="dev-lab-log-01",
+        required_capabilities=[DeviceCapability.FIREWALL_WRITES],
+        operation="test_firewall_write",
+    )
+    
+    # Verify success log was emitted with correct context
+    success_logs = [r for r in caplog.records if "Device capability check passed" in r.message]
+    assert len(success_logs) == 1
+    
+    log_record = success_logs[0]
+    assert log_record.levelname == "INFO"
+    assert log_record.device_id == "dev-lab-log-01"
+    assert log_record.device_name == "router-lab-log-01"
+    assert log_record.device_environment == "lab"
+    assert log_record.operation == "test_firewall_write"
+    assert log_record.check_type == "all"
+    assert log_record.result == "allowed"
+
+
+@pytest.mark.asyncio
+async def test_capability_checks_logs_environment_denial(
+    db_session: AsyncSession, caplog
+):
+    """Test that environment restriction failures are logged with correct context."""
+    import logging
+    from routeros_mcp.domain.exceptions import EnvironmentNotAllowedError
+    from routeros_mcp.domain.models import DeviceCapability
+
+    caplog.set_level(logging.WARNING)
+    
+    # Create prod device
+    settings_prod = Settings(environment="prod", encryption_key="secret-key")
+    service = DeviceService(db_session, settings_prod)
+    
+    await service.register_device(
+        DeviceCreate(
+            id="dev-prod-log-01",
+            name="router-prod-log-01",
+            management_ip="192.0.2.21",
+            environment="prod",
+            allow_firewall_writes=True,
+        )
+    )
+    
+    # Check should fail due to environment
+    with pytest.raises(EnvironmentNotAllowedError):
+        await service.check_device_capabilities(
+            device_id="dev-prod-log-01",
+            required_capabilities=[DeviceCapability.FIREWALL_WRITES],
+            allowed_environments=["lab", "staging"],
+            operation="test_firewall_write",
+        )
+    
+    # Verify environment denial log was emitted with correct context
+    denial_logs = [r for r in caplog.records if "Device environment restriction enforced" in r.message]
+    assert len(denial_logs) == 1
+    
+    log_record = denial_logs[0]
+    assert log_record.levelname == "WARNING"
+    assert log_record.device_id == "dev-prod-log-01"
+    assert log_record.device_name == "router-prod-log-01"
+    assert log_record.device_environment == "prod"
+    assert log_record.operation == "test_firewall_write"
+    assert log_record.check_type == "environment_validation"
+    assert log_record.result == "denied"
+
+
+@pytest.mark.asyncio
+async def test_capability_checks_logs_capability_denial(
+    db_session: AsyncSession, settings: Settings, caplog
+):
+    """Test that capability flag denial is logged with correct context."""
+    import logging
+    from routeros_mcp.domain.exceptions import CapabilityNotAllowedError
+    from routeros_mcp.domain.models import DeviceCapability
+
+    caplog.set_level(logging.WARNING)
+    
+    service = DeviceService(db_session, settings)
+    
+    # Create lab device WITHOUT firewall writes enabled
+    await service.register_device(
+        DeviceCreate(
+            id="dev-lab-log-02",
+            name="router-lab-log-02",
+            management_ip="192.0.2.22",
+            environment="lab",
+            allow_firewall_writes=False,
+        )
+    )
+    
+    # Check should fail due to missing capability
+    with pytest.raises(CapabilityNotAllowedError):
+        await service.check_device_capabilities(
+            device_id="dev-lab-log-02",
+            required_capabilities=[DeviceCapability.FIREWALL_WRITES],
+            operation="test_firewall_write",
+        )
+    
+    # Verify capability denial log was emitted with correct context
+    denial_logs = [r for r in caplog.records if "Device capability flag restriction enforced" in r.message]
+    assert len(denial_logs) == 1
+    
+    log_record = denial_logs[0]
+    assert log_record.levelname == "WARNING"
+    assert log_record.device_id == "dev-lab-log-02"
+    assert log_record.device_name == "router-lab-log-02"
+    assert log_record.device_environment == "lab"
+    assert log_record.required_capability == "allow_firewall_writes"
+    assert log_record.current_value is False
+    assert log_record.operation == "test_firewall_write"
+    assert log_record.check_type == "capability_validation"
+    assert log_record.result == "denied"
+
+
+@pytest.mark.asyncio
+async def test_capability_checks_logs_include_all_required_capabilities(
+    db_session: AsyncSession, settings: Settings, caplog
+):
+    """Test that success log includes all required capabilities in context."""
+    import logging
+    from routeros_mcp.domain.models import DeviceCapability
+
+    caplog.set_level(logging.INFO)
+    
+    service = DeviceService(db_session, settings)
+    
+    # Create device with multiple capabilities
+    await service.register_device(
+        DeviceCreate(
+            id="dev-lab-log-03",
+            name="router-lab-log-03",
+            management_ip="192.0.2.23",
+            environment="lab",
+            allow_firewall_writes=True,
+            allow_routing_writes=True,
+        )
+    )
+    
+    # Check with multiple capabilities
+    await service.check_device_capabilities(
+        device_id="dev-lab-log-03",
+        required_capabilities=[
+            DeviceCapability.FIREWALL_WRITES,
+            DeviceCapability.ROUTING_WRITES,
+        ],
+        operation="test_combined_writes",
+    )
+    
+    # Verify log includes both required capabilities
+    success_logs = [r for r in caplog.records if "Device capability check passed" in r.message]
+    assert len(success_logs) == 1
+    
+    log_record = success_logs[0]
+    assert log_record.levelname == "INFO"
+    assert "allow_firewall_writes" in log_record.required_capabilities
+    assert "allow_routing_writes" in log_record.required_capabilities
+    assert len(log_record.required_capabilities) == 2
+
