@@ -123,19 +123,55 @@ class Device(Base):
         JSON, nullable=False, default=dict, comment="Device tags (key-value pairs)"
     )
 
-    # Capability flags
+    # Capability flags (Phase 2 and Phase 3)
     allow_advanced_writes: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=False,
-        comment="Allow advanced tier write operations",
+        comment="Allow advanced tier write operations (Phase 2)",
     )
 
     allow_professional_workflows: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=False,
-        comment="Allow professional tier workflows",
+        comment="Allow professional tier workflows (Phase 3+)",
+    )
+
+    # Phase 3 topic-specific capability flags
+    allow_firewall_writes: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="Allow firewall filter/NAT rule writes (Phase 3)",
+    )
+
+    allow_routing_writes: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="Allow static route and routing policy writes (Phase 3)",
+    )
+
+    allow_wireless_writes: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="Allow wireless/RF configuration writes (Phase 3)",
+    )
+
+    allow_dhcp_writes: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="Allow DHCP server configuration writes (Phase 3)",
+    )
+
+    allow_bridge_writes: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="Allow bridge and VLAN configuration writes (Phase 3)",
     )
 
     # RouterOS metadata

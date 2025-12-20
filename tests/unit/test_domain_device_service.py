@@ -656,3 +656,558 @@ class TestDeviceServiceSSLVerification:
 
         assert len(captured_kwargs) == 1
         assert captured_kwargs[0]["verify_ssl"] is False
+
+
+# ============================================================================
+# Phase 3 Capability Check Tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_capability_checks_when_lab_device_with_professional_workflows_allowed_passes(
+    db_session: AsyncSession, settings: Settings
+):
+    """Test capability check passes for lab device with professional workflows enabled."""
+    from routeros_mcp.domain.models import DeviceCapability
+
+    service = DeviceService(db_session, settings)
+    
+    # Create lab device with professional workflows enabled
+    await service.register_device(
+        DeviceCreate(
+            id="dev-lab-01",
+            name="router-lab-01",
+            management_ip="192.0.2.1",
+            environment="lab",
+            allow_professional_workflows=True,
+        )
+    )
+    
+    # Check should pass
+    device = await service.check_device_capabilities(
+        device_id="dev-lab-01",
+        required_capabilities=[DeviceCapability.PROFESSIONAL_WORKFLOWS],
+        operation="test_operation",
+    )
+    
+    assert device.id == "dev-lab-01"
+    assert device.environment == "lab"
+    assert device.allow_professional_workflows is True
+
+
+@pytest.mark.asyncio
+async def test_capability_checks_when_staging_device_with_firewall_writes_allowed_passes(
+    db_session: AsyncSession
+):
+    """Test capability check passes for staging device with firewall writes enabled."""
+    from routeros_mcp.domain.models import DeviceCapability
+
+    # Create service with staging environment to register staging device
+    settings_staging = Settings(environment="staging", encryption_key="secret-key")
+    service = DeviceService(db_session, settings_staging)
+    
+    # Create staging device with firewall writes enabled
+    await service.register_device(
+        DeviceCreate(
+            id="dev-staging-01",
+            name="router-staging-01",
+            management_ip="192.0.2.2",
+            environment="staging",
+            allow_firewall_writes=True,
+        )
+    )
+    
+    # Check should pass
+    device = await service.check_device_capabilities(
+        device_id="dev-staging-01",
+        required_capabilities=[DeviceCapability.FIREWALL_WRITES],
+        allowed_environments=["lab", "staging"],
+        operation="firewall_write",
+    )
+    
+    assert device.id == "dev-staging-01"
+    assert device.allow_firewall_writes is True
+
+
+@pytest.mark.asyncio
+async def test_capability_checks_when_prod_device_blocked_by_environment(
+    db_session: AsyncSession
+):
+    """Test capability check fails for prod device (environment restriction)."""
+    from routeros_mcp.domain.exceptions import EnvironmentNotAllowedError
+    from routeros_mcp.domain.models import DeviceCapability
+
+    # Create service with prod environment to register prod device
+    settings_prod = Settings(environment="prod", encryption_key="secret-key")
+    service = DeviceService(db_session, settings_prod)
+    
+    # Create prod device with capability enabled (should still fail on environment)
+    await service.register_device(
+        DeviceCreate(
+            id="dev-prod-01",
+            name="router-prod-01",
+            management_ip="192.0.2.3",
+            environment="prod",
+            allow_professional_workflows=True,
+        )
+    )
+    
+    # Check should fail due to environment restriction
+    with pytest.raises(EnvironmentNotAllowedError) as exc_info:
+        await service.check_device_capabilities(
+            device_id="dev-prod-01",
+            required_capabilities=[DeviceCapability.PROFESSIONAL_WORKFLOWS],
+            allowed_environments=["lab", "staging"],  # prod not allowed
+            operation="professional_operation",
+        )
+    
+    # Verify error context
+    assert exc_info.value.context["device_id"] == "dev-prod-01"
+    assert exc_info.value.context["device_environment"] == "prod"
+    assert exc_info.value.context["allowed_environments"] == ["lab", "staging"]
+
+
+@pytest.mark.asyncio
+async def test_capability_checks_when_prod_device_with_explicit_override_passes(
+    db_session: AsyncSession
+):
+    """Test capability check passes for prod device when explicitly allowed."""
+    from routeros_mcp.domain.models import DeviceCapability
+
+    # Create service with prod environment to register prod device
+    settings_prod = Settings(environment="prod", encryption_key="secret-key")
+    service = DeviceService(db_session, settings_prod)
+    
+    # Create prod device with capability enabled
+    await service.register_device(
+        DeviceCreate(
+            id="dev-prod-02",
+            name="router-prod-02",
+            management_ip="192.0.2.4",
+            environment="prod",
+            allow_routing_writes=True,
+        )
+    )
+    
+    # Check should pass when prod is in allowed environments
+    device = await service.check_device_capabilities(
+        device_id="dev-prod-02",
+        required_capabilities=[DeviceCapability.ROUTING_WRITES],
+        allowed_environments=["lab", "staging", "prod"],  # Explicitly allow prod
+        operation="routing_write",
+    )
+    
+    assert device.id == "dev-prod-02"
+    assert device.environment == "prod"
+    assert device.allow_routing_writes is True
+
+
+@pytest.mark.asyncio
+async def test_capability_checks_when_capability_flag_disabled_raises_error(
+    db_session: AsyncSession, settings: Settings
+):
+    """Test capability check fails when required capability flag is disabled."""
+    from routeros_mcp.domain.exceptions import CapabilityNotAllowedError
+    from routeros_mcp.domain.models import DeviceCapability
+
+    service = DeviceService(db_session, settings)
+    
+    # Create lab device WITHOUT firewall writes enabled
+    await service.register_device(
+        DeviceCreate(
+            id="dev-lab-02",
+            name="router-lab-02",
+            management_ip="192.0.2.5",
+            environment="lab",
+            allow_firewall_writes=False,  # Explicitly disabled
+        )
+    )
+    
+    # Check should fail due to missing capability
+    with pytest.raises(CapabilityNotAllowedError) as exc_info:
+        await service.check_device_capabilities(
+            device_id="dev-lab-02",
+            required_capabilities=[DeviceCapability.FIREWALL_WRITES],
+            operation="firewall_write",
+        )
+    
+    # Verify error context
+    assert exc_info.value.context["device_id"] == "dev-lab-02"
+    assert exc_info.value.context["required_capability"] == "allow_firewall_writes"
+    assert exc_info.value.context["current_value"] is False
+
+
+@pytest.mark.asyncio
+async def test_capability_checks_when_multiple_capabilities_required_all_must_pass(
+    db_session: AsyncSession, settings: Settings
+):
+    """Test capability check with multiple required capabilities."""
+    from routeros_mcp.domain.exceptions import CapabilityNotAllowedError
+    from routeros_mcp.domain.models import DeviceCapability
+
+    service = DeviceService(db_session, settings)
+    
+    # Create device with only one of two required capabilities
+    await service.register_device(
+        DeviceCreate(
+            id="dev-lab-03",
+            name="router-lab-03",
+            management_ip="192.0.2.6",
+            environment="lab",
+            allow_firewall_writes=True,
+            allow_routing_writes=False,  # Missing this one
+        )
+    )
+    
+    # Check should fail because routing_writes is not enabled
+    with pytest.raises(CapabilityNotAllowedError) as exc_info:
+        await service.check_device_capabilities(
+            device_id="dev-lab-03",
+            required_capabilities=[
+                DeviceCapability.FIREWALL_WRITES,
+                DeviceCapability.ROUTING_WRITES,  # This will fail
+            ],
+            operation="combined_operation",
+        )
+    
+    assert exc_info.value.context["required_capability"] == "allow_routing_writes"
+
+
+@pytest.mark.asyncio
+async def test_capability_checks_when_no_capabilities_required_only_checks_environment(
+    db_session: AsyncSession, settings: Settings
+):
+    """Test capability check with no capabilities required (environment only)."""
+    service = DeviceService(db_session, settings)
+    
+    # Create lab device
+    await service.register_device(
+        DeviceCreate(
+            id="dev-lab-04",
+            name="router-lab-04",
+            management_ip="192.0.2.7",
+            environment="lab",
+        )
+    )
+    
+    # Check should pass with no capability requirements
+    device = await service.check_device_capabilities(
+        device_id="dev-lab-04",
+        required_capabilities=None,  # No capabilities required
+        operation="environment_only_check",
+    )
+    
+    assert device.id == "dev-lab-04"
+
+
+@pytest.mark.asyncio
+async def test_capability_checks_when_device_not_found_raises_error(
+    db_session: AsyncSession, settings: Settings
+):
+    """Test capability check fails when device doesn't exist."""
+    from routeros_mcp.domain.models import DeviceCapability
+
+    service = DeviceService(db_session, settings)
+    
+    # Check should fail with DeviceNotFoundError
+    with pytest.raises(DeviceNotFoundError):
+        await service.check_device_capabilities(
+            device_id="non-existent-device",
+            required_capabilities=[DeviceCapability.PROFESSIONAL_WORKFLOWS],
+            operation="test_operation",
+        )
+
+
+@pytest.mark.asyncio
+async def test_capability_checks_all_phase3_capability_flags(
+    db_session: AsyncSession, settings: Settings
+):
+    """Test all Phase 3 capability flags individually."""
+    from routeros_mcp.domain.models import DeviceCapability
+
+    service = DeviceService(db_session, settings)
+    
+    # Create device with all Phase 3 capabilities enabled
+    await service.register_device(
+        DeviceCreate(
+            id="dev-lab-05",
+            name="router-lab-05",
+            management_ip="192.0.2.8",
+            environment="lab",
+            allow_professional_workflows=True,
+            allow_firewall_writes=True,
+            allow_routing_writes=True,
+            allow_wireless_writes=True,
+            allow_dhcp_writes=True,
+            allow_bridge_writes=True,
+        )
+    )
+    
+    # Test each capability individually
+    capabilities_to_test = [
+        DeviceCapability.PROFESSIONAL_WORKFLOWS,
+        DeviceCapability.FIREWALL_WRITES,
+        DeviceCapability.ROUTING_WRITES,
+        DeviceCapability.WIRELESS_WRITES,
+        DeviceCapability.DHCP_WRITES,
+        DeviceCapability.BRIDGE_WRITES,
+    ]
+    
+    for capability in capabilities_to_test:
+        device = await service.check_device_capabilities(
+            device_id="dev-lab-05",
+            required_capabilities=[capability],
+            operation=f"test_{capability.value}",
+        )
+        assert device.id == "dev-lab-05"
+
+
+@pytest.mark.asyncio
+async def test_capability_checks_default_phase3_environments(
+    db_session: AsyncSession
+):
+    """Test default allowed environments for Phase 3 (lab/staging only)."""
+    from routeros_mcp.domain.exceptions import EnvironmentNotAllowedError
+    from routeros_mcp.domain.models import DeviceCapability
+
+    # Create service with prod environment to register prod device
+    settings_prod = Settings(environment="prod", encryption_key="secret-key")
+    service = DeviceService(db_session, settings_prod)
+    
+    # Create prod device
+    await service.register_device(
+        DeviceCreate(
+            id="dev-prod-03",
+            name="router-prod-03",
+            management_ip="192.0.2.9",
+            environment="prod",
+            allow_professional_workflows=True,
+        )
+    )
+    
+    # Check should fail with default environments (None = lab/staging only)
+    with pytest.raises(EnvironmentNotAllowedError):
+        await service.check_device_capabilities(
+            device_id="dev-prod-03",
+            required_capabilities=[DeviceCapability.PROFESSIONAL_WORKFLOWS],
+            allowed_environments=None,  # Defaults to lab/staging only
+            operation="phase3_operation",
+        )
+
+
+@pytest.mark.asyncio
+async def test_capability_checks_with_empty_capabilities_list(
+    db_session: AsyncSession, settings: Settings
+):
+    """Test capability check with empty capabilities list (environment only)."""
+    service = DeviceService(db_session, settings)
+    
+    # Create lab device
+    await service.register_device(
+        DeviceCreate(
+            id="dev-lab-06",
+            name="router-lab-06",
+            management_ip="192.0.2.10",
+            environment="lab",
+        )
+    )
+    
+    # Check should pass with empty capability list
+    device = await service.check_device_capabilities(
+        device_id="dev-lab-06",
+        required_capabilities=[],  # Empty list
+        operation="environment_only_check",
+    )
+    
+    assert device.id == "dev-lab-06"
+
+
+# ============================================================================
+# Audit Logging Tests for Capability Checks
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_capability_checks_logs_success_when_checks_pass(
+    db_session: AsyncSession, settings: Settings, caplog
+):
+    """Test that successful capability checks are logged with correct context."""
+    import logging
+    from routeros_mcp.domain.models import DeviceCapability
+
+    caplog.set_level(logging.INFO)
+    
+    service = DeviceService(db_session, settings)
+    
+    # Create lab device with capability enabled
+    await service.register_device(
+        DeviceCreate(
+            id="dev-lab-log-01",
+            name="router-lab-log-01",
+            management_ip="192.0.2.20",
+            environment="lab",
+            allow_firewall_writes=True,
+        )
+    )
+    
+    # Check should pass and log success
+    await service.check_device_capabilities(
+        device_id="dev-lab-log-01",
+        required_capabilities=[DeviceCapability.FIREWALL_WRITES],
+        operation="test_firewall_write",
+    )
+    
+    # Verify success log was emitted with correct context
+    success_logs = [r for r in caplog.records if "Device capability check passed" in r.message]
+    assert len(success_logs) == 1
+    
+    log_record = success_logs[0]
+    assert log_record.levelname == "INFO"
+    assert log_record.device_id == "dev-lab-log-01"
+    assert log_record.device_name == "router-lab-log-01"
+    assert log_record.device_environment == "lab"
+    assert log_record.operation == "test_firewall_write"
+    assert log_record.check_type == "all"
+    assert log_record.result == "allowed"
+
+
+@pytest.mark.asyncio
+async def test_capability_checks_logs_environment_denial(
+    db_session: AsyncSession, caplog
+):
+    """Test that environment restriction failures are logged with correct context."""
+    import logging
+    from routeros_mcp.domain.exceptions import EnvironmentNotAllowedError
+    from routeros_mcp.domain.models import DeviceCapability
+
+    caplog.set_level(logging.WARNING)
+    
+    # Create prod device
+    settings_prod = Settings(environment="prod", encryption_key="secret-key")
+    service = DeviceService(db_session, settings_prod)
+    
+    await service.register_device(
+        DeviceCreate(
+            id="dev-prod-log-01",
+            name="router-prod-log-01",
+            management_ip="192.0.2.21",
+            environment="prod",
+            allow_firewall_writes=True,
+        )
+    )
+    
+    # Check should fail due to environment
+    with pytest.raises(EnvironmentNotAllowedError):
+        await service.check_device_capabilities(
+            device_id="dev-prod-log-01",
+            required_capabilities=[DeviceCapability.FIREWALL_WRITES],
+            allowed_environments=["lab", "staging"],
+            operation="test_firewall_write",
+        )
+    
+    # Verify environment denial log was emitted with correct context
+    denial_logs = [r for r in caplog.records if "Device environment restriction enforced" in r.message]
+    assert len(denial_logs) == 1
+    
+    log_record = denial_logs[0]
+    assert log_record.levelname == "WARNING"
+    assert log_record.device_id == "dev-prod-log-01"
+    assert log_record.device_name == "router-prod-log-01"
+    assert log_record.device_environment == "prod"
+    assert log_record.operation == "test_firewall_write"
+    assert log_record.check_type == "environment_validation"
+    assert log_record.result == "denied"
+
+
+@pytest.mark.asyncio
+async def test_capability_checks_logs_capability_denial(
+    db_session: AsyncSession, settings: Settings, caplog
+):
+    """Test that capability flag denial is logged with correct context."""
+    import logging
+    from routeros_mcp.domain.exceptions import CapabilityNotAllowedError
+    from routeros_mcp.domain.models import DeviceCapability
+
+    caplog.set_level(logging.WARNING)
+    
+    service = DeviceService(db_session, settings)
+    
+    # Create lab device WITHOUT firewall writes enabled
+    await service.register_device(
+        DeviceCreate(
+            id="dev-lab-log-02",
+            name="router-lab-log-02",
+            management_ip="192.0.2.22",
+            environment="lab",
+            allow_firewall_writes=False,
+        )
+    )
+    
+    # Check should fail due to missing capability
+    with pytest.raises(CapabilityNotAllowedError):
+        await service.check_device_capabilities(
+            device_id="dev-lab-log-02",
+            required_capabilities=[DeviceCapability.FIREWALL_WRITES],
+            operation="test_firewall_write",
+        )
+    
+    # Verify capability denial log was emitted with correct context
+    denial_logs = [r for r in caplog.records if "Device capability flag restriction enforced" in r.message]
+    assert len(denial_logs) == 1
+    
+    log_record = denial_logs[0]
+    assert log_record.levelname == "WARNING"
+    assert log_record.device_id == "dev-lab-log-02"
+    assert log_record.device_name == "router-lab-log-02"
+    assert log_record.device_environment == "lab"
+    assert log_record.required_capability == "allow_firewall_writes"
+    assert log_record.current_value is False
+    assert log_record.operation == "test_firewall_write"
+    assert log_record.check_type == "capability_validation"
+    assert log_record.result == "denied"
+
+
+@pytest.mark.asyncio
+async def test_capability_checks_logs_include_all_required_capabilities(
+    db_session: AsyncSession, settings: Settings, caplog
+):
+    """Test that success log includes all required capabilities in context."""
+    import logging
+    from routeros_mcp.domain.models import DeviceCapability
+
+    caplog.set_level(logging.INFO)
+    
+    service = DeviceService(db_session, settings)
+    
+    # Create device with multiple capabilities
+    await service.register_device(
+        DeviceCreate(
+            id="dev-lab-log-03",
+            name="router-lab-log-03",
+            management_ip="192.0.2.23",
+            environment="lab",
+            allow_firewall_writes=True,
+            allow_routing_writes=True,
+        )
+    )
+    
+    # Check with multiple capabilities
+    await service.check_device_capabilities(
+        device_id="dev-lab-log-03",
+        required_capabilities=[
+            DeviceCapability.FIREWALL_WRITES,
+            DeviceCapability.ROUTING_WRITES,
+        ],
+        operation="test_combined_writes",
+    )
+    
+    # Verify log includes both required capabilities
+    success_logs = [r for r in caplog.records if "Device capability check passed" in r.message]
+    assert len(success_logs) == 1
+    
+    log_record = success_logs[0]
+    assert log_record.levelname == "INFO"
+    assert "allow_firewall_writes" in log_record.required_capabilities
+    assert "allow_routing_writes" in log_record.required_capabilities
+    assert len(log_record.required_capabilities) == 2
+

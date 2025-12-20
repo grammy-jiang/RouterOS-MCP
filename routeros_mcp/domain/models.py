@@ -13,6 +13,45 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 
+# Device Capability Flag Constants (Phase 3)
+# These flags control access to advanced write operations on RouterOS devices.
+# All flags default to False for safety, especially on production devices.
+
+class DeviceCapability(str, Enum):
+    """Device capability flags for Phase 3 safety guardrails.
+    
+    These flags control which high-risk operations are permitted on a device.
+    All capabilities default to False unless explicitly enabled.
+    
+    Phase 3 capabilities (expert workflows):
+        - PROFESSIONAL_WORKFLOWS: Enable all professional-tier plan/apply workflows
+        - FIREWALL_WRITES: Enable firewall filter/NAT rule writes
+        - ROUTING_WRITES: Enable static route and routing policy writes
+        - WIRELESS_WRITES: Enable wireless/RF configuration writes
+        - DHCP_WRITES: Enable DHCP server configuration writes
+        - BRIDGE_WRITES: Enable bridge and VLAN configuration writes
+    """
+
+    # Core professional tier access
+    PROFESSIONAL_WORKFLOWS = "allow_professional_workflows"
+    
+    # Topic-specific write capabilities (Phase 3)
+    FIREWALL_WRITES = "allow_firewall_writes"
+    ROUTING_WRITES = "allow_routing_writes"
+    WIRELESS_WRITES = "allow_wireless_writes"
+    DHCP_WRITES = "allow_dhcp_writes"
+    BRIDGE_WRITES = "allow_bridge_writes"
+
+
+# Environment types for device deployment
+ENVIRONMENT_LAB = "lab"
+ENVIRONMENT_STAGING = "staging"
+ENVIRONMENT_PROD = "prod"
+
+# Default allowed environments for Phase 3 expert workflows (lab/staging only)
+PHASE3_DEFAULT_ALLOWED_ENVIRONMENTS = [ENVIRONMENT_LAB, ENVIRONMENT_STAGING]
+
+
 class PlanStatus(str, Enum):
     """Plan status state machine.
     
@@ -57,8 +96,17 @@ class DeviceCreate(BaseModel):
     management_port: int = Field(default=443, ge=1, le=65535, description="Management port (1-65535)")
     environment: Literal["lab", "staging", "prod"] = Field(..., description="Environment")
     tags: dict[str, str] = Field(default_factory=dict, description="Device tags")
+    
+    # Phase 2 capability flags
     allow_advanced_writes: bool = Field(default=False, description="Allow advanced writes")
     allow_professional_workflows: bool = Field(default=False, description="Allow professional workflows")
+    
+    # Phase 3 topic-specific capability flags
+    allow_firewall_writes: bool = Field(default=False, description="Allow firewall writes")
+    allow_routing_writes: bool = Field(default=False, description="Allow routing writes")
+    allow_wireless_writes: bool = Field(default=False, description="Allow wireless writes")
+    allow_dhcp_writes: bool = Field(default=False, description="Allow DHCP writes")
+    allow_bridge_writes: bool = Field(default=False, description="Allow bridge writes")
 
     @field_validator("management_ip")
     @classmethod
@@ -78,8 +126,18 @@ class DeviceUpdate(BaseModel):
     management_ip: str | None = None
     management_port: int | None = Field(default=None, ge=1, le=65535)
     tags: dict[str, str] | None = None
+    
+    # Phase 2 capability flags
     allow_advanced_writes: bool | None = None
     allow_professional_workflows: bool | None = None
+    
+    # Phase 3 topic-specific capability flags
+    allow_firewall_writes: bool | None = None
+    allow_routing_writes: bool | None = None
+    allow_wireless_writes: bool | None = None
+    allow_dhcp_writes: bool | None = None
+    allow_bridge_writes: bool | None = None
+    
     status: Literal["healthy", "degraded", "unreachable", "pending", "decommissioned"] | None = None
 
     @field_validator("management_ip")
@@ -106,9 +164,16 @@ class Device(BaseModel):
     status: Literal["healthy", "degraded", "unreachable", "pending", "decommissioned"]
     tags: dict[str, str]
 
-    # Capability flags
+    # Phase 2 capability flags
     allow_advanced_writes: bool
     allow_professional_workflows: bool
+
+    # Phase 3 topic-specific capability flags
+    allow_firewall_writes: bool = False
+    allow_routing_writes: bool = False
+    allow_wireless_writes: bool = False
+    allow_dhcp_writes: bool = False
+    allow_bridge_writes: bool = False
 
     # RouterOS metadata
     routeros_version: str | None = None
