@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from routeros_mcp.config import Settings
 from routeros_mcp.domain.models import PlanStatus
@@ -100,10 +100,19 @@ class TestFirewallPlanTools(unittest.TestCase):
             return content[0].get("text", "")
         return str(content)
 
+    def _create_mock_authz(self) -> Mock:
+        """Create a mock for check_tool_authorization.
+
+        Returns:
+            Mock object with return_value=None
+        """
+        return Mock(return_value=None)
+
     def test_plan_add_firewall_rule_success(self) -> None:
         """Test successful firewall rule addition plan."""
 
         async def _run() -> None:
+            mock_authz = self._create_mock_authz()
             with (
                 patch.object(
                     firewall_write_module,
@@ -123,7 +132,7 @@ class TestFirewallPlanTools(unittest.TestCase):
                 patch.object(
                     firewall_write_module,
                     "check_tool_authorization",
-                    lambda **_kwargs: None,
+                    mock_authz,
                 ),
             ):
                 mcp = self._register_tools()

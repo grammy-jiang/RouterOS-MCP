@@ -34,6 +34,11 @@ class FirewallPlanService:
     # Valid protocols
     VALID_PROTOCOLS = ["tcp", "udp", "icmp", "gre", "esp", "ah", "ipip", "ipsec-ah", "ipsec-esp"]
 
+    # High-risk conditions for risk assessment
+    HIGH_RISK_CHAIN = "input"  # Input chain affects device management
+    HIGH_RISK_ACTIONS = ["reject"]  # More aggressive than drop
+    HIGH_RISK_ENVIRONMENTS = ["prod"]  # Production environment
+
     def validate_rule_params(
         self,
         chain: str,
@@ -162,15 +167,15 @@ class FirewallPlanService:
             Risk level: "medium" or "high"
         """
         # High risk conditions
-        if chain == "input":
+        if chain == self.HIGH_RISK_CHAIN:
             logger.info("High risk: input chain affects device management")
             return "high"
 
-        if action == "reject":
+        if action in self.HIGH_RISK_ACTIONS:
             logger.info("High risk: reject action is more aggressive")
             return "high"
 
-        if device_environment == "prod":
+        if device_environment in self.HIGH_RISK_ENVIRONMENTS:
             logger.info("High risk: production environment")
             return "high"
 

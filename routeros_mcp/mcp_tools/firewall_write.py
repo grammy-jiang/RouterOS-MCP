@@ -23,6 +23,69 @@ from routeros_mcp.security.authz import ToolTier, check_tool_authorization
 
 logger = logging.getLogger(__name__)
 
+# TODO: Replace with actual user from auth context when authentication is implemented
+DEFAULT_MCP_USER = "mcp-user"
+
+
+async def _validate_devices_for_firewall_plan(
+    device_service: DeviceService,
+    settings: Settings,
+    device_ids: list[str],
+    tool_name: str,
+) -> list[Any]:
+    """Validate devices for firewall plan operations.
+
+    This helper performs common validation for all firewall plan tools:
+    - Devices exist
+    - Environment is lab/staging (by default)
+    - Professional workflows capability enabled
+    - Firewall writes capability enabled
+
+    Args:
+        device_service: Device service instance
+        settings: Application settings
+        device_ids: List of device identifiers
+        tool_name: Name of the tool being executed
+
+    Returns:
+        List of validated device models
+
+    Raises:
+        ValueError: If validation fails
+    """
+    devices = []
+    for device_id in device_ids:
+        device = await device_service.get_device(device_id)
+        devices.append(device)
+
+        # Check environment (lab/staging by default)
+        if device.environment not in PHASE3_DEFAULT_ALLOWED_ENVIRONMENTS:
+            raise ValueError(
+                f"Device {device_id} is in {device.environment} environment. "
+                f"Firewall rule changes are only allowed in: "
+                f"{', '.join(PHASE3_DEFAULT_ALLOWED_ENVIRONMENTS)}"
+            )
+
+        # Authorization check - professional tier
+        check_tool_authorization(
+            device_environment=device.environment,
+            service_environment=settings.environment,
+            tool_tier=ToolTier.PROFESSIONAL,
+            allow_advanced_writes=device.allow_advanced_writes,
+            allow_professional_workflows=device.allow_professional_workflows,
+            device_id=device_id,
+            tool_name=tool_name,
+        )
+
+        # Check firewall write capability
+        if not device.allow_firewall_writes:
+            raise ValueError(
+                f"Device {device_id} does not have firewall write capability enabled. "
+                f"Set {DeviceCapability.FIREWALL_WRITES.value}=true to enable."
+            )
+
+    return devices
+
 
 def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
     """Register firewall write tools with the MCP server.
@@ -228,36 +291,12 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                 )
 
                 # Validate all devices and check capabilities
-                devices = []
-                for device_id in device_ids:
-                    device = await device_service.get_device(device_id)
-                    devices.append(device)
-
-                    # Check environment (lab/staging by default)
-                    if device.environment not in PHASE3_DEFAULT_ALLOWED_ENVIRONMENTS:
-                        raise ValueError(
-                            f"Device {device_id} is in {device.environment} environment. "
-                            f"Firewall rule changes are only allowed in: "
-                            f"{', '.join(PHASE3_DEFAULT_ALLOWED_ENVIRONMENTS)}"
-                        )
-
-                    # Authorization check - professional tier with firewall writes
-                    check_tool_authorization(
-                        device_environment=device.environment,
-                        service_environment=settings.environment,
-                        tool_tier=ToolTier.PROFESSIONAL,
-                        allow_advanced_writes=device.allow_advanced_writes,
-                        allow_professional_workflows=device.allow_professional_workflows,
-                        device_id=device_id,
-                        tool_name="firewall/plan-add-rule",
-                    )
-
-                    # Check firewall write capability
-                    if not device.allow_firewall_writes:
-                        raise ValueError(
-                            f"Device {device_id} does not have firewall write capability enabled. "
-                            f"Set {DeviceCapability.FIREWALL_WRITES.value}=true to enable."
-                        )
+                devices = await _validate_devices_for_firewall_plan(
+                    device_service,
+                    settings,
+                    device_ids,
+                    "firewall/plan-add-rule",
+                )
 
                 # Assess risk level based on chain and action
                 risk_level = firewall_plan_service.assess_risk(
@@ -287,7 +326,7 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                 # Create plan
                 plan = await plan_service.create_plan(
                     tool_name="firewall/plan-add-rule",
-                    created_by="mcp-user",  # TODO: Get from auth context
+                    created_by=DEFAULT_MCP_USER,
                     device_ids=device_ids,
                     summary=f"Add firewall rule: chain={chain} action={action}",
                     changes={
@@ -437,35 +476,12 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                 )
 
                 # Validate all devices and check capabilities
-                devices = []
-                for device_id in device_ids:
-                    device = await device_service.get_device(device_id)
-                    devices.append(device)
-
-                    # Check environment
-                    if device.environment not in PHASE3_DEFAULT_ALLOWED_ENVIRONMENTS:
-                        raise ValueError(
-                            f"Device {device_id} is in {device.environment} environment. "
-                            f"Firewall rule changes are only allowed in: "
-                            f"{', '.join(PHASE3_DEFAULT_ALLOWED_ENVIRONMENTS)}"
-                        )
-
-                    # Authorization check
-                    check_tool_authorization(
-                        device_environment=device.environment,
-                        service_environment=settings.environment,
-                        tool_tier=ToolTier.PROFESSIONAL,
-                        allow_advanced_writes=device.allow_advanced_writes,
-                        allow_professional_workflows=device.allow_professional_workflows,
-                        device_id=device_id,
-                        tool_name="firewall/plan-modify-rule",
-                    )
-
-                    # Check firewall write capability
-                    if not device.allow_firewall_writes:
-                        raise ValueError(
-                            f"Device {device_id} does not have firewall write capability enabled."
-                        )
+                devices = await _validate_devices_for_firewall_plan(
+                    device_service,
+                    settings,
+                    device_ids,
+                    "firewall/plan-modify-rule",
+                )
 
                 # Assess risk level
                 risk_level = "high"  # Rule modification is always high risk
@@ -488,7 +504,7 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                 # Create plan
                 plan = await plan_service.create_plan(
                     tool_name="firewall/plan-modify-rule",
-                    created_by="mcp-user",
+                    created_by=DEFAULT_MCP_USER,
                     device_ids=device_ids,
                     summary=f"Modify firewall rule {rule_id}",
                     changes={
@@ -587,35 +603,12 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                 firewall_plan_service = FirewallPlanService()
 
                 # Validate all devices and check capabilities
-                devices = []
-                for device_id in device_ids:
-                    device = await device_service.get_device(device_id)
-                    devices.append(device)
-
-                    # Check environment
-                    if device.environment not in PHASE3_DEFAULT_ALLOWED_ENVIRONMENTS:
-                        raise ValueError(
-                            f"Device {device_id} is in {device.environment} environment. "
-                            f"Firewall rule changes are only allowed in: "
-                            f"{', '.join(PHASE3_DEFAULT_ALLOWED_ENVIRONMENTS)}"
-                        )
-
-                    # Authorization check
-                    check_tool_authorization(
-                        device_environment=device.environment,
-                        service_environment=settings.environment,
-                        tool_tier=ToolTier.PROFESSIONAL,
-                        allow_advanced_writes=device.allow_advanced_writes,
-                        allow_professional_workflows=device.allow_professional_workflows,
-                        device_id=device_id,
-                        tool_name="firewall/plan-remove-rule",
-                    )
-
-                    # Check firewall write capability
-                    if not device.allow_firewall_writes:
-                        raise ValueError(
-                            f"Device {device_id} does not have firewall write capability enabled."
-                        )
+                devices = await _validate_devices_for_firewall_plan(
+                    device_service,
+                    settings,
+                    device_ids,
+                    "firewall/plan-remove-rule",
+                )
 
                 # Rule removal is always high risk
                 risk_level = "high"
@@ -637,7 +630,7 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                 # Create plan
                 plan = await plan_service.create_plan(
                     tool_name="firewall/plan-remove-rule",
-                    created_by="mcp-user",
+                    created_by=DEFAULT_MCP_USER,
                     device_ids=device_ids,
                     summary=f"Remove firewall rule {rule_id}",
                     changes={
