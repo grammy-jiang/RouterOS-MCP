@@ -93,11 +93,10 @@ class FirewallPlanService:
             )
 
         # Validate destination port if provided
-        if dst_port:
-            if not self._validate_port(dst_port):
-                errors.append(
-                    f"Invalid destination port '{dst_port}'. Must be a number (1-65535) or range (e.g., '8000-9000')"
-                )
+        if dst_port and not self._validate_port(dst_port):
+            errors.append(
+                f"Invalid destination port '{dst_port}'. Must be a number (1-65535) or range (e.g., '8000-9000')"
+            )
 
         if errors:
             raise ValueError("Rule parameter validation failed:\n- " + "\n- ".join(errors))
@@ -164,15 +163,15 @@ class FirewallPlanService:
         """
         # High risk conditions
         if chain == "input":
-            logger.info(f"High risk: input chain affects device management")
+            logger.info("High risk: input chain affects device management")
             return "high"
 
         if action == "reject":
-            logger.info(f"High risk: reject action is more aggressive")
+            logger.info("High risk: reject action is more aggressive")
             return "high"
 
         if device_environment == "prod":
-            logger.info(f"High risk: production environment")
+            logger.info("High risk: production environment")
             return "high"
 
         # Default to medium risk

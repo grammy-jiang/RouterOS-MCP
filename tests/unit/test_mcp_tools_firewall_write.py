@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from routeros_mcp.config import Settings
 from routeros_mcp.domain.models import PlanStatus
@@ -88,10 +88,10 @@ class TestFirewallPlanTools(unittest.TestCase):
 
     def _get_content_text(self, result: dict) -> str:
         """Extract content text from tool result.
-        
+
         Args:
             result: Tool result dictionary
-            
+
         Returns:
             Content text string
         """
