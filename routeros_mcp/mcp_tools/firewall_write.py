@@ -632,8 +632,8 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                         device_id=device.id,
                         device_name=device.name,
                         device_environment=device.environment,
-                        chain="unknown",  # Will be determined during apply
-                        action="unknown",
+                        chain="to-be-determined",  # Will be determined during apply
+                        action="to-be-determined",
                         rule_id=rule_id,
                     )
                     device_previews.append(preview)
