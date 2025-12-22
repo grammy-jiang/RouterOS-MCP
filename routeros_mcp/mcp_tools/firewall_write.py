@@ -609,6 +609,7 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
             )
         """
         try:
+            session_factory = get_session_factory(settings)
             async with session_factory.session() as session:
                 device_service = DeviceService(session, settings)
                 plan_service = PlanService(session, settings)
