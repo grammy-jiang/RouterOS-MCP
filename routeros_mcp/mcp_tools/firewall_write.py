@@ -463,18 +463,28 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                 if not modifications:
                     raise ValueError("At least one modification must be specified")
 
-                # Validate modified parameters
-                validate_chain = modifications.get("chain", "forward")
-                validate_action = modifications.get("action", "accept")
-                firewall_plan_service.validate_rule_params(
-                    chain=validate_chain,
-                    action=validate_action,
-                    src_address=modifications.get("src_address"),
-                    dst_address=modifications.get("dst_address"),
-                    protocol=modifications.get("protocol"),
-                    dst_port=modifications.get("dst_port"),
-                )
+                # Validate modified parameters.
+                # If any flow-related fields are being changed, we need an accurate
+                # validation context (chain + action). Do not fall back to defaults,
+                # as that may not match the actual existing rule.
+                flow_fields = ("src_address", "dst_address", "protocol", "dst_port")
+                modifying_flow_fields = any(field in modifications for field in flow_fields)
 
+                if modifying_flow_fields:
+                    if "chain" not in modifications or "action" not in modifications:
+                        raise ValueError(
+                            "When modifying src_address, dst_address, protocol, or dst_port, "
+                            "you must also specify chain and action for proper validation."
+                        )
+
+                    firewall_plan_service.validate_rule_params(
+                        chain=modifications["chain"],
+                        action=modifications["action"],
+                        src_address=modifications.get("src_address"),
+                        dst_address=modifications.get("dst_address"),
+                        protocol=modifications.get("protocol"),
+                        dst_port=modifications.get("dst_port"),
+                    )
                 # Validate all devices and check capabilities
                 devices = await _validate_devices_for_firewall_plan(
                     device_service,
