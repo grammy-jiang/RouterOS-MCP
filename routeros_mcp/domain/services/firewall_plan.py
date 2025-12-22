@@ -128,14 +128,16 @@ class FirewallPlanService:
             True if valid, False otherwise
         """
         try:
+            # Normalize whitespace around the entire port string
+            port = port.strip()
             # Check for range
             if "-" in port:
                 start, end = port.split("-", 1)
-                start_port = int(start)
-                end_port = int(end)
+                start_port = int(start.strip())
+                end_port = int(end.strip())
                 return 1 <= start_port <= 65535 and 1 <= end_port <= 65535 and start_port <= end_port
             else:
-                port_num = int(port)
+                port_num = int(port.strip())
                 return 1 <= port_num <= 65535
         except (ValueError, AttributeError):
             return False
