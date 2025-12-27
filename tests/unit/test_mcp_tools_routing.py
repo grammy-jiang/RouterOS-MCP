@@ -752,3 +752,284 @@ async def test_plan_remove_static_route_success(monkeypatch: pytest.MonkeyPatch)
     assert "unreachable" in result["content"][0]["text"]
     assert result["_meta"]["plan_id"] == "plan-rt-003"
     assert result["_meta"]["risk_level"] == "high"  # Removals are always high risk
+
+
+@pytest.mark.asyncio
+async def test_apply_routing_plan_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test successful routing plan apply workflow."""
+    import routeros_mcp.mcp_tools.routing as routing_tools
+    from datetime import UTC, datetime, timedelta
+    from unittest.mock import AsyncMock, Mock
+
+    class FakeDevice:
+        def __init__(self, device_id: str = "dev-lab-01") -> None:
+            self.id = device_id
+            self.name = f"router-{device_id}"
+            self.environment = "lab"
+            self.allow_professional_workflows = True
+            self.allow_advanced_writes = True
+            self.allow_routing_writes = True
+            self.management_ip = "192.168.1.1"
+
+    # Mock REST client
+    mock_rest_client = AsyncMock()
+    mock_rest_client.get = AsyncMock(
+        side_effect=[
+            # Snapshot: get static routes
+            [{"id": "*1", "dst-address": "10.0.0.0/8", "gateway": "192.168.1.254", "static": True}],
+            # Health check: system resource
+            {"uptime": "1d2h3m"},
+            # Health check: routes
+            [{"id": "*1", "dst-address": "10.0.0.0/8", "gateway": "192.168.1.254", "static": True}],
+        ]
+    )
+    mock_rest_client.post = AsyncMock(
+        return_value={".id": "*2"}  # New route ID
+    )
+    mock_rest_client.close = AsyncMock(return_value=None)
+
+    # Mock plan service
+    fake_plan_service = AsyncMock()
+    fake_plan_service.get_plan = AsyncMock(
+        return_value={
+            "plan_id": "plan-rt-001",
+            "created_by": "test-user",
+            "status": "pending",
+            "device_ids": ["dev-lab-01"],
+            "changes": {
+                "operation": "add_static_route",
+                "dst_address": "172.16.0.0/16",
+                "gateway": "192.168.1.254",
+                "comment": "Test route",
+                "approval_token_timestamp": datetime.now(UTC).isoformat(),
+                "approval_expires_at": (datetime.now(UTC) + timedelta(minutes=15)).isoformat(),
+            },
+        }
+    )
+    fake_plan_service._validate_approval_token = Mock(return_value=None)
+    fake_plan_service.update_plan_status = AsyncMock(return_value=None)
+
+    # Mock device service
+    fake_device_service = AsyncMock()
+    fake_device_service.get_device = AsyncMock(
+        return_value=FakeDevice("dev-lab-01")
+    )
+    fake_device_service.get_rest_client = AsyncMock(
+        return_value=mock_rest_client
+    )
+
+    class FakePlanService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_plan(self, plan_id: str) -> dict:
+            return fake_plan_service.get_plan.return_value
+
+        def _validate_approval_token(self, *args, **kwargs) -> None:
+            return None
+
+        async def update_plan_status(self, *args, **kwargs) -> None:
+            pass
+
+    class FakeDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_device(self, device_id: str) -> FakeDevice:
+            return FakeDevice(device_id)
+
+        async def get_rest_client(self, device_id: str) -> AsyncMock:
+            return mock_rest_client
+
+    monkeypatch.setattr(routing_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(routing_tools, "PlanService", FakePlanService)
+    monkeypatch.setattr(routing_tools, "DeviceService", FakeDeviceService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    routing_tools.register_routing_tools(mcp, settings)
+
+    result = await mcp.tools["apply_routing_plan"](
+        plan_id="plan-rt-001",
+        approval_token="approve-rt-abc123",
+    )
+
+    assert result["isError"] is False
+    assert "successfully" in result["content"][0]["text"].lower()
+    assert result["_meta"]["plan_id"] == "plan-rt-001"
+    assert result["_meta"]["successful_count"] == 1
+    assert result["_meta"]["failed_count"] == 0
+    assert result["_meta"]["final_status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_apply_routing_plan_health_check_failure_triggers_rollback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that health check failure triggers automatic rollback."""
+    import routeros_mcp.mcp_tools.routing as routing_tools
+    from datetime import UTC, datetime, timedelta
+    from unittest.mock import AsyncMock, Mock
+
+    class FakeDevice:
+        def __init__(self, device_id: str = "dev-lab-01") -> None:
+            self.id = device_id
+            self.name = f"router-{device_id}"
+            self.environment = "lab"
+            self.allow_professional_workflows = True
+            self.allow_advanced_writes = True
+            self.allow_routing_writes = True
+            self.management_ip = "192.168.1.1"
+
+    # Mock REST client - health check will fail
+    mock_rest_client = AsyncMock()
+    mock_rest_client.get = AsyncMock(
+        side_effect=[
+            # Snapshot: get static routes
+            [{"id": "*1", "dst-address": "10.0.0.0/8", "gateway": "192.168.1.254", "static": True}],
+            # Health check: system resource fails
+            None,  # Health check fails
+            # Rollback: get current routes for comparison
+            [
+                {"id": "*1", "dst-address": "10.0.0.0/8", "gateway": "192.168.1.254", "static": True},
+                {"id": "*2", "dst-address": "172.16.0.0/16", "gateway": "192.168.1.254", "static": True},
+            ],
+        ]
+    )
+    mock_rest_client.post = AsyncMock(
+        return_value={".id": "*2"}  # New route ID
+    )
+    mock_rest_client.delete = AsyncMock(return_value=None)
+    mock_rest_client.close = AsyncMock(return_value=None)
+
+    # Mock plan service
+    fake_plan_service = AsyncMock()
+    fake_plan_service.get_plan = AsyncMock(
+        return_value={
+            "plan_id": "plan-rt-002",
+            "created_by": "test-user",
+            "status": "pending",
+            "device_ids": ["dev-lab-01"],
+            "changes": {
+                "operation": "add_static_route",
+                "dst_address": "172.16.0.0/16",
+                "gateway": "192.168.1.254",
+                "comment": "Test route",
+                "approval_token_timestamp": datetime.now(UTC).isoformat(),
+                "approval_expires_at": (datetime.now(UTC) + timedelta(minutes=15)).isoformat(),
+            },
+        }
+    )
+    fake_plan_service._validate_approval_token = Mock(return_value=None)
+    fake_plan_service.update_plan_status = AsyncMock(return_value=None)
+
+    # Mock device service
+    fake_device_service = AsyncMock()
+    fake_device_service.get_device = AsyncMock(
+        return_value=FakeDevice("dev-lab-01")
+    )
+    fake_device_service.get_rest_client = AsyncMock(
+        return_value=mock_rest_client
+    )
+
+    class FakePlanService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_plan(self, plan_id: str) -> dict:
+            return fake_plan_service.get_plan.return_value
+
+        def _validate_approval_token(self, *args, **kwargs) -> None:
+            return None
+
+        async def update_plan_status(self, *args, **kwargs) -> None:
+            pass
+
+    class FakeDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_device(self, device_id: str) -> FakeDevice:
+            return FakeDevice(device_id)
+
+        async def get_rest_client(self, device_id: str) -> AsyncMock:
+            return mock_rest_client
+
+    monkeypatch.setattr(routing_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(routing_tools, "PlanService", FakePlanService)
+    monkeypatch.setattr(routing_tools, "DeviceService", FakeDeviceService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    routing_tools.register_routing_tools(mcp, settings)
+
+    result = await mcp.tools["apply_routing_plan"](
+        plan_id="plan-rt-002",
+        approval_token="approve-rt-xyz789",
+    )
+
+    assert result["isError"] is True
+    assert "failed" in result["content"][0]["text"].lower()
+    assert result["_meta"]["plan_id"] == "plan-rt-002"
+    assert result["_meta"]["successful_count"] == 0
+    assert result["_meta"]["failed_count"] == 1
+    assert result["_meta"]["final_status"] == "failed"
+    # Check that device was rolled back
+    device_results = result["_meta"]["device_results"]
+    assert len(device_results) == 1
+    assert device_results[0]["status"] == "rolled_back"
+    assert "rollback" in device_results[0]
+
+
+@pytest.mark.asyncio
+async def test_apply_routing_plan_invalid_plan_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that apply rejects plans not in pending status."""
+    import routeros_mcp.mcp_tools.routing as routing_tools
+    from datetime import UTC, datetime, timedelta
+    from unittest.mock import AsyncMock, Mock
+
+    # Mock plan service with completed plan
+    fake_plan_service = AsyncMock()
+    fake_plan_service.get_plan = AsyncMock(
+        return_value={
+            "plan_id": "plan-rt-003",
+            "created_by": "test-user",
+            "status": "completed",  # Already completed
+            "device_ids": ["dev-lab-01"],
+            "changes": {
+                "operation": "add_static_route",
+                "dst_address": "172.16.0.0/16",
+                "gateway": "192.168.1.254",
+                "approval_token_timestamp": datetime.now(UTC).isoformat(),
+                "approval_expires_at": (datetime.now(UTC) + timedelta(minutes=15)).isoformat(),
+            },
+        }
+    )
+    fake_plan_service._validate_approval_token = Mock(return_value=None)
+
+    class FakePlanService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_plan(self, plan_id: str) -> dict:
+            return fake_plan_service.get_plan.return_value
+
+        def _validate_approval_token(self, *args, **kwargs) -> None:
+            return None
+
+    monkeypatch.setattr(routing_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(routing_tools, "PlanService", FakePlanService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    routing_tools.register_routing_tools(mcp, settings)
+
+    result = await mcp.tools["apply_routing_plan"](
+        plan_id="plan-rt-003",
+        approval_token="approve-rt-def456",
+    )
+
+    assert result["isError"] is True
+    assert "cannot be applied" in result["content"][0]["text"].lower()
+    assert "pending" in result["content"][0]["text"].lower()

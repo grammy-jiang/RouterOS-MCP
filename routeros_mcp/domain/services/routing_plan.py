@@ -42,14 +42,14 @@ class RoutingPlanService:
 
     def validate_route_params(
         self,
-        dst_address: str,
+        dst_address: str | None = None,
         gateway: str | None = None,
         comment: str | None = None,
     ) -> dict[str, Any]:
         """Validate static route parameters.
 
         Args:
-            dst_address: Destination address in CIDR notation
+            dst_address: Destination address in CIDR notation (optional for modifications)
             gateway: Gateway IP address (optional for validation only)
             comment: Route comment (optional)
 
@@ -61,10 +61,8 @@ class RoutingPlanService:
         """
         errors = []
 
-        # Validate destination address
-        if not dst_address:
-            errors.append("Destination address is required")
-        else:
+        # Validate destination address if provided
+        if dst_address:
             try:
                 network = ipaddress.ip_network(dst_address, strict=False)
 

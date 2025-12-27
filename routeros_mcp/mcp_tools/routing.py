@@ -27,6 +27,78 @@ logger = logging.getLogger(__name__)
 DEFAULT_MCP_USER = "mcp-user"
 
 
+def _normalize_empty_string(value: str) -> str | None:
+    """Convert empty strings to None for consistency.
+
+    Args:
+        value: String value to normalize
+
+    Returns:
+        None if value is empty string, otherwise the original value
+    """
+    return None if value == "" else value
+
+
+async def _validate_devices_for_routing_plan(
+    device_service: DeviceService,
+    settings: Settings,
+    device_ids: list[str],
+    tool_name: str,
+) -> list[Any]:
+    """Validate devices for routing plan operations.
+
+    This helper performs common validation for all routing plan tools:
+    - Devices exist
+    - Environment is lab/staging (by default)
+    - Professional workflows capability enabled
+    - Routing writes capability enabled
+
+    Args:
+        device_service: Device service instance
+        settings: Application settings
+        device_ids: List of device identifiers
+        tool_name: Name of the tool being executed
+
+    Returns:
+        List of validated device models
+
+    Raises:
+        ValueError: If validation fails
+    """
+    devices = []
+    for device_id in device_ids:
+        device = await device_service.get_device(device_id)
+        devices.append(device)
+
+        # Check environment (lab/staging by default)
+        if device.environment not in PHASE3_DEFAULT_ALLOWED_ENVIRONMENTS:
+            raise ValueError(
+                f"Device {device_id} is in {device.environment} environment. "
+                f"Routing changes are only allowed in: "
+                f"{', '.join(PHASE3_DEFAULT_ALLOWED_ENVIRONMENTS)}"
+            )
+
+        # Authorization check - professional tier
+        check_tool_authorization(
+            device_environment=device.environment,
+            service_environment=settings.environment,
+            tool_tier=ToolTier.PROFESSIONAL,
+            allow_advanced_writes=device.allow_advanced_writes,
+            allow_professional_workflows=device.allow_professional_workflows,
+            device_id=device_id,
+            tool_name=tool_name,
+        )
+
+        # Check routing write capability
+        if not device.allow_routing_writes:
+            raise ValueError(
+                f"Device {device_id} does not have routing write capability enabled. "
+                f"Set {DeviceCapability.ROUTING_WRITES.value}=true to enable."
+            )
+
+    return devices
+
+
 def register_routing_tools(mcp: FastMCP, settings: Settings) -> None:
     """Register routing management tools with the MCP server.
 
@@ -211,76 +283,6 @@ def register_routing_tools(mcp: FastMCP, settings: Settings) -> None:
                 meta=error.data,
             )
 
-    def _normalize_empty_string(value: str) -> str | None:
-        """Convert empty strings to None for consistency.
-
-        Args:
-            value: String value to normalize
-
-        Returns:
-            None if value is empty string, otherwise the original value
-        """
-        return None if value == "" else value
-
-    async def _validate_devices_for_routing_plan(
-        device_service: DeviceService,
-        settings: Settings,
-        device_ids: list[str],
-        tool_name: str,
-    ) -> list[Any]:
-        """Validate devices for routing plan operations.
-
-        This helper performs common validation for all routing plan tools:
-        - Devices exist
-        - Environment is lab/staging (by default)
-        - Professional workflows capability enabled
-        - Routing writes capability enabled
-
-        Args:
-            device_service: Device service instance
-            settings: Application settings
-            device_ids: List of device identifiers
-            tool_name: Name of the tool being executed
-
-        Returns:
-            List of validated device models
-
-        Raises:
-            ValueError: If validation fails
-        """
-        devices = []
-        for device_id in device_ids:
-            device = await device_service.get_device(device_id)
-            devices.append(device)
-
-            # Check environment (lab/staging by default)
-            if device.environment not in PHASE3_DEFAULT_ALLOWED_ENVIRONMENTS:
-                raise ValueError(
-                    f"Device {device_id} is in {device.environment} environment. "
-                    f"Routing changes are only allowed in: "
-                    f"{', '.join(PHASE3_DEFAULT_ALLOWED_ENVIRONMENTS)}"
-                )
-
-            # Authorization check - professional tier
-            check_tool_authorization(
-                device_environment=device.environment,
-                service_environment=settings.environment,
-                tool_tier=ToolTier.PROFESSIONAL,
-                allow_advanced_writes=device.allow_advanced_writes,
-                allow_professional_workflows=device.allow_professional_workflows,
-                device_id=device_id,
-                tool_name=tool_name,
-            )
-
-            # Check routing write capability
-            if not device.allow_routing_writes:
-                raise ValueError(
-                    f"Device {device_id} does not have routing write capability enabled. "
-                    f"Set {DeviceCapability.ROUTING_WRITES.value}=true to enable."
-                )
-
-        return devices
-
     @mcp.tool()
     async def plan_add_static_route(
         device_ids: list[str],
@@ -334,6 +336,10 @@ def register_routing_tools(mcp: FastMCP, settings: Settings) -> None:
                 device_service = DeviceService(session, settings)
                 plan_service = PlanService(session, settings)
                 routing_plan_service = RoutingPlanService()
+
+                # Validate dst_address is provided for add operation
+                if not dst_address:
+                    raise ValueError("Destination address is required for adding a static route")
 
                 # Validate route parameters first
                 routing_plan_service.validate_route_params(
@@ -838,6 +844,11 @@ def register_routing_tools(mcp: FastMCP, settings: Settings) -> None:
                             )
                             device_result["health_check"] = health_check
 
+                            # Note: "degraded" status (device reachable but routing inaccessible)
+                            # also triggers rollback since:
+                            # 1. We cannot verify routes were applied correctly
+                            # 2. The routing subsystem may be in an inconsistent state
+                            # 3. Better to rollback and investigate than leave device in unknown state
                             if health_check["status"] != "healthy":
                                 # Health check failed or degraded - rollback
                                 logger.warning(
