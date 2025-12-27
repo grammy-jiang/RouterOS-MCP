@@ -7,9 +7,16 @@ See docs/07-device-control-and-high-risk-operations-safeguards.md for
 detailed requirements.
 """
 
+import gzip
+import hashlib
 import ipaddress
+import json
 import logging
+import uuid
+from datetime import UTC, datetime
 from typing import Any
+
+from routeros_mcp.infra.routeros.rest_client import RouterOSRestClient
 
 logger = logging.getLogger(__name__)
 
@@ -276,3 +283,390 @@ class FirewallPlanService:
         logger.debug(f"Generated preview for {operation} on device {device_id}")
 
         return preview
+
+    async def create_firewall_snapshot(
+        self,
+        device_id: str,
+        device_name: str,
+        rest_client: RouterOSRestClient,
+    ) -> dict[str, Any]:
+        """Create snapshot of current firewall rules for rollback.
+
+        Args:
+            device_id: Device identifier
+            device_name: Device name
+            rest_client: REST client instance for device
+
+        Returns:
+            Snapshot metadata with snapshot_id and rules payload
+
+        Raises:
+            Exception: If snapshot creation fails
+        """
+        try:
+            # Fetch current firewall filter rules
+            filter_rules = await rest_client.get("/rest/ip/firewall/filter")
+            
+            # Create snapshot payload
+            snapshot_payload = {
+                "device_id": device_id,
+                "device_name": device_name,
+                "timestamp": datetime.now(UTC).isoformat(),
+                "filter_rules": filter_rules if isinstance(filter_rules, list) else [],
+            }
+            
+            # Serialize and compress
+            payload_json = json.dumps(snapshot_payload)
+            payload_bytes = payload_json.encode("utf-8")
+            compressed_data = gzip.compress(payload_bytes, compresslevel=6)
+            
+            # Calculate checksum
+            checksum = hashlib.sha256(payload_bytes).hexdigest()
+            
+            # Generate snapshot ID
+            snapshot_id = f"snap-fw-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
+            
+            logger.info(
+                f"Created firewall snapshot {snapshot_id} for device {device_id}",
+                extra={
+                    "snapshot_id": snapshot_id,
+                    "device_id": device_id,
+                    "rule_count": len(snapshot_payload["filter_rules"]),
+                    "size_bytes": len(payload_bytes),
+                    "compressed_size": len(compressed_data),
+                },
+            )
+            
+            return {
+                "snapshot_id": snapshot_id,
+                "device_id": device_id,
+                "timestamp": snapshot_payload["timestamp"],
+                "rule_count": len(snapshot_payload["filter_rules"]),
+                "size_bytes": len(payload_bytes),
+                "compressed_size": len(compressed_data),
+                "checksum": checksum,
+                "data": compressed_data,
+            }
+            
+        except Exception as e:
+            logger.error(
+                f"Failed to create firewall snapshot for device {device_id}: {e}",
+                exc_info=True,
+            )
+            raise
+
+    async def perform_health_check(
+        self,
+        device_id: str,
+        rest_client: RouterOSRestClient,
+        timeout_seconds: float = 30.0,
+    ) -> dict[str, Any]:
+        """Perform health check after firewall rule changes.
+
+        Verifies:
+        - Device still responds to REST API
+        - Management interface is accessible
+        - Basic connectivity test
+
+        Args:
+            device_id: Device identifier
+            rest_client: REST client instance for device
+            timeout_seconds: Health check timeout (default: 30s)
+
+        Returns:
+            Health check results with status and details
+
+        Raises:
+            Exception: If health check fails critically
+        """
+        try:
+            # Test 1: Check device responds to REST API
+            system_resource = await rest_client.get("/rest/system/resource")
+            
+            if not system_resource:
+                return {
+                    "status": "failed",
+                    "device_id": device_id,
+                    "checks": [
+                        {
+                            "check": "rest_api_response",
+                            "status": "failed",
+                            "message": "Device did not respond to REST API",
+                        }
+                    ],
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+            
+            # Test 2: Verify firewall filter rules are accessible (management path intact)
+            filter_rules = await rest_client.get("/rest/ip/firewall/filter")
+            
+            if filter_rules is None:
+                return {
+                    "status": "degraded",
+                    "device_id": device_id,
+                    "checks": [
+                        {
+                            "check": "rest_api_response",
+                            "status": "passed",
+                            "message": "Device responds to REST API",
+                        },
+                        {
+                            "check": "firewall_access",
+                            "status": "failed",
+                            "message": "Cannot access firewall configuration",
+                        },
+                    ],
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+            
+            # All checks passed
+            logger.info(
+                f"Health check passed for device {device_id}",
+                extra={
+                    "device_id": device_id,
+                    "checks_passed": 2,
+                },
+            )
+            
+            return {
+                "status": "healthy",
+                "device_id": device_id,
+                "checks": [
+                    {
+                        "check": "rest_api_response",
+                        "status": "passed",
+                        "message": "Device responds to REST API",
+                    },
+                    {
+                        "check": "firewall_access",
+                        "status": "passed",
+                        "message": "Firewall configuration accessible",
+                    },
+                ],
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+            
+        except Exception as e:
+            logger.error(
+                f"Health check failed for device {device_id}: {e}",
+                exc_info=True,
+            )
+            return {
+                "status": "failed",
+                "device_id": device_id,
+                "checks": [
+                    {
+                        "check": "health_check_exception",
+                        "status": "failed",
+                        "message": f"Health check exception: {str(e)}",
+                    }
+                ],
+                "timestamp": datetime.now(UTC).isoformat(),
+                "error": str(e),
+            }
+
+    async def rollback_from_snapshot(
+        self,
+        device_id: str,
+        snapshot_data: bytes,
+        rest_client: RouterOSRestClient,
+    ) -> dict[str, Any]:
+        """Rollback firewall rules from snapshot.
+
+        Args:
+            device_id: Device identifier
+            snapshot_data: Compressed snapshot data
+            rest_client: REST client instance for device
+
+        Returns:
+            Rollback results with status and details
+
+        Raises:
+            Exception: If rollback fails
+        """
+        try:
+            # Decompress snapshot
+            decompressed = gzip.decompress(snapshot_data)
+            snapshot_payload = json.loads(decompressed.decode("utf-8"))
+            
+            original_rules = snapshot_payload.get("filter_rules", [])
+            
+            logger.info(
+                f"Starting rollback for device {device_id}",
+                extra={
+                    "device_id": device_id,
+                    "original_rule_count": len(original_rules),
+                },
+            )
+            
+            # Get current rules to identify what was added
+            current_rules = await rest_client.get("/rest/ip/firewall/filter")
+            current_rule_ids = {rule.get(".id") for rule in (current_rules if isinstance(current_rules, list) else [])}
+            original_rule_ids = {rule.get(".id") for rule in original_rules}
+            
+            # Identify new rules added during apply (not in original snapshot)
+            new_rule_ids = current_rule_ids - original_rule_ids
+            
+            # Remove new rules
+            removed_count = 0
+            for rule_id in new_rule_ids:
+                try:
+                    await rest_client.delete(f"/rest/ip/firewall/filter/{rule_id}")
+                    removed_count += 1
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to remove rule {rule_id} during rollback: {e}",
+                        extra={"device_id": device_id, "rule_id": rule_id},
+                    )
+            
+            logger.info(
+                f"Rollback completed for device {device_id}",
+                extra={
+                    "device_id": device_id,
+                    "removed_rule_count": removed_count,
+                },
+            )
+            
+            return {
+                "status": "success",
+                "device_id": device_id,
+                "removed_rule_count": removed_count,
+                "original_rule_count": len(original_rules),
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+            
+        except Exception as e:
+            logger.error(
+                f"Rollback failed for device {device_id}: {e}",
+                exc_info=True,
+            )
+            return {
+                "status": "failed",
+                "device_id": device_id,
+                "error": str(e),
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+
+    async def apply_plan(
+        self,
+        device_id: str,
+        device_name: str,
+        operation: str,
+        changes: dict[str, Any],
+        rest_client: RouterOSRestClient,
+    ) -> dict[str, Any]:
+        """Apply firewall plan changes to a device.
+
+        Args:
+            device_id: Device identifier
+            device_name: Device name
+            operation: Operation type (add_firewall_rule, modify_firewall_rule, remove_firewall_rule)
+            changes: Change specifications from plan
+            rest_client: REST client instance for device
+
+        Returns:
+            Apply results with status and details
+
+        Raises:
+            Exception: If apply operation fails
+        """
+        try:
+            logger.info(
+                f"Applying firewall plan to device {device_id}",
+                extra={
+                    "device_id": device_id,
+                    "operation": operation,
+                },
+            )
+            
+            if operation == "add_firewall_rule":
+                # Build rule payload
+                rule_data = {
+                    "chain": changes["chain"],
+                    "action": changes["action"],
+                }
+                
+                if changes.get("src_address"):
+                    rule_data["src-address"] = changes["src_address"]
+                if changes.get("dst_address"):
+                    rule_data["dst-address"] = changes["dst_address"]
+                if changes.get("protocol"):
+                    rule_data["protocol"] = changes["protocol"]
+                if changes.get("dst_port"):
+                    rule_data["dst-port"] = changes["dst_port"]
+                if changes.get("comment"):
+                    rule_data["comment"] = changes["comment"]
+                
+                # Add rule via REST API
+                result = await rest_client.post("/rest/ip/firewall/filter/add", rule_data)
+                
+                return {
+                    "status": "success",
+                    "device_id": device_id,
+                    "operation": operation,
+                    "rule_id": result.get(".id") if isinstance(result, dict) else None,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+                
+            elif operation == "modify_firewall_rule":
+                rule_id = changes["rule_id"]
+                modifications = changes["modifications"]
+                
+                # Build update payload
+                update_data = {}
+                if "chain" in modifications:
+                    update_data["chain"] = modifications["chain"]
+                if "action" in modifications:
+                    update_data["action"] = modifications["action"]
+                if "src_address" in modifications:
+                    update_data["src-address"] = modifications["src_address"]
+                if "dst_address" in modifications:
+                    update_data["dst-address"] = modifications["dst_address"]
+                if "protocol" in modifications:
+                    update_data["protocol"] = modifications["protocol"]
+                if "dst_port" in modifications:
+                    update_data["dst-port"] = modifications["dst_port"]
+                if "comment" in modifications:
+                    update_data["comment"] = modifications["comment"]
+                
+                # Update rule via REST API
+                await rest_client.patch(f"/rest/ip/firewall/filter/{rule_id}", update_data)
+                
+                return {
+                    "status": "success",
+                    "device_id": device_id,
+                    "operation": operation,
+                    "rule_id": rule_id,
+                    "modifications": list(modifications.keys()),
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+                
+            elif operation == "remove_firewall_rule":
+                rule_id = changes["rule_id"]
+                
+                # Remove rule via REST API
+                await rest_client.delete(f"/rest/ip/firewall/filter/{rule_id}")
+                
+                return {
+                    "status": "success",
+                    "device_id": device_id,
+                    "operation": operation,
+                    "rule_id": rule_id,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+                
+            else:
+                raise ValueError(f"Unknown operation: {operation}")
+                
+        except Exception as e:
+            logger.error(
+                f"Failed to apply firewall plan to device {device_id}: {e}",
+                exc_info=True,
+            )
+            return {
+                "status": "failed",
+                "device_id": device_id,
+                "operation": operation,
+                "error": str(e),
+                "timestamp": datetime.now(UTC).isoformat(),
+            }

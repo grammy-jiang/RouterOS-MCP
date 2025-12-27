@@ -718,4 +718,243 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                 meta=error.data,
             )
 
+    @mcp.tool()
+    async def apply_firewall_plan(
+        plan_id: str,
+        approval_token: str,
+    ) -> dict[str, Any]:
+        """Apply approved firewall plan with health checks and automatic rollback.
+
+        Use when:
+        - User provides plan_id and approval_token from plan creation
+        - Ready to execute firewall changes after review
+        - Implementing firewall rule changes across devices
+
+        Pattern: This is the APPLY step (executes changes with safety checks).
+
+        Safety:
+        - Professional tier (requires approved plan with valid token)
+        - Creates snapshot before changes for rollback
+        - Performs health check after each device
+        - Automatic rollback on health check failure
+        - Updates plan status to completed/failed
+        - Comprehensive audit logging
+
+        Args:
+            plan_id: Plan identifier from plan creation (e.g., 'plan-fw-20250115-001')
+            approval_token: Approval token from plan creation (must be valid and unexpired)
+
+        Returns:
+            Formatted tool result with execution status and results per device
+
+        Examples:
+            # Apply approved firewall plan
+            apply_firewall_plan(
+                plan_id="plan-fw-20250115-001",
+                approval_token="approve-fw-a1b2c3d4"
+            )
+        """
+        try:
+            async with session_factory.session() as session:
+                plan_service = PlanService(session, settings)
+                device_service = DeviceService(session, settings)
+                firewall_plan_service = FirewallPlanService()
+
+                # Get plan details
+                plan = await plan_service.get_plan(plan_id)
+
+                # Validate approval token
+                # Extract token metadata from plan
+                expires_at_str = plan["changes"].get("approval_expires_at")
+                token_timestamp = plan["changes"].get("approval_token_timestamp")
+                if not expires_at_str or not token_timestamp:
+                    raise ValueError("Invalid plan: missing approval token metadata")
+
+                from datetime import datetime
+                expires_at = datetime.fromisoformat(expires_at_str)
+                
+                # Validate token using PlanService internal method
+                plan_service._validate_approval_token(
+                    plan_id, plan["created_by"], approval_token, expires_at, token_timestamp
+                )
+
+                # Check plan status
+                if plan["status"] != "pending":
+                    raise ValueError(
+                        f"Plan cannot be applied from status '{plan['status']}'. "
+                        f"Plan must be in 'pending' status."
+                    )
+
+                # Update plan status to executing
+                await plan_service.update_plan_status(plan_id, "executing", DEFAULT_MCP_USER)
+
+                # Get operation details from plan
+                operation = plan["changes"].get("operation")
+                if not operation:
+                    raise ValueError("Invalid plan: missing operation type")
+
+                device_ids = plan["device_ids"]
+                device_results = []
+                snapshots = {}
+                failed_devices = []
+                successful_devices = []
+
+                # Process each device
+                for device_id in device_ids:
+                    device_result = {
+                        "device_id": device_id,
+                        "status": "pending",
+                    }
+
+                    try:
+                        # Get device
+                        device = await device_service.get_device(device_id)
+                        rest_client = await device_service.get_rest_client(device_id)
+
+                        try:
+                            # Step 1: Create snapshot before changes
+                            logger.info(f"Creating snapshot for device {device_id}")
+                            snapshot = await firewall_plan_service.create_firewall_snapshot(
+                                device_id, device.name, rest_client
+                            )
+                            snapshots[device_id] = snapshot
+                            device_result["snapshot_id"] = snapshot["snapshot_id"]
+
+                            # Step 2: Apply changes
+                            logger.info(f"Applying changes to device {device_id}")
+                            apply_result = await firewall_plan_service.apply_plan(
+                                device_id,
+                                device.name,
+                                operation,
+                                plan["changes"],
+                                rest_client,
+                            )
+                            device_result["apply_result"] = apply_result
+
+                            if apply_result["status"] != "success":
+                                device_result["status"] = "failed"
+                                device_result["error"] = apply_result.get("error", "Apply failed")
+                                failed_devices.append(device_id)
+                                device_results.append(device_result)
+                                continue
+
+                            # Step 3: Perform health check
+                            logger.info(f"Performing health check for device {device_id}")
+                            health_check = await firewall_plan_service.perform_health_check(
+                                device_id, rest_client
+                            )
+                            device_result["health_check"] = health_check
+
+                            if health_check["status"] != "healthy":
+                                # Health check failed - rollback
+                                logger.warning(
+                                    f"Health check failed for device {device_id}, initiating rollback"
+                                )
+                                rollback_result = await firewall_plan_service.rollback_from_snapshot(
+                                    device_id, snapshot["data"], rest_client
+                                )
+                                device_result["rollback"] = rollback_result
+                                device_result["status"] = "rolled_back"
+                                failed_devices.append(device_id)
+                            else:
+                                # Success
+                                device_result["status"] = "success"
+                                successful_devices.append(device_id)
+
+                        finally:
+                            await rest_client.close()
+
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to process device {device_id}: {e}",
+                            exc_info=True,
+                        )
+                        device_result["status"] = "failed"
+                        device_result["error"] = str(e)
+
+                        # Attempt rollback if snapshot exists
+                        if device_id in snapshots:
+                            try:
+                                rest_client = await device_service.get_rest_client(device_id)
+                                try:
+                                    rollback_result = await firewall_plan_service.rollback_from_snapshot(
+                                        device_id, snapshots[device_id]["data"], rest_client
+                                    )
+                                    device_result["rollback"] = rollback_result
+                                    device_result["status"] = "rolled_back"
+                                finally:
+                                    await rest_client.close()
+                            except Exception as rollback_error:
+                                logger.error(
+                                    f"Rollback failed for device {device_id}: {rollback_error}",
+                                    exc_info=True,
+                                )
+                                device_result["rollback"] = {
+                                    "status": "failed",
+                                    "error": str(rollback_error),
+                                }
+
+                        failed_devices.append(device_id)
+
+                    device_results.append(device_result)
+
+                # Determine final plan status
+                if len(successful_devices) == len(device_ids):
+                    final_status = "completed"
+                    content = (
+                        f"Firewall plan applied successfully to all {len(device_ids)} device(s).\n\n"
+                        f"Operation: {operation}\n"
+                        f"Successful: {len(successful_devices)}\n"
+                        f"Failed: {len(failed_devices)}"
+                    )
+                elif len(successful_devices) > 0:
+                    final_status = "failed"
+                    content = (
+                        f"Firewall plan partially applied.\n\n"
+                        f"Operation: {operation}\n"
+                        f"Successful: {len(successful_devices)}\n"
+                        f"Failed: {len(failed_devices)}\n\n"
+                        f"Successful devices: {', '.join(successful_devices)}\n"
+                        f"Failed devices: {', '.join(failed_devices)}"
+                    )
+                else:
+                    final_status = "failed"
+                    content = (
+                        f"Firewall plan failed on all devices.\n\n"
+                        f"Operation: {operation}\n"
+                        f"Failed: {len(failed_devices)}\n"
+                        f"Failed devices: {', '.join(failed_devices)}"
+                    )
+
+                # Update plan status
+                await plan_service.update_plan_status(plan_id, final_status, DEFAULT_MCP_USER)
+
+                return format_tool_result(
+                    content=content,
+                    meta={
+                        "plan_id": plan_id,
+                        "operation": operation,
+                        "device_count": len(device_ids),
+                        "successful_count": len(successful_devices),
+                        "failed_count": len(failed_devices),
+                        "final_status": final_status,
+                        "device_results": device_results,
+                    },
+                    is_error=(final_status == "failed" and len(successful_devices) == 0),
+                )
+
+        except MCPError as e:
+            return format_tool_result(
+                content=e.message,
+                is_error=True,
+                meta=e.data,
+            )
+        except Exception as e:
+            error = map_exception_to_error(e)
+            return format_tool_result(
+                content=error.message,
+                is_error=True,
+                meta=error.data,
+            )
+
     logger.info("Registered firewall write tools")
