@@ -791,5 +791,397 @@ class TestFirewallPlanService(unittest.TestCase):
         self.assertIn("estimated_impact", preview["preview"])
 
 
+class TestFirewallApplyTool(unittest.TestCase):
+    """Tests for firewall apply MCP tool."""
+
+    def _register_tools(self) -> DummyMCP:
+        """Register firewall write tools for testing."""
+        mcp = DummyMCP()
+        settings = Settings()
+        firewall_write_module.register_firewall_write_tools(mcp, settings)
+        return mcp
+
+    def _get_content_text(self, result: dict) -> str:
+        """Extract content text from tool result."""
+        content = result["content"]
+        if isinstance(content, list) and len(content) > 0:
+            return content[0].get("text", "")
+        return str(content)
+
+    def test_apply_firewall_plan_success(self) -> None:
+        """Test successful firewall plan apply workflow."""
+
+        async def _run() -> None:
+            from datetime import UTC, datetime, timedelta
+            from unittest.mock import AsyncMock
+
+            # Mock REST client
+            mock_rest_client = AsyncMock()
+            mock_rest_client.get = AsyncMock(
+                side_effect=[
+                    # Snapshot: get filter rules
+                    [{"id": "*1", "chain": "input", "action": "accept"}],
+                    # Health check: system resource
+                    {"uptime": "1d2h3m"},
+                    # Health check: filter rules
+                    [{"id": "*1", "chain": "input", "action": "accept"}],
+                ]
+            )
+            mock_rest_client.post = AsyncMock(
+                return_value={".id": "*2"}  # New rule ID
+            )
+            mock_rest_client.close = AsyncMock(return_value=None)
+
+            # Mock plan service
+            fake_plan_service = AsyncMock()
+            fake_plan_service.get_plan = AsyncMock(
+                return_value={
+                    "plan_id": "plan-test-001",
+                    "created_by": "test-user",
+                    "status": "pending",
+                    "device_ids": ["dev-lab-01"],
+                    "changes": {
+                        "operation": "add_firewall_rule",
+                        "chain": "forward",
+                        "action": "accept",
+                        "src_address": "192.168.1.0/24",
+                        "approval_token_timestamp": datetime.now(UTC).isoformat(),
+                        "approval_expires_at": (datetime.now(UTC) + timedelta(minutes=15)).isoformat(),
+                    },
+                }
+            )
+            fake_plan_service._validate_approval_token = Mock(return_value=None)
+            fake_plan_service.update_plan_status = AsyncMock(return_value=None)
+
+            # Mock device service
+            fake_device_service = AsyncMock()
+            fake_device_service.get_device = AsyncMock(
+                return_value=FakeDevice("dev-lab-01", "lab")
+            )
+            fake_device_service.get_rest_client = AsyncMock(
+                return_value=mock_rest_client
+            )
+
+            with (
+                patch.object(
+                    firewall_write_module,
+                    "get_session_factory",
+                    return_value=FakeSessionFactory(),
+                ),
+                patch.object(
+                    firewall_write_module,
+                    "PlanService",
+                    return_value=fake_plan_service,
+                ),
+                patch.object(
+                    firewall_write_module,
+                    "DeviceService",
+                    return_value=fake_device_service,
+                ),
+            ):
+                mcp = self._register_tools()
+                fn = mcp.tools["apply_firewall_plan"]
+                result = await fn(
+                    plan_id="plan-test-001",
+                    approval_token="approve-test-abc123",
+                )
+
+                # Check success
+                self.assertFalse(result.get("isError", False))
+                content_text = self._get_content_text(result)
+                self.assertIn("successfully", content_text.lower())
+
+                # Check metadata
+                meta = result["_meta"]
+                self.assertEqual(meta["plan_id"], "plan-test-001")
+                self.assertEqual(meta["successful_count"], 1)
+                self.assertEqual(meta["failed_count"], 0)
+                self.assertEqual(meta["final_status"], "completed")
+
+                # Verify plan status was updated
+                fake_plan_service.update_plan_status.assert_any_call(
+                    "plan-test-001", "executing", "mcp-user"
+                )
+                fake_plan_service.update_plan_status.assert_any_call(
+                    "plan-test-001", "completed", "mcp-user"
+                )
+
+        asyncio.run(_run())
+
+    def test_apply_firewall_plan_expired_token(self) -> None:
+        """Test apply with expired approval token."""
+
+        async def _run() -> None:
+            from datetime import UTC, datetime, timedelta
+            from unittest.mock import AsyncMock
+
+            # Mock plan service with expired token
+            fake_plan_service = AsyncMock()
+            fake_plan_service.get_plan = AsyncMock(
+                return_value={
+                    "plan_id": "plan-test-001",
+                    "created_by": "test-user",
+                    "status": "pending",
+                    "device_ids": ["dev-lab-01"],
+                    "changes": {
+                        "operation": "add_firewall_rule",
+                        "approval_token_timestamp": (datetime.now(UTC) - timedelta(hours=1)).isoformat(),
+                        "approval_expires_at": (datetime.now(UTC) - timedelta(minutes=45)).isoformat(),
+                    },
+                }
+            )
+            fake_plan_service._validate_approval_token = Mock(
+                side_effect=ValueError("Approval token has expired")
+            )
+
+            with (
+                patch.object(
+                    firewall_write_module,
+                    "get_session_factory",
+                    return_value=FakeSessionFactory(),
+                ),
+                patch.object(
+                    firewall_write_module,
+                    "PlanService",
+                    return_value=fake_plan_service,
+                ),
+            ):
+                mcp = self._register_tools()
+                fn = mcp.tools["apply_firewall_plan"]
+                result = await fn(
+                    plan_id="plan-test-001",
+                    approval_token="approve-test-expired",
+                )
+
+                # Check error
+                self.assertTrue(result.get("isError", False))
+                content_text = self._get_content_text(result)
+                self.assertIn("expired", content_text.lower())
+
+        asyncio.run(_run())
+
+    def test_apply_firewall_plan_health_check_failure_with_rollback(self) -> None:
+        """Test apply with health check failure triggering rollback."""
+
+        async def _run() -> None:
+            from datetime import UTC, datetime, timedelta
+            from unittest.mock import AsyncMock
+
+            # Mock REST client with health check failure
+            mock_rest_client = AsyncMock()
+            mock_rest_client.get = AsyncMock(
+                side_effect=[
+                    # Snapshot: get filter rules
+                    [{"id": "*1", "chain": "input", "action": "accept"}],
+                    # Health check: system resource fails (returns None)
+                    None,
+                    # Rollback: get current rules
+                    [
+                        {"id": "*1", "chain": "input", "action": "accept"},
+                        {"id": "*2", "chain": "forward", "action": "accept"},  # New rule
+                    ],
+                ]
+            )
+            mock_rest_client.post = AsyncMock(
+                return_value={".id": "*2"}  # New rule ID
+            )
+            mock_rest_client.delete = AsyncMock(return_value=None)
+            mock_rest_client.close = AsyncMock(return_value=None)
+
+            # Mock plan service
+            fake_plan_service = AsyncMock()
+            fake_plan_service.get_plan = AsyncMock(
+                return_value={
+                    "plan_id": "plan-test-001",
+                    "created_by": "test-user",
+                    "status": "pending",
+                    "device_ids": ["dev-lab-01"],
+                    "changes": {
+                        "operation": "add_firewall_rule",
+                        "chain": "forward",
+                        "action": "accept",
+                        "src_address": "192.168.1.0/24",
+                        "approval_token_timestamp": datetime.now(UTC).isoformat(),
+                        "approval_expires_at": (datetime.now(UTC) + timedelta(minutes=15)).isoformat(),
+                    },
+                }
+            )
+            fake_plan_service._validate_approval_token = Mock(return_value=None)
+            fake_plan_service.update_plan_status = AsyncMock(return_value=None)
+
+            # Mock device service
+            fake_device_service = AsyncMock()
+            fake_device_service.get_device = AsyncMock(
+                return_value=FakeDevice("dev-lab-01", "lab")
+            )
+            fake_device_service.get_rest_client = AsyncMock(
+                return_value=mock_rest_client
+            )
+
+            with (
+                patch.object(
+                    firewall_write_module,
+                    "get_session_factory",
+                    return_value=FakeSessionFactory(),
+                ),
+                patch.object(
+                    firewall_write_module,
+                    "PlanService",
+                    return_value=fake_plan_service,
+                ),
+                patch.object(
+                    firewall_write_module,
+                    "DeviceService",
+                    return_value=fake_device_service,
+                ),
+            ):
+                mcp = self._register_tools()
+                fn = mcp.tools["apply_firewall_plan"]
+                result = await fn(
+                    plan_id="plan-test-001",
+                    approval_token="approve-test-abc123",
+                )
+
+                # Check that it reports failure
+                self.assertTrue(result.get("isError", False))
+                content_text = self._get_content_text(result)
+                self.assertIn("failed", content_text.lower())
+
+                # Check metadata shows rollback
+                meta = result["_meta"]
+                self.assertEqual(meta["successful_count"], 0)
+                self.assertEqual(meta["failed_count"], 1)
+                device_result = meta["device_results"][0]
+                self.assertEqual(device_result["status"], "rolled_back")
+                self.assertIn("rollback", device_result)
+
+                # Verify plan status was updated to failed
+                fake_plan_service.update_plan_status.assert_any_call(
+                    "plan-test-001", "failed", "mcp-user"
+                )
+
+        asyncio.run(_run())
+
+    def test_apply_firewall_plan_device_unreachable(self) -> None:
+        """Test apply with unreachable device."""
+
+        async def _run() -> None:
+            from datetime import UTC, datetime, timedelta
+            from unittest.mock import AsyncMock
+
+            # Mock plan service
+            fake_plan_service = AsyncMock()
+            fake_plan_service.get_plan = AsyncMock(
+                return_value={
+                    "plan_id": "plan-test-001",
+                    "created_by": "test-user",
+                    "status": "pending",
+                    "device_ids": ["dev-lab-01"],
+                    "changes": {
+                        "operation": "add_firewall_rule",
+                        "chain": "forward",
+                        "action": "accept",
+                        "approval_token_timestamp": datetime.now(UTC).isoformat(),
+                        "approval_expires_at": (datetime.now(UTC) + timedelta(minutes=15)).isoformat(),
+                    },
+                }
+            )
+            fake_plan_service._validate_approval_token = Mock(return_value=None)
+            fake_plan_service.update_plan_status = AsyncMock(return_value=None)
+
+            # Mock device service with unreachable device
+            fake_device_service = AsyncMock()
+            fake_device_service.get_device = AsyncMock(
+                side_effect=Exception("Device unreachable")
+            )
+
+            with (
+                patch.object(
+                    firewall_write_module,
+                    "get_session_factory",
+                    return_value=FakeSessionFactory(),
+                ),
+                patch.object(
+                    firewall_write_module,
+                    "PlanService",
+                    return_value=fake_plan_service,
+                ),
+                patch.object(
+                    firewall_write_module,
+                    "DeviceService",
+                    return_value=fake_device_service,
+                ),
+            ):
+                mcp = self._register_tools()
+                fn = mcp.tools["apply_firewall_plan"]
+                result = await fn(
+                    plan_id="plan-test-001",
+                    approval_token="approve-test-abc123",
+                )
+
+                # Check error
+                self.assertTrue(result.get("isError", False))
+                content_text = self._get_content_text(result)
+                self.assertIn("failed", content_text.lower())
+
+                # Check metadata
+                meta = result["_meta"]
+                self.assertEqual(meta["failed_count"], 1)
+                device_result = meta["device_results"][0]
+                self.assertEqual(device_result["status"], "failed")
+                self.assertIn("error", device_result)
+
+        asyncio.run(_run())
+
+    def test_apply_firewall_plan_invalid_status(self) -> None:
+        """Test apply with plan in invalid status."""
+
+        async def _run() -> None:
+            from datetime import UTC, datetime, timedelta
+            from unittest.mock import AsyncMock
+
+            # Mock plan service with completed plan
+            fake_plan_service = AsyncMock()
+            fake_plan_service.get_plan = AsyncMock(
+                return_value={
+                    "plan_id": "plan-test-001",
+                    "created_by": "test-user",
+                    "status": "completed",  # Already completed
+                    "device_ids": ["dev-lab-01"],
+                    "changes": {
+                        "approval_token_timestamp": datetime.now(UTC).isoformat(),
+                        "approval_expires_at": (datetime.now(UTC) + timedelta(minutes=15)).isoformat(),
+                    },
+                }
+            )
+            fake_plan_service._validate_approval_token = Mock(return_value=None)
+
+            with (
+                patch.object(
+                    firewall_write_module,
+                    "get_session_factory",
+                    return_value=FakeSessionFactory(),
+                ),
+                patch.object(
+                    firewall_write_module,
+                    "PlanService",
+                    return_value=fake_plan_service,
+                ),
+            ):
+                mcp = self._register_tools()
+                fn = mcp.tools["apply_firewall_plan"]
+                result = await fn(
+                    plan_id="plan-test-001",
+                    approval_token="approve-test-abc123",
+                )
+
+                # Check error
+                self.assertTrue(result.get("isError", False))
+                content_text = self._get_content_text(result)
+                self.assertIn("cannot be applied", content_text.lower())
+
+        asyncio.run(_run())
+
+
 if __name__ == "__main__":
     unittest.main()
