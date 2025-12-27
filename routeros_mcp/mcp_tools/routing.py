@@ -504,10 +504,10 @@ def register_routing_tools(mcp: FastMCP, settings: Settings) -> None:
                 if not modifications:
                     raise ValueError("At least one modification must be specified")
 
-                # Validate modified destination address if provided
-                if "dst_address" in modifications:
+                # Validate modified route parameters if provided
+                if "dst_address" in modifications or "gateway" in modifications:
                     routing_plan_service.validate_route_params(
-                        dst_address=modifications["dst_address"],
+                        dst_address=modifications.get("dst_address"),
                         gateway=modifications.get("gateway"),
                     )
 
