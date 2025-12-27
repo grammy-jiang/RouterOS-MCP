@@ -48,7 +48,7 @@ def register_routing_tools(mcp: FastMCP, settings: Settings) -> None:
         - Before planning routing changes
         - Troubleshooting routing issues (verifying routes exist)
 
-        Returns: Total route count, counts by type (static/connected/dynamic), list of routes 
+        Returns: Total route count, counts by type (static/connected/dynamic), list of routes
         with destination, gateway, distance, comment.
 
         Tip: For detailed single route info, use routing/get-route.
@@ -119,7 +119,7 @@ def register_routing_tools(mcp: FastMCP, settings: Settings) -> None:
         - Verifying route configuration
         - Detailed troubleshooting of routing behavior
 
-        Returns: Complete route details including destination, gateway, distance, scope, 
+        Returns: Complete route details including destination, gateway, distance, scope,
         active status, dynamic flag.
 
         Note: Requires route ID (from routing/get-summary).
@@ -158,7 +158,7 @@ def register_routing_tools(mcp: FastMCP, settings: Settings) -> None:
                     # First get the routing summary to see available routes
                     summary = await routing_service.get_routing_summary(device_id)
                     route_count = summary.get("total_routes", 0)
-                    
+
                     if route_count > 0:
                         return format_tool_result(
                             content=(

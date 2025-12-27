@@ -67,7 +67,7 @@ class RoutingPlanService:
         else:
             try:
                 network = ipaddress.ip_network(dst_address, strict=False)
-                
+
                 # Block default routes
                 if str(network) in self.DEFAULT_ROUTES or dst_address in self.DEFAULT_ROUTES:
                     errors.append(
@@ -113,7 +113,7 @@ class RoutingPlanService:
         try:
             network = ipaddress.ip_network(dst_address, strict=False)
             mgmt_ip = ipaddress.ip_address(management_ip)
-            
+
             # Check if management IP is within the destination network
             return mgmt_ip in network
         except (ValueError, TypeError):
@@ -204,12 +204,11 @@ class RoutingPlanService:
 
         # Generate warnings for management network overlap
         warnings = []
-        if dst_address and management_ip:
-            if self.check_management_network_overlap(dst_address, management_ip):
-                warnings.append(
-                    f"WARNING: Route destination {dst_address} overlaps with "
-                    f"management network. This may affect device reachability."
-                )
+        if dst_address and management_ip and self.check_management_network_overlap(dst_address, management_ip):
+            warnings.append(
+                f"WARNING: Route destination {dst_address} overlaps with "
+                f"management network. This may affect device reachability."
+            )
 
         if operation == "add_static_route":
             # Build route specification
@@ -275,9 +274,9 @@ class RoutingPlanService:
         try:
             # Fetch current static routes
             routes_data = await rest_client.get("/rest/ip/route")
-            
+
             # Filter only static routes
-            static_routes = []
+            static_routes: list[dict[str, Any]] = []
             if isinstance(routes_data, list):
                 static_routes = [
                     route for route in routes_data
@@ -481,14 +480,14 @@ class RoutingPlanService:
 
             # Get current routes
             current_routes_data = await rest_client.get("/rest/ip/route")
-            current_routes_list = current_routes_data if isinstance(current_routes_data, list) else []
-            
+            current_routes_list: list[dict[str, Any]] = current_routes_data if isinstance(current_routes_data, list) else []
+
             # Filter only static routes
             current_static_routes = [
                 route for route in current_routes_list
                 if isinstance(route, dict) and route.get("static", False)
             ]
-            
+
             current_route_ids = {route.get(".id") for route in current_static_routes}
             original_route_ids = {route.get(".id") for route in original_routes}
 
