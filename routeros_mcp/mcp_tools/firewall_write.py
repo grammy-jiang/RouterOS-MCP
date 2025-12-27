@@ -844,10 +844,15 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                             )
                             device_result["health_check"] = health_check
 
+                            # Note: "degraded" status (device reachable but firewall inaccessible)
+                            # also triggers rollback since:
+                            # 1. We cannot verify firewall rules were applied correctly
+                            # 2. The firewall subsystem may be in an inconsistent state
+                            # 3. Better to rollback and investigate than leave device in unknown state
                             if health_check["status"] != "healthy":
-                                # Health check failed - rollback
+                                # Health check failed or degraded - rollback
                                 logger.warning(
-                                    f"Health check failed for device {device_id}, initiating rollback"
+                                    f"Health check {health_check['status']} for device {device_id}, initiating rollback"
                                 )
                                 rollback_result = await firewall_plan_service.rollback_from_snapshot(
                                     device_id, snapshot["data"], rest_client, operation
