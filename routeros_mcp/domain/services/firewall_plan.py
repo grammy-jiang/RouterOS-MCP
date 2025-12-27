@@ -306,7 +306,7 @@ class FirewallPlanService:
         try:
             # Fetch current firewall filter rules
             filter_rules = await rest_client.get("/rest/ip/firewall/filter")
-            
+
             # Create snapshot payload
             snapshot_payload = {
                 "device_id": device_id,
@@ -314,18 +314,18 @@ class FirewallPlanService:
                 "timestamp": datetime.now(UTC).isoformat(),
                 "filter_rules": filter_rules if isinstance(filter_rules, list) else [],
             }
-            
+
             # Serialize and compress
             payload_json = json.dumps(snapshot_payload)
             payload_bytes = payload_json.encode("utf-8")
             compressed_data = gzip.compress(payload_bytes, compresslevel=6)
-            
+
             # Calculate checksum
             checksum = hashlib.sha256(payload_bytes).hexdigest()
-            
+
             # Generate snapshot ID
             snapshot_id = f"snap-fw-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
-            
+
             logger.info(
                 f"Created firewall snapshot {snapshot_id} for device {device_id}",
                 extra={
@@ -336,7 +336,7 @@ class FirewallPlanService:
                     "compressed_size": len(compressed_data),
                 },
             )
-            
+
             return {
                 "snapshot_id": snapshot_id,
                 "device_id": device_id,
@@ -347,7 +347,7 @@ class FirewallPlanService:
                 "checksum": checksum,
                 "data": compressed_data,
             }
-            
+
         except Exception as e:
             logger.error(
                 f"Failed to create firewall snapshot for device {device_id}: {e}",
@@ -359,7 +359,7 @@ class FirewallPlanService:
         self,
         device_id: str,
         rest_client: RouterOSRestClient,
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float = 30.0,  # noqa: ARG002 - reserved for future timeout implementation
     ) -> dict[str, Any]:
         """Perform health check after firewall rule changes.
 
@@ -382,7 +382,7 @@ class FirewallPlanService:
         try:
             # Test 1: Check device responds to REST API
             system_resource = await rest_client.get("/rest/system/resource")
-            
+
             if not system_resource:
                 return {
                     "status": "failed",
@@ -396,10 +396,10 @@ class FirewallPlanService:
                     ],
                     "timestamp": datetime.now(UTC).isoformat(),
                 }
-            
+
             # Test 2: Verify firewall filter rules are accessible (management path intact)
             filter_rules = await rest_client.get("/rest/ip/firewall/filter")
-            
+
             if filter_rules is None:
                 return {
                     "status": "degraded",
@@ -418,7 +418,7 @@ class FirewallPlanService:
                     ],
                     "timestamp": datetime.now(UTC).isoformat(),
                 }
-            
+
             # All checks passed
             logger.info(
                 f"Health check passed for device {device_id}",
@@ -427,7 +427,7 @@ class FirewallPlanService:
                     "checks_passed": 2,
                 },
             )
-            
+
             return {
                 "status": "healthy",
                 "device_id": device_id,
@@ -445,7 +445,7 @@ class FirewallPlanService:
                 ],
                 "timestamp": datetime.now(UTC).isoformat(),
             }
-            
+
         except Exception as e:
             logger.error(
                 f"Health check failed for device {device_id}: {e}",
@@ -488,9 +488,9 @@ class FirewallPlanService:
             # Decompress snapshot
             decompressed = gzip.decompress(snapshot_data)
             snapshot_payload = json.loads(decompressed.decode("utf-8"))
-            
+
             original_rules = snapshot_payload.get("filter_rules", [])
-            
+
             logger.info(
                 f"Starting rollback for device {device_id}",
                 extra={
@@ -498,15 +498,15 @@ class FirewallPlanService:
                     "original_rule_count": len(original_rules),
                 },
             )
-            
+
             # Get current rules to identify what was added
             current_rules = await rest_client.get("/rest/ip/firewall/filter")
             current_rule_ids = {rule.get(".id") for rule in (current_rules if isinstance(current_rules, list) else [])}
             original_rule_ids = {rule.get(".id") for rule in original_rules}
-            
+
             # Identify new rules added during apply (not in original snapshot)
             new_rule_ids = current_rule_ids - original_rule_ids
-            
+
             # Remove new rules
             removed_count = 0
             for rule_id in new_rule_ids:
@@ -518,7 +518,7 @@ class FirewallPlanService:
                         f"Failed to remove rule {rule_id} during rollback: {e}",
                         extra={"device_id": device_id, "rule_id": rule_id},
                     )
-            
+
             logger.info(
                 f"Rollback completed for device {device_id}",
                 extra={
@@ -526,7 +526,7 @@ class FirewallPlanService:
                     "removed_rule_count": removed_count,
                 },
             )
-            
+
             return {
                 "status": "success",
                 "device_id": device_id,
@@ -534,7 +534,7 @@ class FirewallPlanService:
                 "original_rule_count": len(original_rules),
                 "timestamp": datetime.now(UTC).isoformat(),
             }
-            
+
         except Exception as e:
             logger.error(
                 f"Rollback failed for device {device_id}: {e}",
@@ -550,7 +550,7 @@ class FirewallPlanService:
     async def apply_plan(
         self,
         device_id: str,
-        device_name: str,
+        device_name: str,  # noqa: ARG002 - used in logging context, reserved for future use
         operation: str,
         changes: dict[str, Any],
         rest_client: RouterOSRestClient,
@@ -578,14 +578,14 @@ class FirewallPlanService:
                     "operation": operation,
                 },
             )
-            
+
             if operation == "add_firewall_rule":
                 # Build rule payload
                 rule_data = {
                     "chain": changes["chain"],
                     "action": changes["action"],
                 }
-                
+
                 if changes.get("src_address"):
                     rule_data["src-address"] = changes["src_address"]
                 if changes.get("dst_address"):
@@ -596,10 +596,10 @@ class FirewallPlanService:
                     rule_data["dst-port"] = changes["dst_port"]
                 if changes.get("comment"):
                     rule_data["comment"] = changes["comment"]
-                
+
                 # Add rule via REST API
                 result = await rest_client.post("/rest/ip/firewall/filter/add", rule_data)
-                
+
                 return {
                     "status": "success",
                     "device_id": device_id,
@@ -607,11 +607,11 @@ class FirewallPlanService:
                     "rule_id": result.get(".id") if isinstance(result, dict) else None,
                     "timestamp": datetime.now(UTC).isoformat(),
                 }
-                
+
             elif operation == "modify_firewall_rule":
                 rule_id = changes["rule_id"]
                 modifications = changes["modifications"]
-                
+
                 # Build update payload
                 update_data = {}
                 if "chain" in modifications:
@@ -628,10 +628,10 @@ class FirewallPlanService:
                     update_data["dst-port"] = modifications["dst_port"]
                 if "comment" in modifications:
                     update_data["comment"] = modifications["comment"]
-                
+
                 # Update rule via REST API
                 await rest_client.patch(f"/rest/ip/firewall/filter/{rule_id}", update_data)
-                
+
                 return {
                     "status": "success",
                     "device_id": device_id,
@@ -640,13 +640,13 @@ class FirewallPlanService:
                     "modifications": list(modifications.keys()),
                     "timestamp": datetime.now(UTC).isoformat(),
                 }
-                
+
             elif operation == "remove_firewall_rule":
                 rule_id = changes["rule_id"]
-                
+
                 # Remove rule via REST API
                 await rest_client.delete(f"/rest/ip/firewall/filter/{rule_id}")
-                
+
                 return {
                     "status": "success",
                     "device_id": device_id,
@@ -654,10 +654,10 @@ class FirewallPlanService:
                     "rule_id": rule_id,
                     "timestamp": datetime.now(UTC).isoformat(),
                 }
-                
+
             else:
                 raise ValueError(f"Unknown operation: {operation}")
-                
+
         except Exception as e:
             logger.error(
                 f"Failed to apply firewall plan to device {device_id}: {e}",
