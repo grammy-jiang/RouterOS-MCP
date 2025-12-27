@@ -27,6 +27,18 @@ logger = logging.getLogger(__name__)
 DEFAULT_MCP_USER = "mcp-user"
 
 
+def _normalize_empty_string(value: str) -> str | None:
+    """Convert empty strings to None for consistency.
+
+    Args:
+        value: String value to normalize
+
+    Returns:
+        None if value is empty string, otherwise the original value
+    """
+    return None if value == "" else value
+
+
 async def _validate_devices_for_firewall_plan(
     device_service: DeviceService,
     settings: Settings,
@@ -40,6 +52,11 @@ async def _validate_devices_for_firewall_plan(
     - Environment is lab/staging (by default)
     - Professional workflows capability enabled
     - Firewall writes capability enabled
+
+    Note: Devices are validated sequentially to provide specific error messages
+    for each device and to perform authorization checks per device. While this
+    could be optimized with batch queries for large device lists, the current
+    approach ensures clear error reporting and proper per-device authorization.
 
     Args:
         device_service: Device service instance
@@ -275,7 +292,6 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
             )
         """
         try:
-            session_factory = get_session_factory(settings)
             async with session_factory.session() as session:
                 device_service = DeviceService(session, settings)
                 plan_service = PlanService(session, settings)
@@ -285,10 +301,10 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                 firewall_plan_service.validate_rule_params(
                     chain=chain,
                     action=action,
-                    src_address=src_address or None,
-                    dst_address=dst_address or None,
-                    protocol=protocol or None,
-                    dst_port=dst_port or None,
+                    src_address=_normalize_empty_string(src_address),
+                    dst_address=_normalize_empty_string(dst_address),
+                    protocol=_normalize_empty_string(protocol),
+                    dst_port=_normalize_empty_string(dst_port),
                 )
 
                 # Validate all devices and check capabilities
@@ -299,11 +315,17 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                     "firewall/plan-add-rule",
                 )
 
-                # Assess risk level based on chain and action
+                # Assess risk level based on chain, action, and highest risk environment
+                # Use the highest risk environment from all devices for conservative risk assessment
+                device_environments = [d.environment for d in devices]
+                highest_risk_env = "prod" if "prod" in device_environments else (
+                    "staging" if "staging" in device_environments else "lab"
+                )
+
                 risk_level = firewall_plan_service.assess_risk(
                     chain=chain,
                     action=action,
-                    device_environment=devices[0].environment,
+                    device_environment=highest_risk_env,
                 )
 
                 # Generate preview for each device
@@ -316,11 +338,11 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                         device_environment=device.environment,
                         chain=chain,
                         action=action,
-                        src_address=src_address or None,
-                        dst_address=dst_address or None,
-                        protocol=protocol or None,
-                        dst_port=dst_port or None,
-                        comment=comment or None,
+                        src_address=_normalize_empty_string(src_address),
+                        dst_address=_normalize_empty_string(dst_address),
+                        protocol=_normalize_empty_string(protocol),
+                        dst_port=_normalize_empty_string(dst_port),
+                        comment=_normalize_empty_string(comment),
                     )
                     device_previews.append(preview)
 
@@ -334,11 +356,11 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                         "operation": "add_firewall_rule",
                         "chain": chain,
                         "action": action,
-                        "src_address": src_address or None,
-                        "dst_address": dst_address or None,
-                        "protocol": protocol or None,
-                        "dst_port": dst_port or None,
-                        "comment": comment or None,
+                        "src_address": _normalize_empty_string(src_address),
+                        "dst_address": _normalize_empty_string(dst_address),
+                        "protocol": _normalize_empty_string(protocol),
+                        "dst_port": _normalize_empty_string(dst_port),
+                        "comment": _normalize_empty_string(comment),
                         "device_previews": device_previews,
                     },
                     risk_level=risk_level,
@@ -439,7 +461,6 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
             )
         """
         try:
-            session_factory = get_session_factory(settings)
             async with session_factory.session() as session:
                 device_service = DeviceService(session, settings)
                 plan_service = PlanService(session, settings)
@@ -501,13 +522,17 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                 # Generate preview for each device
                 device_previews = []
                 for device in devices:
+                    # Use chain/action from modifications if present, otherwise use placeholder
+                    preview_chain = modifications.get("chain", "unknown")
+                    preview_action = modifications.get("action", "unknown")
+
                     preview = firewall_plan_service.generate_preview(
                         operation="modify_firewall_rule",
                         device_id=device.id,
                         device_name=device.name,
                         device_environment=device.environment,
-                        chain=validate_chain,
-                        action=validate_action,
+                        chain=preview_chain,
+                        action=preview_action,
                         rule_id=rule_id,
                         modifications=modifications,
                     )
@@ -609,7 +634,6 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
             )
         """
         try:
-            session_factory = get_session_factory(settings)
             async with session_factory.session() as session:
                 device_service = DeviceService(session, settings)
                 plan_service = PlanService(session, settings)

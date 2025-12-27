@@ -386,6 +386,7 @@ class TestFirewallPlanTools(unittest.TestCase):
         """Test successful firewall rule modification plan."""
 
         async def _run() -> None:
+            mock_authz = self._create_mock_authz()
             with (
                 patch.object(
                     firewall_write_module,
@@ -405,7 +406,7 @@ class TestFirewallPlanTools(unittest.TestCase):
                 patch.object(
                     firewall_write_module,
                     "check_tool_authorization",
-                    lambda **_kwargs: None,
+                    mock_authz,
                 ),
             ):
                 mcp = self._register_tools()
@@ -623,6 +624,70 @@ class TestFirewallPlanService(unittest.TestCase):
             )
 
         self.assertIn("Invalid destination port", str(cm.exception))
+
+    def test_validate_rule_params_invalid_protocol(self) -> None:
+        """Test validation with invalid protocol."""
+        from routeros_mcp.domain.services.firewall_plan import FirewallPlanService
+
+        service = FirewallPlanService()
+        with self.assertRaises(ValueError) as cm:
+            service.validate_rule_params(
+                chain="forward", action="accept", protocol="invalid_protocol"
+            )
+
+        self.assertIn("Invalid protocol", str(cm.exception))
+
+    def test_validate_port_valid_single(self) -> None:
+        """Test port validation with valid single port."""
+        from routeros_mcp.domain.services.firewall_plan import FirewallPlanService
+
+        service = FirewallPlanService()
+        self.assertTrue(service._validate_port("443"))
+        self.assertTrue(service._validate_port("80"))
+        self.assertTrue(service._validate_port("65535"))
+
+    def test_validate_port_valid_range(self) -> None:
+        """Test port validation with valid port range."""
+        from routeros_mcp.domain.services.firewall_plan import FirewallPlanService
+
+        service = FirewallPlanService()
+        self.assertTrue(service._validate_port("8000-9000"))
+        self.assertTrue(service._validate_port("1-65535"))
+
+    def test_validate_port_invalid_number(self) -> None:
+        """Test port validation with invalid port number."""
+        from routeros_mcp.domain.services.firewall_plan import FirewallPlanService
+
+        service = FirewallPlanService()
+        self.assertFalse(service._validate_port("70000"))
+        self.assertFalse(service._validate_port("0"))
+        self.assertFalse(service._validate_port("-1"))
+
+    def test_validate_port_invalid_range(self) -> None:
+        """Test port validation with invalid port range."""
+        from routeros_mcp.domain.services.firewall_plan import FirewallPlanService
+
+        service = FirewallPlanService()
+        self.assertFalse(service._validate_port("9000-8000"))  # reversed range
+        self.assertFalse(service._validate_port("0-1000"))  # starts with 0
+
+    def test_validate_port_invalid_format(self) -> None:
+        """Test port validation with invalid format."""
+        from routeros_mcp.domain.services.firewall_plan import FirewallPlanService
+
+        service = FirewallPlanService()
+        self.assertFalse(service._validate_port("abc"))
+        self.assertFalse(service._validate_port("80-"))
+        self.assertFalse(service._validate_port("-80"))
+
+    def test_validate_port_whitespace_handling(self) -> None:
+        """Test port validation with whitespace."""
+        from routeros_mcp.domain.services.firewall_plan import FirewallPlanService
+
+        service = FirewallPlanService()
+        self.assertTrue(service._validate_port(" 443 "))
+        self.assertTrue(service._validate_port("8000 - 9000"))
+        self.assertTrue(service._validate_port(" 8000-9000 "))
 
     def test_assess_risk_high_input_chain(self) -> None:
         """Test risk assessment for input chain (high risk)."""
