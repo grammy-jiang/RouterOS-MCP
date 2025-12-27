@@ -470,6 +470,7 @@ class FirewallPlanService:
         device_id: str,
         snapshot_data: bytes,
         rest_client: RouterOSRestClient,
+        operation: str = "add_firewall_rule",
     ) -> dict[str, Any]:
         """Rollback firewall rules from snapshot.
 
@@ -477,6 +478,7 @@ class FirewallPlanService:
             device_id: Device identifier
             snapshot_data: Compressed snapshot data
             rest_client: REST client instance for device
+            operation: Operation type that was performed (add/modify/remove)
 
         Returns:
             Rollback results with status and details
@@ -495,42 +497,99 @@ class FirewallPlanService:
                 f"Starting rollback for device {device_id}",
                 extra={
                     "device_id": device_id,
+                    "operation": operation,
                     "original_rule_count": len(original_rules),
                 },
             )
 
-            # Get current rules to identify what was added
+            # Get current rules
             current_rules = await rest_client.get("/rest/ip/firewall/filter")
-            current_rule_ids = {rule.get(".id") for rule in (current_rules if isinstance(current_rules, list) else [])}
+            current_rules_list = current_rules if isinstance(current_rules, list) else []
+            current_rule_ids = {rule.get(".id") for rule in current_rules_list}
             original_rule_ids = {rule.get(".id") for rule in original_rules}
 
-            # Identify new rules added during apply (not in original snapshot)
-            new_rule_ids = current_rule_ids - original_rule_ids
+            rollback_actions = []
 
-            # Remove new rules
-            removed_count = 0
-            for rule_id in new_rule_ids:
-                try:
-                    await rest_client.delete(f"/rest/ip/firewall/filter/{rule_id}")
-                    removed_count += 1
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to remove rule {rule_id} during rollback: {e}",
-                        extra={"device_id": device_id, "rule_id": rule_id},
-                    )
+            if operation == "add_firewall_rule":
+                # For add operations: remove newly added rules
+                new_rule_ids = current_rule_ids - original_rule_ids
+
+                for rule_id in new_rule_ids:
+                    try:
+                        await rest_client.delete(f"/rest/ip/firewall/filter/{rule_id}")
+                        rollback_actions.append({"action": "removed", "rule_id": rule_id})
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to remove rule {rule_id} during rollback: {e}",
+                            extra={"device_id": device_id, "rule_id": rule_id},
+                        )
+                        rollback_actions.append({"action": "failed_remove", "rule_id": rule_id, "error": str(e)})
+
+            elif operation == "modify_firewall_rule":
+                # For modify operations: restore original rule properties
+                # Build a map of original rules by ID
+                original_rules_map = {rule.get(".id"): rule for rule in original_rules if rule.get(".id")}
+
+                for current_rule in current_rules_list:
+                    rule_id = current_rule.get(".id")
+                    if rule_id in original_rules_map:
+                        original_rule = original_rules_map[rule_id]
+                        # Check if rule was modified (compare properties)
+                        if self._rule_differs(original_rule, current_rule):
+                            try:
+                                # Restore original properties
+                                restore_data = {}
+                                for key in ["chain", "action", "src-address", "dst-address", "protocol", "dst-port", "comment"]:
+                                    if key in original_rule:
+                                        restore_data[key] = original_rule[key]
+
+                                await rest_client.patch(f"/rest/ip/firewall/filter/{rule_id}", restore_data)
+                                rollback_actions.append({"action": "restored", "rule_id": rule_id})
+                            except Exception as e:
+                                logger.warning(
+                                    f"Failed to restore rule {rule_id} during rollback: {e}",
+                                    extra={"device_id": device_id, "rule_id": rule_id},
+                                )
+                                rollback_actions.append({"action": "failed_restore", "rule_id": rule_id, "error": str(e)})
+
+            elif operation == "remove_firewall_rule":
+                # For remove operations: re-add deleted rules
+                deleted_rule_ids = original_rule_ids - current_rule_ids
+                original_rules_map = {rule.get(".id"): rule for rule in original_rules}
+
+                for rule_id in deleted_rule_ids:
+                    if rule_id in original_rules_map:
+                        original_rule = original_rules_map[rule_id]
+                        try:
+                            # Re-create the rule
+                            add_data = {}
+                            for key in ["chain", "action", "src-address", "dst-address", "protocol", "dst-port", "comment"]:
+                                if key in original_rule:
+                                    add_data[key] = original_rule[key]
+
+                            await rest_client.post("/rest/ip/firewall/filter/add", add_data)
+                            rollback_actions.append({"action": "re-added", "rule_id": rule_id})
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to re-add rule {rule_id} during rollback: {e}",
+                                extra={"device_id": device_id, "rule_id": rule_id},
+                            )
+                            rollback_actions.append({"action": "failed_readd", "rule_id": rule_id, "error": str(e)})
 
             logger.info(
                 f"Rollback completed for device {device_id}",
                 extra={
                     "device_id": device_id,
-                    "removed_rule_count": removed_count,
+                    "operation": operation,
+                    "rollback_action_count": len(rollback_actions),
                 },
             )
 
             return {
                 "status": "success",
                 "device_id": device_id,
-                "removed_rule_count": removed_count,
+                "operation": operation,
+                "rollback_actions": rollback_actions,
                 "original_rule_count": len(original_rules),
                 "timestamp": datetime.now(UTC).isoformat(),
             }
@@ -543,9 +602,24 @@ class FirewallPlanService:
             return {
                 "status": "failed",
                 "device_id": device_id,
+                "operation": operation,
                 "error": str(e),
                 "timestamp": datetime.now(UTC).isoformat(),
             }
+
+    def _rule_differs(self, rule1: dict[str, Any], rule2: dict[str, Any]) -> bool:
+        """Check if two firewall rules have different properties.
+
+        Args:
+            rule1: First rule
+            rule2: Second rule
+
+        Returns:
+            True if rules differ in any property
+        """
+        # Compare key properties
+        check_keys = ["chain", "action", "src-address", "dst-address", "protocol", "dst-port", "comment"]
+        return any(rule1.get(key) != rule2.get(key) for key in check_keys)
 
     async def apply_plan(
         self,

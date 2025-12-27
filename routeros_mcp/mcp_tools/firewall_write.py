@@ -6,6 +6,7 @@ Provides MCP tools for:
 """
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from fastmcp import FastMCP
@@ -770,7 +771,6 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                 if not expires_at_str or not token_timestamp:
                     raise ValueError("Invalid plan: missing approval token metadata")
 
-                from datetime import datetime
                 expires_at = datetime.fromisoformat(expires_at_str)
 
                 # Validate token using PlanService internal method
@@ -806,61 +806,59 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                         "status": "pending",
                     }
 
+                    rest_client = None
                     try:
                         # Get device
                         device = await device_service.get_device(device_id)
                         rest_client = await device_service.get_rest_client(device_id)
 
-                        try:
-                            # Step 1: Create snapshot before changes
-                            logger.info(f"Creating snapshot for device {device_id}")
-                            snapshot = await firewall_plan_service.create_firewall_snapshot(
-                                device_id, device.name, rest_client
-                            )
-                            snapshots[device_id] = snapshot
-                            device_result["snapshot_id"] = snapshot["snapshot_id"]
+                        # Step 1: Create snapshot before changes
+                        logger.info(f"Creating snapshot for device {device_id}")
+                        snapshot = await firewall_plan_service.create_firewall_snapshot(
+                            device_id, device.name, rest_client
+                        )
+                        snapshots[device_id] = snapshot
+                        device_result["snapshot_id"] = snapshot["snapshot_id"]
 
-                            # Step 2: Apply changes
-                            logger.info(f"Applying changes to device {device_id}")
-                            apply_result = await firewall_plan_service.apply_plan(
-                                device_id,
-                                device.name,
-                                operation,
-                                plan["changes"],
-                                rest_client,
-                            )
-                            device_result["apply_result"] = apply_result
+                        # Step 2: Apply changes
+                        logger.info(f"Applying changes to device {device_id}")
+                        apply_result = await firewall_plan_service.apply_plan(
+                            device_id,
+                            device.name,
+                            operation,
+                            plan["changes"],
+                            rest_client,
+                        )
+                        device_result["apply_result"] = apply_result
 
-                            if apply_result["status"] != "success":
-                                device_result["status"] = "failed"
-                                device_result["error"] = apply_result.get("error", "Apply failed")
-                                failed_devices.append(device_id)
-                                device_results.append(device_result)
-                            else:
-                                # Step 3: Perform health check
-                                logger.info(f"Performing health check for device {device_id}")
-                                health_check = await firewall_plan_service.perform_health_check(
-                                    device_id, rest_client
+                        if apply_result["status"] != "success":
+                            device_result["status"] = "failed"
+                            device_result["error"] = apply_result.get("error", "Apply failed")
+                            failed_devices.append(device_id)
+                            device_results.append(device_result)
+                        else:
+                            # Step 3: Perform health check
+                            logger.info(f"Performing health check for device {device_id}")
+                            health_check = await firewall_plan_service.perform_health_check(
+                                device_id, rest_client
+                            )
+                            device_result["health_check"] = health_check
+
+                            if health_check["status"] != "healthy":
+                                # Health check failed - rollback
+                                logger.warning(
+                                    f"Health check failed for device {device_id}, initiating rollback"
                                 )
-                                device_result["health_check"] = health_check
-
-                                if health_check["status"] != "healthy":
-                                    # Health check failed - rollback
-                                    logger.warning(
-                                        f"Health check failed for device {device_id}, initiating rollback"
-                                    )
-                                    rollback_result = await firewall_plan_service.rollback_from_snapshot(
-                                        device_id, snapshot["data"], rest_client
-                                    )
-                                    device_result["rollback"] = rollback_result
-                                    device_result["status"] = "rolled_back"
-                                    failed_devices.append(device_id)
-                                else:
-                                    # Success
-                                    device_result["status"] = "success"
-                                    successful_devices.append(device_id)
-                        finally:
-                            await rest_client.close()
+                                rollback_result = await firewall_plan_service.rollback_from_snapshot(
+                                    device_id, snapshot["data"], rest_client, operation
+                                )
+                                device_result["rollback"] = rollback_result
+                                device_result["status"] = "rolled_back"
+                                failed_devices.append(device_id)
+                            else:
+                                # Success
+                                device_result["status"] = "success"
+                                successful_devices.append(device_id)
 
                     except Exception as e:
                         logger.error(
@@ -873,15 +871,14 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                         # Attempt rollback if snapshot exists
                         if device_id in snapshots:
                             try:
-                                rest_client = await device_service.get_rest_client(device_id)
-                                try:
-                                    rollback_result = await firewall_plan_service.rollback_from_snapshot(
-                                        device_id, snapshots[device_id]["data"], rest_client
-                                    )
-                                    device_result["rollback"] = rollback_result
-                                    device_result["status"] = "rolled_back"
-                                finally:
-                                    await rest_client.close()
+                                # rest_client may already be set, otherwise get a new one
+                                if rest_client is None:
+                                    rest_client = await device_service.get_rest_client(device_id)
+                                rollback_result = await firewall_plan_service.rollback_from_snapshot(
+                                    device_id, snapshots[device_id]["data"], rest_client, operation
+                                )
+                                device_result["rollback"] = rollback_result
+                                device_result["status"] = "rolled_back"
                             except Exception as rollback_error:
                                 logger.error(
                                     f"Rollback failed for device {device_id}: {rollback_error}",
@@ -893,6 +890,16 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                                 }
 
                         failed_devices.append(device_id)
+
+                    finally:
+                        # Ensure REST client is always closed
+                        if rest_client is not None:
+                            try:
+                                await rest_client.close()
+                            except Exception as close_error:
+                                logger.warning(
+                                    f"Failed to close REST client for device {device_id}: {close_error}"
+                                )
 
                     device_results.append(device_result)
 
