@@ -895,7 +895,11 @@ def register_routing_tools(mcp: FastMCP, settings: Settings) -> None:
                                     f"Failed to close REST client for device {device_id}: {close_error}"
                                 )
 
-                    device_results.append(device_result)
+                    if not any(
+                        r.get("device_id") == device_result.get("device_id")
+                        for r in device_results
+                    ):
+                        device_results.append(device_result)
 
                 # Determine final plan status
                 if len(successful_devices) == len(device_ids):
