@@ -836,31 +836,29 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                                 device_result["error"] = apply_result.get("error", "Apply failed")
                                 failed_devices.append(device_id)
                                 device_results.append(device_result)
-                                continue
-
-                            # Step 3: Perform health check
-                            logger.info(f"Performing health check for device {device_id}")
-                            health_check = await firewall_plan_service.perform_health_check(
-                                device_id, rest_client
-                            )
-                            device_result["health_check"] = health_check
-
-                            if health_check["status"] != "healthy":
-                                # Health check failed - rollback
-                                logger.warning(
-                                    f"Health check failed for device {device_id}, initiating rollback"
-                                )
-                                rollback_result = await firewall_plan_service.rollback_from_snapshot(
-                                    device_id, snapshot["data"], rest_client
-                                )
-                                device_result["rollback"] = rollback_result
-                                device_result["status"] = "rolled_back"
-                                failed_devices.append(device_id)
                             else:
-                                # Success
-                                device_result["status"] = "success"
-                                successful_devices.append(device_id)
+                                # Step 3: Perform health check
+                                logger.info(f"Performing health check for device {device_id}")
+                                health_check = await firewall_plan_service.perform_health_check(
+                                    device_id, rest_client
+                                )
+                                device_result["health_check"] = health_check
 
+                                if health_check["status"] != "healthy":
+                                    # Health check failed - rollback
+                                    logger.warning(
+                                        f"Health check failed for device {device_id}, initiating rollback"
+                                    )
+                                    rollback_result = await firewall_plan_service.rollback_from_snapshot(
+                                        device_id, snapshot["data"], rest_client
+                                    )
+                                    device_result["rollback"] = rollback_result
+                                    device_result["status"] = "rolled_back"
+                                    failed_devices.append(device_id)
+                                else:
+                                    # Success
+                                    device_result["status"] = "success"
+                                    successful_devices.append(device_id)
                         finally:
                             await rest_client.close()
 
