@@ -1,11 +1,17 @@
 """DHCP service for DHCP server operations.
 
 Provides operations for querying RouterOS DHCP server configuration,
-pools, and active leases.
+pools, and active leases, plus plan/apply workflow for DHCP changes.
 """
 
+import gzip
+import hashlib
+import ipaddress
+import json
 import logging
 import shlex
+import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +24,7 @@ from routeros_mcp.infra.routeros.exceptions import (
     RouterOSServerError,
     RouterOSTimeoutError,
 )
+from routeros_mcp.infra.routeros.rest_client import RouterOSRestClient
 
 logger = logging.getLogger(__name__)
 
@@ -483,3 +490,504 @@ class DHCPService:
 
         finally:
             await ssh_client.close()
+
+
+class DHCPPlanService:
+    """Service for DHCP server planning operations.
+
+    Provides:
+    - DHCP pool parameter validation (overlapping ranges, gateway in subnet)
+    - Risk level assessment based on environment and scope
+    - Preview generation for planned changes
+    - Snapshot creation for rollback
+    - Health check after DHCP changes
+
+    All DHCP pool operations follow the plan/apply workflow.
+    """
+
+    # High-risk conditions for risk assessment
+    HIGH_RISK_ENVIRONMENTS = ["prod"]  # Production environment
+
+    def validate_pool_params(
+        self,
+        pool_name: str,
+        address_range: str,
+        gateway: str | None = None,
+        dns_servers: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Validate DHCP pool parameters.
+
+        Args:
+            pool_name: Name for the DHCP pool
+            address_range: IP address range (e.g., "192.168.1.100-192.168.1.200")
+            gateway: Gateway IP address (optional)
+            dns_servers: List of DNS server IPs (optional)
+
+        Returns:
+            Dictionary with validation result
+
+        Raises:
+            ValueError: If any parameter is invalid
+        """
+        errors = []
+
+        # Validate pool name
+        if not pool_name or not pool_name.strip():
+            errors.append("Pool name cannot be empty")
+        
+        # Validate address range format and parse
+        if not address_range or "-" not in address_range:
+            errors.append(
+                f"Invalid address range '{address_range}'. "
+                "Must be in format: 'start_ip-end_ip' (e.g., '192.168.1.100-192.168.1.200')"
+            )
+        else:
+            try:
+                start_str, end_str = address_range.split("-", 1)
+                start_ip = ipaddress.ip_address(start_str.strip())
+                end_ip = ipaddress.ip_address(end_str.strip())
+                
+                # Validate range order
+                if start_ip >= end_ip:
+                    errors.append(
+                        f"Invalid address range: start IP {start_ip} must be less than end IP {end_ip}"
+                    )
+                
+                # Store parsed IPs for subnet validation
+                range_start = start_ip
+                range_end = end_ip
+                
+            except ValueError as e:
+                errors.append(f"Invalid IP address in range '{address_range}': {e}")
+                range_start = None
+                range_end = None
+
+        # Validate gateway if provided
+        gateway_ip = None
+        if gateway:
+            try:
+                gateway_ip = ipaddress.ip_address(gateway.strip())
+                
+                # Check if gateway is in the same subnet as the address range
+                if range_start and range_end:
+                    # Infer subnet from range (common /24 subnet assumption)
+                    # More accurate: check if gateway is logically close to the range
+                    network = ipaddress.ip_network(f"{range_start}/24", strict=False)
+                    if gateway_ip not in network:
+                        errors.append(
+                            f"Gateway {gateway} should be in the same subnet as address range "
+                            f"(inferred: {network})"
+                        )
+            except ValueError as e:
+                errors.append(f"Invalid gateway address '{gateway}': {e}")
+
+        # Validate DNS servers if provided
+        if dns_servers:
+            for dns in dns_servers:
+                try:
+                    ipaddress.ip_address(dns.strip())
+                except ValueError as e:
+                    errors.append(f"Invalid DNS server address '{dns}': {e}")
+
+        if errors:
+            raise ValueError("DHCP pool parameter validation failed:\n- " + "\n- ".join(errors))
+
+        logger.debug(
+            f"DHCP pool parameter validation passed for pool={pool_name}, "
+            f"range={address_range}"
+        )
+
+        return {
+            "valid": True,
+            "pool_name": pool_name,
+            "address_range": address_range,
+            "gateway": gateway,
+            "dns_servers": dns_servers or [],
+        }
+
+    def check_pool_overlap(
+        self,
+        new_range: str,
+        existing_pools: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Check if new pool overlaps with existing pools.
+
+        Args:
+            new_range: IP address range for new pool
+            existing_pools: List of existing DHCP pools with address ranges
+
+        Returns:
+            Dictionary with overlap status and details
+
+        Raises:
+            ValueError: If overlap is detected
+        """
+        try:
+            start_str, end_str = new_range.split("-", 1)
+            new_start = ipaddress.ip_address(start_str.strip())
+            new_end = ipaddress.ip_address(end_str.strip())
+        except (ValueError, AttributeError) as e:
+            raise ValueError(f"Invalid new pool range '{new_range}': {e}") from e
+
+        overlapping_pools = []
+        for pool in existing_pools:
+            pool_range = pool.get("address_range") or pool.get("addresses", "")
+            if not pool_range or "-" not in pool_range:
+                continue
+            
+            try:
+                pool_start_str, pool_end_str = pool_range.split("-", 1)
+                pool_start = ipaddress.ip_address(pool_start_str.strip())
+                pool_end = ipaddress.ip_address(pool_end_str.strip())
+                
+                # Check for overlap: ranges overlap if one starts before the other ends
+                if not (new_end < pool_start or new_start > pool_end):
+                    overlapping_pools.append({
+                        "pool_name": pool.get("name", "unknown"),
+                        "address_range": pool_range,
+                    })
+            except (ValueError, AttributeError):
+                logger.warning(f"Could not parse existing pool range: {pool_range}")
+                continue
+
+        if overlapping_pools:
+            overlap_details = "; ".join(
+                f"{p['pool_name']} ({p['address_range']})" for p in overlapping_pools
+            )
+            raise ValueError(
+                f"New pool range {new_range} overlaps with existing pools: {overlap_details}"
+            )
+
+        logger.debug(f"No overlap detected for new pool range {new_range}")
+        return {
+            "overlap_detected": False,
+            "new_range": new_range,
+        }
+
+    def assess_risk(
+        self,
+        operation: str,
+        device_environment: str = "lab",
+        affects_production: bool = False,
+    ) -> str:
+        """Assess risk level for a DHCP operation.
+
+        Risk classification:
+        - High risk:
+          - Production environment
+          - Operations affecting production networks
+          - Pool removal (may affect many clients)
+        - Medium risk:
+          - Lab/staging environments
+          - Pool creation/modification
+          - Non-production changes
+
+        Args:
+            operation: Operation type (create_pool/modify_pool/remove_pool)
+            device_environment: Device environment (lab/staging/prod)
+            affects_production: Whether operation affects production network
+
+        Returns:
+            Risk level: "medium" or "high"
+        """
+        # High risk conditions
+        if device_environment in self.HIGH_RISK_ENVIRONMENTS:
+            logger.info("High risk: production environment")
+            return "high"
+
+        if affects_production:
+            logger.info("High risk: affects production network")
+            return "high"
+
+        if operation == "remove_dhcp_pool":
+            logger.info("High risk: pool removal may affect many clients")
+            return "high"
+
+        # Default to medium risk
+        logger.debug(
+            f"Medium risk: operation={operation}, env={device_environment}, "
+            f"prod_impact={affects_production}"
+        )
+        return "medium"
+
+    def generate_preview(
+        self,
+        operation: str,
+        device_id: str,
+        device_name: str,
+        device_environment: str,
+        pool_name: str | None = None,
+        address_range: str | None = None,
+        gateway: str | None = None,
+        dns_servers: list[str] | None = None,
+        pool_id: str | None = None,
+        modifications: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Generate detailed preview for a DHCP operation.
+
+        Args:
+            operation: Operation type (create_dhcp_pool/modify_dhcp_pool/remove_dhcp_pool)
+            device_id: Device identifier
+            device_name: Device name
+            device_environment: Device environment
+            pool_name: Pool name (for create/modify)
+            address_range: Address range (for create)
+            gateway: Gateway IP (for create/modify)
+            dns_servers: DNS servers list (for create/modify)
+            pool_id: Pool ID (for modify/remove)
+            modifications: Modifications dict (for modify)
+
+        Returns:
+            Preview dictionary with operation details
+        """
+        preview: dict[str, Any] = {
+            "device_id": device_id,
+            "name": device_name,
+            "environment": device_environment,
+            "operation": operation,
+            "pre_check_status": "passed",
+        }
+
+        if operation == "create_dhcp_pool":
+            preview["preview"] = {
+                "operation": "create_dhcp_pool",
+                "pool_name": pool_name,
+                "address_range": address_range,
+                "gateway": gateway,
+                "dns_servers": dns_servers or [],
+                "estimated_impact": "Medium - new DHCP pool will begin serving leases to clients",
+            }
+
+        elif operation == "modify_dhcp_pool":
+            preview["preview"] = {
+                "operation": "modify_dhcp_pool",
+                "pool_id": pool_id,
+                "pool_name": pool_name,
+                "modifications": modifications or {},
+                "estimated_impact": "Medium - pool modification may affect active leases",
+            }
+
+        elif operation == "remove_dhcp_pool":
+            preview["preview"] = {
+                "operation": "remove_dhcp_pool",
+                "pool_id": pool_id,
+                "pool_name": pool_name,
+                "estimated_impact": "High - pool removal will stop new leases, may affect clients",
+            }
+
+        logger.debug(f"Generated preview for {operation} on device {device_id}")
+
+        return preview
+
+    async def create_dhcp_snapshot(
+        self,
+        device_id: str,
+        device_name: str,
+        rest_client: RouterOSRestClient,
+    ) -> dict[str, Any]:
+        """Create snapshot of current DHCP configuration for rollback.
+
+        Args:
+            device_id: Device identifier
+            device_name: Device name
+            rest_client: REST client instance for device
+
+        Returns:
+            Snapshot metadata with snapshot_id and DHCP configuration payload
+
+        Raises:
+            Exception: If snapshot creation fails
+        """
+        try:
+            # Fetch current DHCP server configuration
+            dhcp_servers = await rest_client.get("/rest/ip/dhcp-server")
+            
+            # Fetch DHCP pools
+            dhcp_pools = await rest_client.get("/rest/ip/pool")
+            
+            # Fetch DHCP server networks
+            dhcp_networks = await rest_client.get("/rest/ip/dhcp-server/network")
+
+            # Create snapshot payload
+            snapshot_payload = {
+                "device_id": device_id,
+                "device_name": device_name,
+                "timestamp": datetime.now(UTC).isoformat(),
+                "dhcp_servers": dhcp_servers if isinstance(dhcp_servers, list) else [],
+                "dhcp_pools": dhcp_pools if isinstance(dhcp_pools, list) else [],
+                "dhcp_networks": dhcp_networks if isinstance(dhcp_networks, list) else [],
+            }
+
+            # Serialize and compress
+            payload_json = json.dumps(snapshot_payload)
+            payload_bytes = payload_json.encode("utf-8")
+            compressed_data = gzip.compress(payload_bytes, compresslevel=6)
+
+            # Calculate checksum
+            checksum = hashlib.sha256(payload_bytes).hexdigest()
+
+            # Generate snapshot ID
+            snapshot_id = f"snap-dhcp-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
+
+            logger.info(
+                f"Created DHCP snapshot {snapshot_id} for device {device_id}",
+                extra={
+                    "snapshot_id": snapshot_id,
+                    "device_id": device_id,
+                    "server_count": len(snapshot_payload["dhcp_servers"]),
+                    "pool_count": len(snapshot_payload["dhcp_pools"]),
+                    "size_bytes": len(payload_bytes),
+                    "compressed_size": len(compressed_data),
+                },
+            )
+
+            return {
+                "snapshot_id": snapshot_id,
+                "device_id": device_id,
+                "timestamp": snapshot_payload["timestamp"],
+                "server_count": len(snapshot_payload["dhcp_servers"]),
+                "pool_count": len(snapshot_payload["dhcp_pools"]),
+                "size_bytes": len(payload_bytes),
+                "compressed_size": len(compressed_data),
+                "checksum": checksum,
+                "data": compressed_data,
+            }
+
+        except Exception as e:
+            logger.error(
+                f"Failed to create DHCP snapshot for device {device_id}: {e}",
+                exc_info=True,
+            )
+            raise
+
+    async def perform_health_check(
+        self,
+        device_id: str,
+        rest_client: RouterOSRestClient,
+        expected_pool_name: str | None = None,
+        timeout_seconds: float = 30.0,  # noqa: ARG002 - reserved for future timeout implementation
+    ) -> dict[str, Any]:
+        """Perform health check after DHCP changes.
+
+        Verifies:
+        - Device still responds to REST API
+        - DHCP server is accessible
+        - Expected pool exists (if specified)
+
+        Args:
+            device_id: Device identifier
+            rest_client: REST client instance for device
+            expected_pool_name: Pool name to verify (optional)
+            timeout_seconds: Health check timeout (default: 30s)
+
+        Returns:
+            Health check results with status and details
+
+        Raises:
+            Exception: If health check fails critically
+        """
+        try:
+            # Test 1: Check device responds to REST API
+            system_resource = await rest_client.get("/rest/system/resource")
+
+            if not system_resource:
+                return {
+                    "status": "failed",
+                    "device_id": device_id,
+                    "checks": [
+                        {
+                            "check": "rest_api_response",
+                            "status": "failed",
+                            "message": "Device did not respond to REST API",
+                        }
+                    ],
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+
+            # Test 2: Verify DHCP server configuration is accessible
+            dhcp_servers = await rest_client.get("/rest/ip/dhcp-server")
+            
+            if dhcp_servers is None:
+                return {
+                    "status": "failed",
+                    "device_id": device_id,
+                    "checks": [
+                        {
+                            "check": "dhcp_config_accessible",
+                            "status": "failed",
+                            "message": "DHCP server configuration not accessible",
+                        }
+                    ],
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+
+            checks = [
+                {
+                    "check": "rest_api_response",
+                    "status": "passed",
+                    "message": "Device responding to REST API",
+                },
+                {
+                    "check": "dhcp_config_accessible",
+                    "status": "passed",
+                    "message": "DHCP server configuration accessible",
+                },
+            ]
+
+            # Test 3: Verify expected pool exists (if specified)
+            if expected_pool_name:
+                dhcp_pools = await rest_client.get("/rest/ip/pool")
+                pool_list = dhcp_pools if isinstance(dhcp_pools, list) else []
+                
+                pool_exists = any(
+                    pool.get("name") == expected_pool_name for pool in pool_list
+                )
+                
+                if pool_exists:
+                    checks.append({
+                        "check": "expected_pool_exists",
+                        "status": "passed",
+                        "message": f"Pool '{expected_pool_name}' exists",
+                    })
+                else:
+                    checks.append({
+                        "check": "expected_pool_exists",
+                        "status": "failed",
+                        "message": f"Pool '{expected_pool_name}' not found",
+                    })
+                    return {
+                        "status": "failed",
+                        "device_id": device_id,
+                        "checks": checks,
+                        "timestamp": datetime.now(UTC).isoformat(),
+                    }
+
+            logger.info(
+                f"DHCP health check passed for device {device_id}",
+                extra={"device_id": device_id, "checks": len(checks)},
+            )
+
+            return {
+                "status": "passed",
+                "device_id": device_id,
+                "checks": checks,
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+
+        except Exception as e:
+            logger.error(
+                f"DHCP health check failed for device {device_id}: {e}",
+                exc_info=True,
+            )
+            return {
+                "status": "failed",
+                "device_id": device_id,
+                "checks": [
+                    {
+                        "check": "health_check_execution",
+                        "status": "failed",
+                        "message": f"Health check failed with error: {str(e)}",
+                    }
+                ],
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
