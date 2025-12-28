@@ -400,7 +400,7 @@ class TestDHCPPlanService(unittest.TestCase):
         result = service.validate_pool_params(
             pool_name="test-pool",
             address_range="192.168.1.100-192.168.1.200",
-            gateway="192.168.1.1",
+            gateway="192.168.1.150",  # Gateway within range
             dns_servers=["8.8.8.8", "8.8.4.4"]
         )
         
@@ -422,20 +422,20 @@ class TestDHCPPlanService(unittest.TestCase):
         
         self.assertIn("start IP", str(context.exception))
     
-    def test_validate_pool_params_gateway_not_in_subnet(self) -> None:
-        """Test pool parameter validation with gateway not in subnet."""
+    def test_validate_pool_params_gateway_not_in_range(self) -> None:
+        """Test pool parameter validation with gateway not in address range."""
         service = dhcp_module.DHCPPlanService()
         
         with self.assertRaises(ValueError) as context:
             service.validate_pool_params(
                 pool_name="test-pool",
                 address_range="192.168.1.100-192.168.1.200",
-                gateway="10.0.0.1",  # Different subnet
+                gateway="10.0.0.1",  # Different subnet, not in range
                 dns_servers=None
             )
         
         self.assertIn("Gateway", str(context.exception))
-        self.assertIn("same subnet", str(context.exception))
+        self.assertIn("within the DHCP address range", str(context.exception))
     
     def test_check_pool_overlap_no_overlap(self) -> None:
         """Test pool overlap detection with no overlap."""

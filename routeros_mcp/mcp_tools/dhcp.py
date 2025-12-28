@@ -411,6 +411,13 @@ def register_dhcp_tools(mcp: FastMCP, settings: Settings) -> None:
                 is_error=True,
                 meta=e.data,
             )
+        except ValueError as e:
+            # Validation errors from service methods
+            return format_tool_result(
+                content=f"Validation error: {str(e)}",
+                is_error=True,
+                meta={"error_type": "validation_error", "details": str(e)},
+            )
         except Exception as e:
             error = map_exception_to_error(e)
             return format_tool_result(
