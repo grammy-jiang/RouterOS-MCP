@@ -773,8 +773,8 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
 
                 expires_at = datetime.fromisoformat(expires_at_str)
 
-                # Validate token using PlanService internal method
-                plan_service._validate_approval_token(
+                # Validate token using PlanService public method
+                plan_service.validate_approval_token(
                     plan_id, plan["created_by"], approval_token, expires_at, token_timestamp
                 )
 

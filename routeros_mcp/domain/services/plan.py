@@ -444,6 +444,23 @@ class PlanService:
             "updated_at": plan.updated_at.isoformat(),
         }
 
+    def validate_approval_token(
+        self, plan_id: str, created_by: str, approval_token: str, expires_at: datetime, token_timestamp: str
+    ) -> None:
+        """Validate approval token signature and expiration (public interface).
+
+        Args:
+            plan_id: Plan identifier
+            created_by: User who created the plan
+            approval_token: Token to validate
+            expires_at: Token expiration timestamp
+            token_timestamp: Timestamp used when generating the token
+
+        Raises:
+            ValueError: If token is invalid or expired
+        """
+        self._validate_approval_token(plan_id, created_by, approval_token, expires_at, token_timestamp)
+
     async def approve_plan(
         self, plan_id: str, approval_token: str, approved_by: str
     ) -> dict[str, Any]:
