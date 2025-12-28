@@ -68,7 +68,6 @@ async def admin_dashboard(
         HTML page with device and plan management interface
     """
     # Read static HTML file
-    import os
     from pathlib import Path
 
     static_dir = Path(__file__).parent / "static"
