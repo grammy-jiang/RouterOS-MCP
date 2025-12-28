@@ -182,7 +182,7 @@
                                                 <span class="status-badge" :class="'status-' + plan.status" x-text="plan.status"></span>
                                             </td>
                                             <td x-text="plan.tool_name"></td>
-                                            <td x-text="plan.summary.substring(0, 50) + '...'"></td>
+                                            <td x-text="(plan.summary ?? '').substring(0, 50) + '...'"></td>
                                             <td x-text="plan.created_by"></td>
                                             <td x-text="formatDate(plan.created_at)"></td>
                                             <td>
