@@ -523,7 +523,7 @@ def register_bridge_tools(mcp: FastMCP, settings: Settings) -> None:
     async def plan_modify_bridge_settings(
         device_ids: list[str],
         bridge_name: str,
-        settings: dict[str, Any],
+        bridge_settings: dict[str, Any],
     ) -> dict[str, Any]:
         """Create plan for modifying bridge settings.
 
@@ -550,7 +550,7 @@ def register_bridge_tools(mcp: FastMCP, settings: Settings) -> None:
         Args:
             device_ids: List of device identifiers
             bridge_name: Name of the bridge
-            settings: Dict of settings to modify (e.g., {'protocol_mode': 'rstp', 'vlan_filtering': true})
+            bridge_settings: Dict of settings to modify (e.g., {'protocol_mode': 'rstp', 'vlan_filtering': true})
 
         Returns:
             Formatted tool result with plan details and approval token
@@ -572,7 +572,7 @@ def register_bridge_tools(mcp: FastMCP, settings: Settings) -> None:
                 # Validate bridge parameters
                 bridge_plan_service.validate_bridge_params(
                     bridge_name=bridge_name,
-                    settings=settings,
+                    settings=bridge_settings,
                     operation="modify_bridge_settings",
                 )
 
@@ -588,7 +588,7 @@ def register_bridge_tools(mcp: FastMCP, settings: Settings) -> None:
                 for device in devices:
                     bridge_plan_service.check_stp_safety(
                         bridge_name=bridge_name,
-                        settings=settings,
+                        settings=bridge_settings,
                         device_environment=device.environment,
                     )
 
@@ -599,10 +599,10 @@ def register_bridge_tools(mcp: FastMCP, settings: Settings) -> None:
                 )
 
                 is_stp_change = bool(
-                    set(settings.keys())
+                    set(bridge_settings.keys())
                     & {"protocol_mode", "stp", "priority", "forward_delay", "max_message_age"}
                 )
-                is_vlan_filtering_change = "vlan_filtering" in settings
+                is_vlan_filtering_change = "vlan_filtering" in bridge_settings
 
                 risk_level = bridge_plan_service.assess_risk(
                     operation="modify_bridge_settings",
@@ -620,7 +620,7 @@ def register_bridge_tools(mcp: FastMCP, settings: Settings) -> None:
                         device_name=device.name,
                         device_environment=device.environment,
                         bridge_name=bridge_name,
-                        settings=settings,
+                        settings=bridge_settings,
                     )
                     device_previews.append(preview)
 
@@ -633,7 +633,7 @@ def register_bridge_tools(mcp: FastMCP, settings: Settings) -> None:
                     changes={
                         "operation": "modify_bridge_settings",
                         "bridge_name": bridge_name,
-                        "settings": settings,
+                        "settings": bridge_settings,
                         "device_previews": device_previews,
                     },
                     risk_level=risk_level,
@@ -643,7 +643,7 @@ def register_bridge_tools(mcp: FastMCP, settings: Settings) -> None:
                 warning = ""
                 if is_stp_change:
                     warning = "\nWARNING: STP changes can create loops or outages."
-                elif is_vlan_change:
+                elif is_vlan_filtering_change:
                     warning = "\nWARNING: VLAN filtering changes affect network segmentation."
 
                 content = (
@@ -765,47 +765,60 @@ def register_bridge_tools(mcp: FastMCP, settings: Settings) -> None:
 
                 # Execute plan for each device
                 for device_id in device_ids:
+                    rest_client = None
                     try:
                         device = await device_service.get_device(device_id)
                         rest_client = await device_service.get_rest_client(device_id)
 
-                        # Create snapshot before changes
-                        snapshot = await bridge_plan_service.create_bridge_snapshot(
-                            device_id, device.name, rest_client
-                        )
-                        snapshots[device_id] = snapshot
+                        try:
+                            # Create snapshot before changes
+                            snapshot = await bridge_plan_service.create_bridge_snapshot(
+                                device_id, device.name, rest_client
+                            )
+                            snapshots[device_id] = snapshot
 
-                        # Execute operation (mock for now - would call RouterOS API)
-                        # TODO: Implement actual RouterOS API calls for bridge operations
-                        logger.info(f"Executing {operation} on device {device_id} (mock only, no RouterOS changes applied)")
+                            # Execute operation (mock for now - would call RouterOS API)
+                            # TODO: Implement actual RouterOS API calls for bridge operations
+                            logger.info(f"Executing {operation} on device {device_id} (mock only, no RouterOS changes applied)")
 
-                        # Since RouterOS API calls are not yet implemented, we cannot reliably
-                        # perform a post-change health check. Mark this operation as not
-                        # executed to avoid reporting false positives.
-                        health_result = {
-                            "status": "skipped",
-                            "reason": (
-                                "Bridge operation was not executed: RouterOS API calls for this "
-                                "operation are not yet implemented"
-                            ),
-                        }
+                            # Since RouterOS API calls are not yet implemented, we cannot reliably
+                            # perform a post-change health check. Mark this operation as not
+                            # executed to avoid reporting false positives.
+                            health_result = {
+                                "status": "skipped",
+                                "reason": (
+                                    "Bridge operation was not executed: RouterOS API calls for this "
+                                    "operation are not yet implemented"
+                                ),
+                            }
 
-                        failed_devices.append(device_id)
-                        device_results.append({
-                            "device_id": device_id,
-                            "status": "not_executed",
-                            "message": "Bridge operation skipped because it is not yet implemented",
-                            "health_check": health_result,
-                        })
-                        await rest_client.close()
+                            failed_devices.append(device_id)
+                            device_results.append({
+                                "device_id": device_id,
+                                "status": "not_executed",
+                                "message": "Bridge operation skipped because it is not yet implemented",
+                                "health_check": health_result,
+                            })
+
+                        finally:
+                            # Ensure REST client is always closed
+                            if rest_client is not None:
+                                await rest_client.close()
 
                     except Exception as e:
                         logger.error(f"Failed to execute plan on device {device_id}: {e}")
                         failed_devices.append(device_id)
+                        snapshot = snapshots.get(device_id)
+                        if snapshot is not None:
+                            logger.info(
+                                "Using bridge snapshot for potential rollback on device %s",
+                                device_id,
+                            )
                         device_results.append({
                             "device_id": device_id,
                             "status": "failed",
                             "message": f"Execution failed: {str(e)}",
+                            "rollback_snapshot": snapshot if snapshot is not None else None,
                         })
 
                 # Update plan status
