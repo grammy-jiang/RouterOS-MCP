@@ -34,12 +34,12 @@ def mock_session_factory():
         mock_session_cm = MagicMock()
         mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
-        
+
         # Create session factory mock
         factory = MagicMock()
         factory.init = AsyncMock()
         factory.session = MagicMock(return_value=mock_session_cm)
-        
+
         mock_factory.return_value = factory
         yield factory
 
@@ -59,7 +59,7 @@ class TestDeviceCommands:
             mock_service.register_device = AsyncMock(return_value=mock_device)
             mock_service.add_credential = AsyncMock()
             mock_service_class.return_value = mock_service
-            
+
             result = cli_runner.invoke(
                 admin,
                 [
@@ -73,7 +73,7 @@ class TestDeviceCommands:
                     "--non-interactive",
                 ],
             )
-            
+
             assert result.exit_code == 0
             assert "Device registered" in result.output
             assert "dev-lab-01" in result.output
@@ -94,7 +94,7 @@ class TestDeviceCommands:
                 "--non-interactive",
             ],
         )
-        
+
         assert result.exit_code == 1
         assert "password required" in result.output.lower()
 
@@ -109,7 +109,7 @@ class TestDeviceCommands:
             mock_service.register_device = AsyncMock(return_value=mock_device)
             mock_service.add_credential = AsyncMock()
             mock_service_class.return_value = mock_service
-            
+
             result = cli_runner.invoke(
                 admin,
                 [
@@ -125,7 +125,7 @@ class TestDeviceCommands:
                     "--non-interactive",
                 ],
             )
-            
+
             assert result.exit_code == 0
             # Verify register_device was called with correct capability flags
             call_args = mock_service.register_device.call_args
@@ -144,7 +144,7 @@ class TestDeviceCommands:
             mock_service.register_device = AsyncMock(return_value=mock_device)
             mock_service.add_credential = AsyncMock()
             mock_service_class.return_value = mock_service
-            
+
             result = cli_runner.invoke(
                 admin,
                 [
@@ -159,7 +159,7 @@ class TestDeviceCommands:
                     "--non-interactive",
                 ],
             )
-            
+
             assert result.exit_code == 0
             # Verify tags were parsed correctly
             call_args = mock_service.register_device.call_args
@@ -184,7 +184,7 @@ class TestDeviceCommands:
                 "--non-interactive",
             ],
         )
-        
+
         assert result.exit_code == 1
         assert "Invalid JSON" in result.output
 
@@ -202,10 +202,10 @@ class TestDeviceCommands:
             mock_device1.environment = "lab"
             mock_device1.status = "healthy"
             mock_device1.allow_professional_workflows = True
-            
+
             mock_service.list_devices = AsyncMock(return_value=[mock_device1])
             mock_service_class.return_value = mock_service
-            
+
             result = cli_runner.invoke(
                 admin,
                 [
@@ -213,7 +213,7 @@ class TestDeviceCommands:
                     "device", "list",
                 ],
             )
-            
+
             assert result.exit_code == 0
             assert "dev-lab-01" in result.output
             assert "Router 1" in result.output
@@ -233,10 +233,10 @@ class TestDeviceCommands:
             mock_device1.environment = "lab"
             mock_device1.status = "healthy"
             mock_device1.allow_professional_workflows = True
-            
+
             mock_service.list_devices = AsyncMock(return_value=[mock_device1])
             mock_service_class.return_value = mock_service
-            
+
             result = cli_runner.invoke(
                 admin,
                 [
@@ -245,7 +245,7 @@ class TestDeviceCommands:
                     "--format", "json",
                 ],
             )
-            
+
             assert result.exit_code == 0
             assert '"id": "dev-lab-01"' in result.output
             assert '"name": "Router 1"' in result.output
@@ -258,7 +258,7 @@ class TestDeviceCommands:
             mock_service = MagicMock()
             mock_service.list_devices = AsyncMock(return_value=[])
             mock_service_class.return_value = mock_service
-            
+
             result = cli_runner.invoke(
                 admin,
                 [
@@ -268,7 +268,7 @@ class TestDeviceCommands:
                     "--status", "healthy",
                 ],
             )
-            
+
             assert result.exit_code == 0
             # Verify filters were passed to service
             call_args = mock_service.list_devices.call_args
@@ -283,7 +283,7 @@ class TestDeviceCommands:
             mock_service = MagicMock()
             mock_service.update_device = AsyncMock()
             mock_service_class.return_value = mock_service
-            
+
             result = cli_runner.invoke(
                 admin,
                 [
@@ -294,7 +294,7 @@ class TestDeviceCommands:
                     "--allow-professional-workflows", "true",
                 ],
             )
-            
+
             assert result.exit_code == 0
             assert "updated successfully" in result.output
 
@@ -310,7 +310,7 @@ class TestDeviceCommands:
                 "dev-lab-01",
             ],
         )
-        
+
         assert result.exit_code == 0
         assert "No updates specified" in result.output
 
@@ -324,7 +324,7 @@ class TestDeviceCommands:
                 return_value=(True, {"version": "7.11", "identity": "test-router"})
             )
             mock_service_class.return_value = mock_service
-            
+
             result = cli_runner.invoke(
                 admin,
                 [
@@ -333,7 +333,7 @@ class TestDeviceCommands:
                     "dev-lab-01",
                 ],
             )
-            
+
             assert result.exit_code == 0
             assert "is reachable" in result.output
             assert "version" in result.output.lower()
@@ -348,7 +348,7 @@ class TestDeviceCommands:
                 return_value=(False, {"error": "Connection timeout"})
             )
             mock_service_class.return_value = mock_service
-            
+
             result = cli_runner.invoke(
                 admin,
                 [
@@ -357,7 +357,7 @@ class TestDeviceCommands:
                     "dev-lab-01",
                 ],
             )
-            
+
             assert result.exit_code == 1
             assert "not reachable" in result.output
             assert "Connection timeout" in result.output
@@ -385,7 +385,7 @@ class TestPlanCommands:
                 ]
             )
             mock_service_class.return_value = mock_service
-            
+
             result = cli_runner.invoke(
                 admin,
                 [
@@ -393,7 +393,7 @@ class TestPlanCommands:
                     "plan", "list",
                 ],
             )
-            
+
             assert result.exit_code == 0
             assert "plan-12345" in result.output
             assert "pending" in result.output
@@ -417,7 +417,7 @@ class TestPlanCommands:
                 ]
             )
             mock_service_class.return_value = mock_service
-            
+
             result = cli_runner.invoke(
                 admin,
                 [
@@ -426,7 +426,7 @@ class TestPlanCommands:
                     "--format", "json",
                 ],
             )
-            
+
             assert result.exit_code == 0
             assert '"plan_id": "plan-12345"' in result.output
 
@@ -438,7 +438,7 @@ class TestPlanCommands:
             mock_service = MagicMock()
             mock_service.list_plans = AsyncMock(return_value=[])
             mock_service_class.return_value = mock_service
-            
+
             result = cli_runner.invoke(
                 admin,
                 [
@@ -449,7 +449,7 @@ class TestPlanCommands:
                     "--limit", "100",
                 ],
             )
-            
+
             assert result.exit_code == 0
             # Verify filters were passed
             call_args = mock_service.list_plans.call_args
@@ -477,7 +477,7 @@ class TestPlanCommands:
                 }
             )
             mock_service_class.return_value = mock_service
-            
+
             result = cli_runner.invoke(
                 admin,
                 [
@@ -486,7 +486,7 @@ class TestPlanCommands:
                     "plan-12345",
                 ],
             )
-            
+
             assert result.exit_code == 0
             assert "plan-12345" in result.output
             assert "pending" in result.output
@@ -512,7 +512,7 @@ class TestPlanCommands:
                 }
             )
             mock_service_class.return_value = mock_service
-            
+
             result = cli_runner.invoke(
                 admin,
                 [
@@ -522,7 +522,7 @@ class TestPlanCommands:
                     "--format", "json",
                 ],
             )
-            
+
             assert result.exit_code == 0
             assert '"plan_id": "plan-12345"' in result.output
 
@@ -539,7 +539,7 @@ class TestPlanCommands:
                 }
             )
             mock_service_class.return_value = mock_service
-            
+
             result = cli_runner.invoke(
                 admin,
                 [
@@ -549,7 +549,7 @@ class TestPlanCommands:
                     "--non-interactive",
                 ],
             )
-            
+
             assert result.exit_code == 0
             assert "approved successfully" in result.output
             assert "approve-abc123-xyz" in result.output
@@ -562,7 +562,7 @@ class TestPlanCommands:
             mock_service = MagicMock()
             mock_service.update_plan_status = AsyncMock()
             mock_service_class.return_value = mock_service
-            
+
             result = cli_runner.invoke(
                 admin,
                 [
@@ -572,7 +572,7 @@ class TestPlanCommands:
                     "--reason", "Invalid configuration",
                 ],
             )
-            
+
             assert result.exit_code == 0
             assert "rejected" in result.output
             assert "Invalid configuration" in result.output
@@ -589,7 +589,7 @@ class TestPlanCommands:
                 "plan-12345",
             ],
         )
-        
+
         assert result.exit_code != 0
         # Click will show "Missing option" error
 
@@ -600,7 +600,7 @@ class TestCLIHelp:
     def test_main_help(self, cli_runner):
         """Test main CLI help."""
         result = cli_runner.invoke(admin, ["--help"])
-        
+
         assert result.exit_code == 0
         assert "Device onboarding and plan management" in result.output
         assert "device" in result.output
@@ -609,7 +609,7 @@ class TestCLIHelp:
     def test_device_help(self, cli_runner):
         """Test device command help."""
         result = cli_runner.invoke(admin, ["device", "--help"])
-        
+
         assert result.exit_code == 0
         assert "Manage RouterOS devices" in result.output
         assert "add" in result.output
@@ -620,7 +620,7 @@ class TestCLIHelp:
     def test_plan_help(self, cli_runner):
         """Test plan command help."""
         result = cli_runner.invoke(admin, ["plan", "--help"])
-        
+
         assert result.exit_code == 0
         assert "Manage configuration change plans" in result.output
         assert "list" in result.output
@@ -631,7 +631,7 @@ class TestCLIHelp:
     def test_device_add_help(self, cli_runner):
         """Test device add command help."""
         result = cli_runner.invoke(admin, ["device", "add", "--help"])
-        
+
         assert result.exit_code == 0
         assert "--id" in result.output
         assert "--name" in result.output

@@ -12,7 +12,6 @@ Complements the MCP tools which are AI-facing.
 import asyncio
 import json
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -33,10 +32,10 @@ console = Console()
 
 def load_settings(config_path: str | None) -> Settings:
     """Load settings from config file or environment.
-    
+
     Args:
         config_path: Optional path to config file
-        
+
     Returns:
         Settings instance
     """
@@ -111,19 +110,19 @@ def device_add(
     """Add a new RouterOS device with encrypted credentials."""
     try:
         settings = load_settings(ctx.obj["config"])
-        
+
         # Use environment from config if not specified
         if not environment:
             environment = settings.environment
             console.print(f"[yellow]Using environment from config: {environment}[/yellow]")
-        
+
         # Prompt for password if not provided and in interactive mode
         if not password:
             if non_interactive:
                 console.print("[red]Error: --password required in non-interactive mode[/red]")
                 sys.exit(1)
             password = Prompt.ask("Password", password=True)
-        
+
         # Parse tags
         parsed_tags = {}
         if tags:
@@ -132,7 +131,7 @@ def device_add(
             except json.JSONDecodeError as e:
                 console.print(f"[red]Error: Invalid JSON for --tags: {e}[/red]")
                 sys.exit(1)
-        
+
         # Show summary and confirm in interactive mode
         if not non_interactive:
             console.print("\n[bold]Device Configuration Summary:[/bold]")
@@ -149,19 +148,19 @@ def device_add(
             console.print(f"  Allow Wireless Writes: {allow_wireless_writes}")
             console.print(f"  Allow DHCP Writes: {allow_dhcp_writes}")
             console.print(f"  Allow Bridge Writes: {allow_bridge_writes}")
-            
+
             if not Confirm.ask("\nProceed with device registration?", default=True):
                 console.print("[yellow]Operation cancelled[/yellow]")
                 return
-        
+
         # Register device
         async def _register_device() -> None:
             session_factory = get_session_factory(settings)
             await session_factory.init()
-            
+
             async with session_factory.session() as session:
                 device_service = DeviceService(session, settings)
-                
+
                 # Create device
                 device_data = DeviceCreate(
                     id=device_id,
@@ -178,10 +177,10 @@ def device_add(
                     allow_dhcp_writes=allow_dhcp_writes,
                     allow_bridge_writes=allow_bridge_writes,
                 )
-                
+
                 device = await device_service.register_device(device_data)
                 console.print(f"\n[green]✓[/green] Device registered: {device.id}")
-                
+
                 # Add credentials
                 credential_data = CredentialCreate(
                     device_id=device_id,
@@ -189,12 +188,12 @@ def device_add(
                     username=username,
                     password=password,
                 )
-                
+
                 await device_service.add_credential(credential_data)
-                console.print(f"[green]✓[/green] Credentials stored (encrypted)")
-                
+                console.print("[green]✓[/green] Credentials stored (encrypted)")
+
                 console.print(f"\n[bold green]Success![/bold green] Device '{device_id}' is ready to use.")
-        
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -203,7 +202,7 @@ def device_add(
             task = progress.add_task("Registering device...", total=None)
             asyncio.run(_register_device())
             progress.update(task, completed=True)
-    
+
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
@@ -218,18 +217,18 @@ def device_list(ctx: click.Context, environment: str | None, status: str | None,
     """List all registered devices."""
     try:
         settings = load_settings(ctx.obj["config"])
-        
+
         async def _list_devices() -> list[dict[str, Any]]:
             session_factory = get_session_factory(settings)
             await session_factory.init()
-            
+
             async with session_factory.session() as session:
                 device_service = DeviceService(session, settings)
                 devices = await device_service.list_devices(
                     environment=environment,
                     status=status,
                 )
-                
+
                 return [
                     {
                         "id": d.id,
@@ -242,9 +241,9 @@ def device_list(ctx: click.Context, environment: str | None, status: str | None,
                     }
                     for d in devices
                 ]
-        
+
         devices = asyncio.run(_list_devices())
-        
+
         if output_format == "json":
             console.print(json.dumps(devices, indent=2))
         else:
@@ -255,7 +254,7 @@ def device_list(ctx: click.Context, environment: str | None, status: str | None,
             table.add_column("Environment", style="magenta")
             table.add_column("Status", style="green")
             table.add_column("Prof. WF", style="blue")
-            
+
             for device in devices:
                 table.add_row(
                     device["id"],
@@ -265,9 +264,9 @@ def device_list(ctx: click.Context, environment: str | None, status: str | None,
                     device["status"],
                     "✓" if device["professional_workflows"] else "✗",
                 )
-            
+
             console.print(table)
-    
+
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
@@ -301,7 +300,7 @@ def device_update(
     """Update device configuration."""
     try:
         settings = load_settings(ctx.obj["config"])
-        
+
         # Parse tags if provided
         parsed_tags = None
         if tags:
@@ -310,7 +309,7 @@ def device_update(
             except json.JSONDecodeError as e:
                 console.print(f"[red]Error: Invalid JSON for --tags: {e}[/red]")
                 sys.exit(1)
-        
+
         # Build update dict
         updates: dict[str, Any] = {}
         if name is not None:
@@ -331,26 +330,26 @@ def device_update(
             updates["allow_dhcp_writes"] = allow_dhcp_writes
         if allow_bridge_writes is not None:
             updates["allow_bridge_writes"] = allow_bridge_writes
-        
+
         if not updates:
             console.print("[yellow]No updates specified[/yellow]")
             return
-        
+
         async def _update_device() -> None:
             session_factory = get_session_factory(settings)
             await session_factory.init()
-            
+
             async with session_factory.session() as session:
                 device_service = DeviceService(session, settings)
-                
+
                 from routeros_mcp.domain.models import DeviceUpdate
                 device_update_data = DeviceUpdate(**updates)
-                
+
                 await device_service.update_device(device_id, device_update_data)
                 console.print(f"[green]✓[/green] Device '{device_id}' updated successfully")
-        
+
         asyncio.run(_update_device())
-    
+
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
@@ -363,15 +362,15 @@ def device_test(ctx: click.Context, device_id: str) -> None:
     """Test connectivity to a device (REST + SSH)."""
     try:
         settings = load_settings(ctx.obj["config"])
-        
+
         async def _test_connectivity() -> tuple[bool, dict[str, Any]]:
             session_factory = get_session_factory(settings)
             await session_factory.init()
-            
+
             async with session_factory.session() as session:
                 device_service = DeviceService(session, settings)
                 return await device_service.check_connectivity(device_id)
-        
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -380,17 +379,17 @@ def device_test(ctx: click.Context, device_id: str) -> None:
             task = progress.add_task(f"Testing connectivity to {device_id}...", total=None)
             is_reachable, metadata = asyncio.run(_test_connectivity())
             progress.update(task, completed=True)
-        
+
         if is_reachable:
             console.print(f"\n[green]✓[/green] Device '{device_id}' is reachable")
-            console.print(f"\nDevice Information:")
+            console.print("\nDevice Information:")
             for key, value in metadata.items():
                 console.print(f"  {key}: {value}")
         else:
             console.print(f"\n[red]✗[/red] Device '{device_id}' is not reachable")
             console.print(f"\nError: {metadata.get('error', 'Unknown error')}")
             sys.exit(1)
-    
+
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
@@ -412,11 +411,11 @@ def plan_list(
     """List configuration change plans."""
     try:
         settings = load_settings(ctx.obj["config"])
-        
+
         async def _list_plans() -> list[dict[str, Any]]:
             session_factory = get_session_factory(settings)
             await session_factory.init()
-            
+
             async with session_factory.session() as session:
                 plan_service = PlanService(session, settings)
                 return await plan_service.list_plans(
@@ -424,9 +423,9 @@ def plan_list(
                     status=status,
                     limit=limit,
                 )
-        
+
         plans = asyncio.run(_list_plans())
-        
+
         if output_format == "json":
             console.print(json.dumps(plans, indent=2))
         else:
@@ -437,7 +436,7 @@ def plan_list(
             table.add_column("Devices", style="magenta")
             table.add_column("Created By", style="green")
             table.add_column("Created At", style="blue")
-            
+
             for plan_item in plans:
                 table.add_row(
                     plan_item["plan_id"],
@@ -447,9 +446,9 @@ def plan_list(
                     plan_item["created_by"],
                     plan_item["created_at"][:19],  # Trim to datetime only
                 )
-            
+
             console.print(table)
-    
+
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
@@ -463,17 +462,17 @@ def plan_show(ctx: click.Context, plan_id: str, output_format: str) -> None:
     """Show detailed plan information."""
     try:
         settings = load_settings(ctx.obj["config"])
-        
+
         async def _get_plan() -> dict[str, Any]:
             session_factory = get_session_factory(settings)
             await session_factory.init()
-            
+
             async with session_factory.session() as session:
                 plan_service = PlanService(session, settings)
                 return await plan_service.get_plan(plan_id)
-        
+
         plan_data = asyncio.run(_get_plan())
-        
+
         if output_format == "json":
             console.print(json.dumps(plan_data, indent=2, default=str))
         else:
@@ -486,13 +485,13 @@ def plan_show(ctx: click.Context, plan_id: str, output_format: str) -> None:
             console.print(f"Device Count: {len(plan_data['device_ids'])}")
             console.print(f"Devices: {', '.join(plan_data['device_ids'])}")
             console.print(f"\nSummary: {plan_data['summary']}")
-            console.print(f"\nChanges:")
+            console.print("\nChanges:")
             console.print(json.dumps(plan_data['changes'], indent=2))
-            
+
             if plan_data.get("pre_check_results"):
-                console.print(f"\nPre-check Results:")
+                console.print("\nPre-check Results:")
                 console.print(json.dumps(plan_data["pre_check_results"], indent=2))
-    
+
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
@@ -506,46 +505,46 @@ def plan_approve(ctx: click.Context, plan_id: str, non_interactive: bool) -> Non
     """Approve a plan (admin-only operation)."""
     try:
         settings = load_settings(ctx.obj["config"])
-        
+
         # In interactive mode, show plan details and confirm
         if not non_interactive:
             async def _get_plan() -> dict[str, Any]:
                 session_factory = get_session_factory(settings)
                 await session_factory.init()
-                
+
                 async with session_factory.session() as session:
                     plan_service = PlanService(session, settings)
                     return await plan_service.get_plan(plan_id)
-            
+
             plan_data = asyncio.run(_get_plan())
-            
+
             console.print(f"\n[bold]Plan to Approve: {plan_id}[/bold]")
             console.print(f"Tool: {plan_data['tool_name']}")
             console.print(f"Status: {plan_data['status']}")
             console.print(f"Risk Level: {plan_data['risk_level']}")
             console.print(f"Devices: {', '.join(plan_data['device_ids'])}")
             console.print(f"Summary: {plan_data['summary']}\n")
-            
+
             if not Confirm.ask("Are you sure you want to approve this plan?", default=False):
                 console.print("[yellow]Operation cancelled[/yellow]")
                 return
-        
+
         async def _approve_plan() -> dict[str, Any]:
             session_factory = get_session_factory(settings)
             await session_factory.init()
-            
+
             async with session_factory.session() as session:
                 plan_service = PlanService(session, settings)
                 # Use a default admin user sub for CLI operations
                 return await plan_service.approve_plan(plan_id, "admin-cli-user")
-        
+
         result = asyncio.run(_approve_plan())
-        
+
         console.print(f"\n[green]✓[/green] Plan '{plan_id}' approved successfully")
         console.print(f"\nApproval Token: {result['approval_token']}")
         console.print(f"Expires At: {result['approval_expires_at']}")
-        console.print(f"\n[yellow]Use this token to execute the plan via MCP tools[/yellow]")
-    
+        console.print("\n[yellow]Use this token to execute the plan via MCP tools[/yellow]")
+
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
@@ -559,11 +558,11 @@ def plan_reject(ctx: click.Context, plan_id: str, reason: str) -> None:
     """Reject a plan with reason."""
     try:
         settings = load_settings(ctx.obj["config"])
-        
+
         async def _reject_plan() -> None:
             session_factory = get_session_factory(settings)
             await session_factory.init()
-            
+
             async with session_factory.session() as session:
                 plan_service = PlanService(session, settings)
                 # Update plan status to cancelled with metadata
@@ -574,11 +573,11 @@ def plan_reject(ctx: click.Context, plan_id: str, reason: str) -> None:
                     user_sub="admin-cli-user",
                     result_meta={"rejection_reason": reason},
                 )
-        
+
         asyncio.run(_reject_plan())
         console.print(f"[green]✓[/green] Plan '{plan_id}' rejected")
         console.print(f"Reason: {reason}")
-    
+
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
