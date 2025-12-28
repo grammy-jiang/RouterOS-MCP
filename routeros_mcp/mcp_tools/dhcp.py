@@ -308,10 +308,16 @@ def register_dhcp_tools(mcp: FastMCP, settings: Settings) -> None:
                 plan_service = PlanService(session, settings)
                 dhcp_plan_service = DHCPPlanService()
 
-                # Normalize empty strings to None
-                gateway_norm = gateway if gateway.strip() else None
-                dns_servers_norm = dns_servers if dns_servers else []
+                # Normalize optional parameters without conflating "unset" with "empty"
+                if gateway is None:
+                    gateway_norm = None
+                else:
+                    gateway_norm = gateway.strip()
 
+                if dns_servers is None:
+                    dns_servers_norm = None
+                else:
+                    dns_servers_norm = dns_servers
                 # Validate pool parameters first
                 dhcp_plan_service.validate_pool_params(
                     pool_name=pool_name,
