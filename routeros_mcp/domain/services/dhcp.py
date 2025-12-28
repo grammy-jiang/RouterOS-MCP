@@ -568,15 +568,17 @@ class DHCPPlanService:
             try:
                 gateway_ip = ipaddress.ip_address(gateway.strip())
 
-                # Check if gateway is in the same subnet as the address range
+                # Check if gateway is compatible with and within the address range
                 if range_start and range_end:
-                    # Infer subnet from range (common /24 subnet assumption)
-                    # More accurate: check if gateway is logically close to the range
-                    network = ipaddress.ip_network(f"{range_start}/24", strict=False)
-                    if gateway_ip not in network:
+                    if gateway_ip.version != range_start.version:
                         errors.append(
-                            f"Gateway {gateway} should be in the same subnet as address range "
-                            f"(inferred: {network})"
+                            f"Gateway {gateway_ip} IP version must match address range "
+                            f"IP version ({range_start.version})"
+                        )
+                    elif not (range_start <= gateway_ip <= range_end):
+                        errors.append(
+                            f"Gateway {gateway_ip} should be within the DHCP address range "
+                            f"{range_start}-{range_end}"
                         )
             except ValueError as e:
                 errors.append(f"Invalid gateway address '{gateway}': {e}")
