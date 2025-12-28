@@ -550,7 +550,8 @@ def register_bridge_tools(mcp: FastMCP, settings: Settings) -> None:
         Args:
             device_ids: List of device identifiers
             bridge_name: Name of the bridge
-            bridge_settings: Dict of settings to modify (e.g., {'protocol_mode': 'rstp', 'vlan_filtering': true})
+            bridge_settings: Dict of settings to modify (e.g., {'protocol_mode': 'rstp',
+                'vlan_filtering': true})
 
         Returns:
             Formatted tool result with plan details and approval token
@@ -779,7 +780,10 @@ def register_bridge_tools(mcp: FastMCP, settings: Settings) -> None:
 
                             # Execute operation (mock for now - would call RouterOS API)
                             # TODO: Implement actual RouterOS API calls for bridge operations
-                            logger.info(f"Executing {operation} on device {device_id} (mock only, no RouterOS changes applied)")
+                            logger.info(
+                                f"Executing {operation} on device {device_id} "
+                                f"(mock only, no RouterOS changes applied)"
+                            )
 
                             # Since RouterOS API calls are not yet implemented, we cannot reliably
                             # perform a post-change health check. Mark this operation as not
