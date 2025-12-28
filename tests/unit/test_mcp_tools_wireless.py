@@ -672,3 +672,713 @@ async def test_plan_wireless_rf_settings_invalid_tx_power(monkeypatch: pytest.Mo
 
 # Phase 3: Plan/Apply workflow tests
 
+
+
+@pytest.mark.asyncio
+async def test_plan_modify_wireless_ssid_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test successful wireless SSID modification plan."""
+    import routeros_mcp.mcp_tools.wireless as wireless_tools
+    from routeros_mcp.domain.models import PlanStatus
+
+    class FakeDevice:
+        def __init__(self, device_id: str = "dev-lab-01", environment: str = "lab") -> None:
+            self.id = device_id
+            self.name = f"router-{device_id}"
+            self.environment = environment
+            self.allow_professional_workflows = True
+            self.allow_advanced_writes = True
+            self.allow_wireless_writes = True
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_device(self, device_id: str) -> object:
+            return FakeDevice(device_id, "lab")
+
+    class StubPlanService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def create_plan(
+            self,
+            tool_name: str,
+            created_by: str,
+            device_ids: list[str],
+            summary: str,
+            changes: dict,
+            risk_level: str = "medium",
+        ) -> dict:
+            return {
+                "plan_id": "plan-wireless-modify-001",
+                "approval_token": "approve-modify-abc123",
+                "approval_expires_at": "2025-12-20T16:00:00Z",
+                "risk_level": risk_level,
+                "device_count": len(device_ids),
+                "devices": device_ids,
+                "summary": summary,
+                "status": PlanStatus.PENDING.value,
+            }
+
+    monkeypatch.setattr(wireless_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(wireless_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(wireless_tools, "PlanService", StubPlanService)
+    monkeypatch.setattr(wireless_tools, "check_tool_authorization", lambda **_kwargs: None)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+    wireless_tools.register_wireless_tools(mcp, settings)
+
+    result = await mcp.tools["plan_modify_wireless_ssid"](
+        device_ids=["dev-lab-01"],
+        ssid_id="*1",
+        ssid="NewNetworkName",
+        security_profile="wpa2",
+    )
+
+    assert result["isError"] is False
+    assert "plan created successfully" in result["content"][0]["text"]
+    assert result["_meta"]["plan_id"] == "plan-wireless-modify-001"
+    assert result["_meta"]["risk_level"] == "high"  # Modification is always high risk
+
+
+@pytest.mark.asyncio
+async def test_plan_remove_wireless_ssid_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test successful wireless SSID removal plan."""
+    import routeros_mcp.mcp_tools.wireless as wireless_tools
+    from routeros_mcp.domain.models import PlanStatus
+
+    class FakeDevice:
+        def __init__(self, device_id: str = "dev-lab-01", environment: str = "lab") -> None:
+            self.id = device_id
+            self.name = f"router-{device_id}"
+            self.environment = environment
+            self.allow_professional_workflows = True
+            self.allow_advanced_writes = True
+            self.allow_wireless_writes = True
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_device(self, device_id: str) -> object:
+            return FakeDevice(device_id, "lab")
+
+    class StubPlanService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def create_plan(
+            self,
+            tool_name: str,
+            created_by: str,
+            device_ids: list[str],
+            summary: str,
+            changes: dict,
+            risk_level: str = "medium",
+        ) -> dict:
+            return {
+                "plan_id": "plan-wireless-remove-001",
+                "approval_token": "approve-remove-abc123",
+                "approval_expires_at": "2025-12-20T16:00:00Z",
+                "risk_level": risk_level,
+                "device_count": len(device_ids),
+                "devices": device_ids,
+                "summary": summary,
+                "status": PlanStatus.PENDING.value,
+            }
+
+    monkeypatch.setattr(wireless_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(wireless_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(wireless_tools, "PlanService", StubPlanService)
+    monkeypatch.setattr(wireless_tools, "check_tool_authorization", lambda **_kwargs: None)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+    wireless_tools.register_wireless_tools(mcp, settings)
+
+    result = await mcp.tools["plan_remove_wireless_ssid"](
+        device_ids=["dev-lab-01"],
+        ssid_id="*1",
+    )
+
+    assert result["isError"] is False
+    assert "plan created successfully" in result["content"][0]["text"]
+    assert result["_meta"]["plan_id"] == "plan-wireless-remove-001"
+    assert result["_meta"]["risk_level"] == "high"  # Removal is always high risk
+
+
+@pytest.mark.asyncio
+async def test_apply_wireless_plan_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test successful wireless plan application with health checks."""
+    import routeros_mcp.mcp_tools.wireless as wireless_tools
+    from datetime import datetime, UTC
+
+    class FakeDevice:
+        def __init__(self, device_id: str = "dev-lab-01", environment: str = "lab") -> None:
+            self.id = device_id
+            self.name = f"router-{device_id}"
+            self.environment = environment
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_device(self, device_id: str) -> object:
+            return FakeDevice(device_id, "lab")
+
+        async def get_rest_client(self, device_id: str) -> object:
+            class MockRestClient:
+                async def close(self) -> None:
+                    pass
+            return MockRestClient()
+
+    class StubPlanService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_plan(self, plan_id: str) -> dict:
+            return {
+                "plan_id": plan_id,
+                "status": "pending",
+                "created_by": "test-user",
+                "device_ids": ["dev-lab-01"],
+                "changes": {
+                    "operation": "create_ssid",
+                    "ssid": "TestNetwork",
+                    "approval_expires_at": (datetime.now(UTC).replace(hour=23, minute=59)).isoformat(),
+                    "approval_token_timestamp": datetime.now(UTC).isoformat(),
+                },
+            }
+
+        def validate_approval_token(
+            self, plan_id: str, created_by: str, token: str, expires_at: object, token_timestamp: str
+        ) -> None:
+            pass  # Validation passes
+
+        async def update_plan_status(self, plan_id: str, status: str, updated_by: str) -> None:
+            pass
+
+    class StubWirelessPlanService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def create_wireless_snapshot(
+            self, device_id: str, device_name: str, rest_client: object
+        ) -> dict:
+            return {
+                "snapshot_id": "snap-001",
+                "data": b"compressed_snapshot_data",
+            }
+
+        async def apply_plan(
+            self, device_id: str, device_name: str, operation: str, changes: dict, rest_client: object
+        ) -> dict:
+            return {
+                "status": "success",
+                "device_id": device_id,
+                "message": "Changes applied successfully",
+            }
+
+        async def perform_health_check(self, device_id: str, rest_client: object) -> dict:
+            return {
+                "status": "healthy",
+                "device_id": device_id,
+                "checks": [
+                    {"check": "rest_api_response", "status": "passed"},
+                    {"check": "wireless_access", "status": "passed"},
+                    {"check": "wireless_running", "status": "passed"},
+                ],
+            }
+
+    monkeypatch.setattr(wireless_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(wireless_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(wireless_tools, "PlanService", StubPlanService)
+    monkeypatch.setattr(wireless_tools, "WirelessPlanService", StubWirelessPlanService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+    wireless_tools.register_wireless_tools(mcp, settings)
+
+    result = await mcp.tools["apply_wireless_plan"](
+        plan_id="plan-wireless-001",
+        approval_token="approve-wireless-abc123",
+    )
+
+    assert result["isError"] is False
+    assert "completed" in result["content"][0]["text"]
+    assert result["_meta"]["final_status"] == "completed"
+    assert result["_meta"]["success_count"] == 1
+    assert result["_meta"]["fail_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_apply_wireless_plan_with_rollback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test wireless plan application with health check failure triggers rollback."""
+    import routeros_mcp.mcp_tools.wireless as wireless_tools
+    from datetime import datetime, UTC
+
+    class FakeDevice:
+        def __init__(self, device_id: str = "dev-lab-01", environment: str = "lab") -> None:
+            self.id = device_id
+            self.name = f"router-{device_id}"
+            self.environment = environment
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_device(self, device_id: str) -> object:
+            return FakeDevice(device_id, "lab")
+
+        async def get_rest_client(self, device_id: str) -> object:
+            class MockRestClient:
+                async def close(self) -> None:
+                    pass
+            return MockRestClient()
+
+    class StubPlanService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_plan(self, plan_id: str) -> dict:
+            return {
+                "plan_id": plan_id,
+                "status": "pending",
+                "created_by": "test-user",
+                "device_ids": ["dev-lab-01"],
+                "changes": {
+                    "operation": "create_ssid",
+                    "ssid": "TestNetwork",
+                    "approval_expires_at": (datetime.now(UTC).replace(hour=23, minute=59)).isoformat(),
+                    "approval_token_timestamp": datetime.now(UTC).isoformat(),
+                },
+            }
+
+        def validate_approval_token(
+            self, plan_id: str, created_by: str, token: str, expires_at: object, token_timestamp: str
+        ) -> None:
+            pass
+
+        async def update_plan_status(self, plan_id: str, status: str, updated_by: str) -> None:
+            pass
+
+    class StubWirelessPlanService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def create_wireless_snapshot(
+            self, device_id: str, device_name: str, rest_client: object
+        ) -> dict:
+            return {
+                "snapshot_id": "snap-001",
+                "data": b"compressed_snapshot_data",
+            }
+
+        async def apply_plan(
+            self, device_id: str, device_name: str, operation: str, changes: dict, rest_client: object
+        ) -> dict:
+            return {
+                "status": "success",
+                "device_id": device_id,
+                "message": "Changes applied successfully",
+            }
+
+        async def perform_health_check(self, device_id: str, rest_client: object) -> dict:
+            # Health check fails
+            return {
+                "status": "failed",
+                "device_id": device_id,
+                "checks": [
+                    {"check": "rest_api_response", "status": "failed"},
+                ],
+            }
+
+        async def rollback_from_snapshot(
+            self, device_id: str, snapshot_data: bytes, rest_client: object, operation: str
+        ) -> dict:
+            return {
+                "status": "success",
+                "device_id": device_id,
+                "rollback_actions": ["Restored interface wlan1"],
+            }
+
+    monkeypatch.setattr(wireless_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(wireless_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(wireless_tools, "PlanService", StubPlanService)
+    monkeypatch.setattr(wireless_tools, "WirelessPlanService", StubWirelessPlanService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+    wireless_tools.register_wireless_tools(mcp, settings)
+
+    result = await mcp.tools["apply_wireless_plan"](
+        plan_id="plan-wireless-001",
+        approval_token="approve-wireless-abc123",
+    )
+
+    assert result["isError"] is False
+    assert "finished with errors" in result["content"][0]["text"]
+    assert result["_meta"]["final_status"] == "failed"
+    assert result["_meta"]["success_count"] == 0
+    assert result["_meta"]["fail_count"] == 1
+    # Verify rollback occurred
+    assert "device_results" in result["_meta"]
+    device_result = result["_meta"]["device_results"][0]
+    assert device_result["status"] == "rolled_back"
+    assert "rollback" in device_result
+
+
+@pytest.mark.asyncio
+async def test_plan_modify_wireless_ssid_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test successful wireless SSID modification plan."""
+    import routeros_mcp.mcp_tools.wireless as wireless_tools
+    from routeros_mcp.domain.models import PlanStatus
+
+    class FakeDevice:
+        def __init__(self, device_id: str = "dev-lab-01", environment: str = "lab") -> None:
+            self.id = device_id
+            self.name = f"router-{device_id}"
+            self.environment = environment
+            self.allow_professional_workflows = True
+            self.allow_advanced_writes = True
+            self.allow_wireless_writes = True
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_device(self, device_id: str) -> object:
+            return FakeDevice(device_id, "lab")
+
+    class StubPlanService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def create_plan(
+            self,
+            tool_name: str,
+            created_by: str,
+            device_ids: list[str],
+            summary: str,
+            changes: dict,
+            risk_level: str = "medium",
+        ) -> dict:
+            return {
+                "plan_id": "plan-wireless-modify-001",
+                "approval_token": "approve-modify-abc123",
+                "approval_expires_at": "2025-12-20T16:00:00Z",
+                "risk_level": risk_level,
+                "device_count": len(device_ids),
+                "devices": device_ids,
+                "summary": summary,
+                "status": PlanStatus.PENDING.value,
+            }
+
+    monkeypatch.setattr(wireless_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(wireless_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(wireless_tools, "PlanService", StubPlanService)
+    monkeypatch.setattr(wireless_tools, "check_tool_authorization", lambda **_kwargs: None)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+    wireless_tools.register_wireless_tools(mcp, settings)
+
+    result = await mcp.tools["plan_modify_wireless_ssid"](
+        device_ids=["dev-lab-01"],
+        ssid_id="*1",
+        ssid="NewNetworkName",
+        security_profile="wpa2",
+    )
+
+    assert result["isError"] is False
+    assert "plan created successfully" in result["content"][0]["text"]
+    assert result["_meta"]["plan_id"] == "plan-wireless-modify-001"
+    assert result["_meta"]["risk_level"] == "high"  # Modification is always high risk
+
+
+@pytest.mark.asyncio
+async def test_plan_remove_wireless_ssid_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test successful wireless SSID removal plan."""
+    import routeros_mcp.mcp_tools.wireless as wireless_tools
+    from routeros_mcp.domain.models import PlanStatus
+
+    class FakeDevice:
+        def __init__(self, device_id: str = "dev-lab-01", environment: str = "lab") -> None:
+            self.id = device_id
+            self.name = f"router-{device_id}"
+            self.environment = environment
+            self.allow_professional_workflows = True
+            self.allow_advanced_writes = True
+            self.allow_wireless_writes = True
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_device(self, device_id: str) -> object:
+            return FakeDevice(device_id, "lab")
+
+    class StubPlanService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def create_plan(
+            self,
+            tool_name: str,
+            created_by: str,
+            device_ids: list[str],
+            summary: str,
+            changes: dict,
+            risk_level: str = "medium",
+        ) -> dict:
+            return {
+                "plan_id": "plan-wireless-remove-001",
+                "approval_token": "approve-remove-abc123",
+                "approval_expires_at": "2025-12-20T16:00:00Z",
+                "risk_level": risk_level,
+                "device_count": len(device_ids),
+                "devices": device_ids,
+                "summary": summary,
+                "status": PlanStatus.PENDING.value,
+            }
+
+    monkeypatch.setattr(wireless_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(wireless_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(wireless_tools, "PlanService", StubPlanService)
+    monkeypatch.setattr(wireless_tools, "check_tool_authorization", lambda **_kwargs: None)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+    wireless_tools.register_wireless_tools(mcp, settings)
+
+    result = await mcp.tools["plan_remove_wireless_ssid"](
+        device_ids=["dev-lab-01"],
+        ssid_id="*1",
+    )
+
+    assert result["isError"] is False
+    assert "plan created successfully" in result["content"][0]["text"]
+    assert result["_meta"]["plan_id"] == "plan-wireless-remove-001"
+    assert result["_meta"]["risk_level"] == "high"  # Removal is always high risk
+
+
+@pytest.mark.asyncio
+async def test_apply_wireless_plan_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test successful wireless plan application with health checks."""
+    import routeros_mcp.mcp_tools.wireless as wireless_tools
+    from datetime import datetime, UTC
+
+    class FakeDevice:
+        def __init__(self, device_id: str = "dev-lab-01", environment: str = "lab") -> None:
+            self.id = device_id
+            self.name = f"router-{device_id}"
+            self.environment = environment
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_device(self, device_id: str) -> object:
+            return FakeDevice(device_id, "lab")
+
+        async def get_rest_client(self, device_id: str) -> object:
+            class MockRestClient:
+                async def close(self) -> None:
+                    pass
+            return MockRestClient()
+
+    class StubPlanService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_plan(self, plan_id: str) -> dict:
+            return {
+                "plan_id": plan_id,
+                "status": "pending",
+                "created_by": "test-user",
+                "device_ids": ["dev-lab-01"],
+                "changes": {
+                    "operation": "create_ssid",
+                    "ssid": "TestNetwork",
+                    "approval_expires_at": (datetime.now(UTC).replace(hour=23, minute=59)).isoformat(),
+                    "approval_token_timestamp": datetime.now(UTC).isoformat(),
+                },
+            }
+
+        def validate_approval_token(
+            self, plan_id: str, created_by: str, token: str, expires_at: object, token_timestamp: str
+        ) -> None:
+            pass  # Validation passes
+
+        async def update_plan_status(self, plan_id: str, status: str, updated_by: str) -> None:
+            pass
+
+    class StubWirelessPlanService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def create_wireless_snapshot(
+            self, device_id: str, device_name: str, rest_client: object
+        ) -> dict:
+            return {
+                "snapshot_id": "snap-001",
+                "data": b"compressed_snapshot_data",
+            }
+
+        async def apply_plan(
+            self, device_id: str, device_name: str, operation: str, changes: dict, rest_client: object
+        ) -> dict:
+            return {
+                "status": "success",
+                "device_id": device_id,
+                "message": "Changes applied successfully",
+            }
+
+        async def perform_health_check(self, device_id: str, rest_client: object) -> dict:
+            return {
+                "status": "healthy",
+                "device_id": device_id,
+                "checks": [
+                    {"check": "rest_api_response", "status": "passed"},
+                    {"check": "wireless_access", "status": "passed"},
+                    {"check": "wireless_running", "status": "passed"},
+                ],
+            }
+
+    monkeypatch.setattr(wireless_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(wireless_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(wireless_tools, "PlanService", StubPlanService)
+    monkeypatch.setattr(wireless_tools, "WirelessPlanService", StubWirelessPlanService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+    wireless_tools.register_wireless_tools(mcp, settings)
+
+    result = await mcp.tools["apply_wireless_plan"](
+        plan_id="plan-wireless-001",
+        approval_token="approve-wireless-abc123",
+    )
+
+    assert result["isError"] is False
+    assert "completed" in result["content"][0]["text"]
+    assert result["_meta"]["final_status"] == "completed"
+    assert result["_meta"]["success_count"] == 1
+    assert result["_meta"]["fail_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_apply_wireless_plan_with_rollback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test wireless plan application with health check failure triggers rollback."""
+    import routeros_mcp.mcp_tools.wireless as wireless_tools
+    from datetime import datetime, UTC
+
+    class FakeDevice:
+        def __init__(self, device_id: str = "dev-lab-01", environment: str = "lab") -> None:
+            self.id = device_id
+            self.name = f"router-{device_id}"
+            self.environment = environment
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_device(self, device_id: str) -> object:
+            return FakeDevice(device_id, "lab")
+
+        async def get_rest_client(self, device_id: str) -> object:
+            class MockRestClient:
+                async def close(self) -> None:
+                    pass
+            return MockRestClient()
+
+    class StubPlanService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_plan(self, plan_id: str) -> dict:
+            return {
+                "plan_id": plan_id,
+                "status": "pending",
+                "created_by": "test-user",
+                "device_ids": ["dev-lab-01"],
+                "changes": {
+                    "operation": "create_ssid",
+                    "ssid": "TestNetwork",
+                    "approval_expires_at": (datetime.now(UTC).replace(hour=23, minute=59)).isoformat(),
+                    "approval_token_timestamp": datetime.now(UTC).isoformat(),
+                },
+            }
+
+        def validate_approval_token(
+            self, plan_id: str, created_by: str, token: str, expires_at: object, token_timestamp: str
+        ) -> None:
+            pass
+
+        async def update_plan_status(self, plan_id: str, status: str, updated_by: str) -> None:
+            pass
+
+    class StubWirelessPlanService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def create_wireless_snapshot(
+            self, device_id: str, device_name: str, rest_client: object
+        ) -> dict:
+            return {
+                "snapshot_id": "snap-001",
+                "data": b"compressed_snapshot_data",
+            }
+
+        async def apply_plan(
+            self, device_id: str, device_name: str, operation: str, changes: dict, rest_client: object
+        ) -> dict:
+            return {
+                "status": "success",
+                "device_id": device_id,
+                "message": "Changes applied successfully",
+            }
+
+        async def perform_health_check(self, device_id: str, rest_client: object) -> dict:
+            # Health check fails
+            return {
+                "status": "failed",
+                "device_id": device_id,
+                "checks": [
+                    {"check": "rest_api_response", "status": "failed"},
+                ],
+            }
+
+        async def rollback_from_snapshot(
+            self, device_id: str, snapshot_data: bytes, rest_client: object, operation: str
+        ) -> dict:
+            return {
+                "status": "success",
+                "device_id": device_id,
+                "rollback_actions": ["Restored interface wlan1"],
+            }
+
+    monkeypatch.setattr(wireless_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(wireless_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(wireless_tools, "PlanService", StubPlanService)
+    monkeypatch.setattr(wireless_tools, "WirelessPlanService", StubWirelessPlanService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+    wireless_tools.register_wireless_tools(mcp, settings)
+
+    result = await mcp.tools["apply_wireless_plan"](
+        plan_id="plan-wireless-001",
+        approval_token="approve-wireless-abc123",
+    )
+
+    assert result["isError"] is False
+    assert "finished with errors" in result["content"][0]["text"]
+    assert result["_meta"]["final_status"] == "failed"
+    assert result["_meta"]["success_count"] == 0
+    assert result["_meta"]["fail_count"] == 1
+    # Verify rollback occurred
+    assert "device_results" in result["_meta"]
+    device_result = result["_meta"]["device_results"][0]
+    assert device_result["status"] == "rolled_back"
+    assert "rollback" in device_result
