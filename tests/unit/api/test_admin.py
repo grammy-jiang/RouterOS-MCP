@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 
 from routeros_mcp.api.admin import router
 from routeros_mcp.api.http import create_http_app
-from routeros_mcp.domain.models import PlanStatus
 
 
 @pytest.fixture
