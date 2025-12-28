@@ -317,8 +317,6 @@ async def reject_plan(
             metadata={"rejection_reason": rejection.reason},
         )
 
-        # Commit is handled by plan service
-        
         return JSONResponse(
             content={
                 "message": "Plan rejected successfully",
