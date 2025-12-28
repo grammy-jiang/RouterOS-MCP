@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Add a new RouterOS device to the MCP database (developer utility).
 
+**DEPRECATED**: This script is deprecated. Use the new admin CLI instead:
+
+    python -m routeros_mcp.cli.admin device add --help
+
 Purpose:
     Convenience CLI for quickly registering a device and its REST credential in the
     MCP database using the same config precedence as the main app. Intended for
@@ -120,8 +124,25 @@ async def add_device(
 
 
 def main() -> None:
+    # Print deprecation warning
+    print("=" * 80)
+    print("WARNING: This script is deprecated!")
+    print("=" * 80)
+    print()
+    print("Please use the new admin CLI instead:")
+    print()
+    print("  python -m routeros_mcp.cli.admin device add --help")
+    print()
+    print("Example:")
+    print("  python -m routeros_mcp.cli.admin --config config/lab.yaml device add \\")
+    print("      --id dev-lab-01 --name 'Router Lab 01' \\")
+    print("      --ip 192.168.1.1 --username admin --password secret")
+    print()
+    print("=" * 80)
+    print()
+    
     parser = argparse.ArgumentParser(
-        description="Add a new device to the RouterOS MCP server",
+        description="Add a new device to the RouterOS MCP server (DEPRECATED - use admin CLI)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

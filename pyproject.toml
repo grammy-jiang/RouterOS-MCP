@@ -71,6 +71,9 @@ dependencies = [
     # Security
     "cryptography>=41.0.0",
     "authlib>=1.3.0",
+    
+    # CLI
+    "click>=8.1.0",
 ]
 
 [project.optional-dependencies]
@@ -97,6 +100,7 @@ dev = [
 
 [project.scripts]
 routeros-mcp = "routeros_mcp.main:main"
+routeros-mcp-admin = "routeros_mcp.cli.admin:admin"
 
 [project.urls]
 Homepage = "https://github.com/grammy-jiang/RouterOS-MCP"
