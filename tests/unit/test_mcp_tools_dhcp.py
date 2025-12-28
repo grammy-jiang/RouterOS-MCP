@@ -88,6 +88,10 @@ class TestMCPToolsDHCP(unittest.TestCase):
         mcp = self._register_tools()
         self.assertIn("get_dhcp_server_status", mcp.tools)
         self.assertIn("get_dhcp_leases", mcp.tools)
+        self.assertIn("plan_create_dhcp_pool", mcp.tools)
+        self.assertIn("plan_modify_dhcp_pool", mcp.tools)
+        self.assertIn("plan_remove_dhcp_pool", mcp.tools)
+        self.assertIn("apply_dhcp_plan", mcp.tools)
 
     @patch.object(dhcp_module, "DeviceService")
     @patch.object(dhcp_module, "DHCPService")
