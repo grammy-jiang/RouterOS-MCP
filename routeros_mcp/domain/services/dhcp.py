@@ -867,7 +867,7 @@ class DHCPPlanService:
         device_id: str,
         rest_client: RouterOSRestClient,
         expected_pool_name: str | None = None,
-        timeout_seconds: float = 30.0,  # noqa: ARG002 - reserved for future timeout implementation
+        timeout_seconds: float = 30.0,  # TODO: implement health check timeout handling; currently unused. noqa: ARG002
     ) -> dict[str, Any]:
         """Perform health check after DHCP changes.
 
