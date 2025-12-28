@@ -536,7 +536,7 @@ def plan_approve(ctx: click.Context, plan_id: str, non_interactive: bool) -> Non
             async with session_factory.session() as session:
                 plan_service = PlanService(session, settings)
                 # Use a default admin user sub for CLI operations
-                return await plan_service.approve_plan(plan_id, "admin-cli-user")
+                return await plan_service.approve_plan(plan_id, "admin-cli-user", {})
 
         result = asyncio.run(_approve_plan())
 
