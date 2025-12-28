@@ -140,7 +140,6 @@ def main() -> None:
     print()
     print("=" * 80)
     print()
-    
     parser = argparse.ArgumentParser(
         description="Add a new device to the RouterOS MCP server (DEPRECATED - use admin CLI)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
