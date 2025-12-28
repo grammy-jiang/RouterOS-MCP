@@ -602,13 +602,13 @@ def register_bridge_tools(mcp: FastMCP, settings: Settings) -> None:
                     set(settings.keys())
                     & {"protocol_mode", "stp", "priority", "forward_delay", "max_message_age"}
                 )
-                is_vlan_change = "vlan_filtering" in settings
+                is_vlan_filtering_change = "vlan_filtering" in settings
 
                 risk_level = bridge_plan_service.assess_risk(
                     operation="modify_bridge_settings",
                     device_environment=highest_risk_env,
                     is_stp_change=is_stp_change,
-                    is_vlan_filtering_change=is_vlan_change,
+                    is_vlan_filtering_change=is_vlan_filtering_change,
                 )
 
                 # Generate preview for each device
