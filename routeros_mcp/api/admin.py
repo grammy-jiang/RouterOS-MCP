@@ -99,7 +99,12 @@ async def list_devices(
     try:
         devices = await device_service.list_devices()
 
-        # Convert to JSON-serializable format
+        # Convert to JSON-serializable format with staleness checking
+        from datetime import UTC, datetime, timedelta
+        
+        # Consider devices stale if not seen in 10 minutes
+        stale_threshold = datetime.now(UTC) - timedelta(minutes=10)
+        
         devices_data = [
             {
                 "id": device.id,
@@ -110,7 +115,10 @@ async def list_devices(
                 "tags": device.tags,
                 "capabilities": device.capabilities,
                 "last_seen": device.last_seen.isoformat() if device.last_seen else None,
-                "status": "online" if device.last_seen else "offline",
+                "status": (
+                    "online" if device.last_seen and device.last_seen > stale_threshold 
+                    else "offline"
+                ),
             }
             for device in devices
         ]
@@ -118,10 +126,16 @@ async def list_devices(
         return JSONResponse(content={"devices": devices_data})
 
     except Exception as e:
-        logger.error(f"Error listing devices: {e}", exc_info=True)
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error listing devices: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to list devices",
+            detail=f"Failed to list devices. Correlation ID: {correlation_id}",
         )
 
 
@@ -167,10 +181,16 @@ async def list_plans(
         return JSONResponse(content={"plans": plans_data})
 
     except Exception as e:
-        logger.error(f"Error listing plans: {e}", exc_info=True)
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error listing plans: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to list plans",
+            detail=f"Failed to list plans. Correlation ID: {correlation_id}",
         )
 
 
@@ -221,10 +241,16 @@ async def get_plan_detail(
             detail=str(e),
         )
     except Exception as e:
-        logger.error(f"Error getting plan {plan_id}: {e}", exc_info=True)
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error getting plan {plan_id}: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get plan",
+            detail=f"Failed to get plan. Correlation ID: {correlation_id}",
         )
 
 
@@ -273,10 +299,16 @@ async def approve_plan(
             detail=str(e),
         )
     except Exception as e:
-        logger.error(f"Error approving plan {plan_id}: {e}", exc_info=True)
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error approving plan {plan_id}: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to approve plan",
+            detail=f"Failed to approve plan. Correlation ID: {correlation_id}",
         )
 
 
@@ -330,10 +362,16 @@ async def reject_plan(
             detail=str(e),
         )
     except Exception as e:
-        logger.error(f"Error rejecting plan {plan_id}: {e}", exc_info=True)
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error rejecting plan {plan_id}: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to reject plan",
+            detail=f"Failed to reject plan. Correlation ID: {correlation_id}",
         )
 
 
