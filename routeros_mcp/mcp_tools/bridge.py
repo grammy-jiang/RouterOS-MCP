@@ -777,35 +777,26 @@ def register_bridge_tools(mcp: FastMCP, settings: Settings) -> None:
 
                         # Execute operation (mock for now - would call RouterOS API)
                         # TODO: Implement actual RouterOS API calls for bridge operations
-                        logger.info(f"Executing {operation} on device {device_id}")
+                        logger.info(f"Executing {operation} on device {device_id} (mock only, no RouterOS changes applied)")
 
-                        # Perform health check
-                        bridge_name = plan["changes"].get("bridge_name")
-                        expected_port = None
-                        if operation == "add_bridge_port":
-                            expected_port = plan["changes"].get("interface")
+                        # Since RouterOS API calls are not yet implemented, we cannot reliably
+                        # perform a post-change health check. Mark this operation as not
+                        # executed to avoid reporting false positives.
+                        health_result = {
+                            "status": "skipped",
+                            "reason": (
+                                "Bridge operation was not executed: RouterOS API calls for this "
+                                "operation are not yet implemented"
+                            ),
+                        }
 
-                        health_result = await bridge_plan_service.perform_health_check(
-                            device_id, rest_client, bridge_name=bridge_name, expected_port=expected_port
-                        )
-
-                        if health_result["status"] != "passed":
-                            failed_devices.append(device_id)
-                            device_results.append({
-                                "device_id": device_id,
-                                "status": "failed",
-                                "message": "Health check failed after changes",
-                                "health_check": health_result,
-                            })
-                        else:
-                            successful_devices.append(device_id)
-                            device_results.append({
-                                "device_id": device_id,
-                                "status": "success",
-                                "message": "Bridge operation completed successfully",
-                                "health_check": health_result,
-                            })
-
+                        failed_devices.append(device_id)
+                        device_results.append({
+                            "device_id": device_id,
+                            "status": "not_executed",
+                            "message": "Bridge operation skipped because it is not yet implemented",
+                            "health_check": health_result,
+                        })
                         await rest_client.close()
 
                     except Exception as e:
