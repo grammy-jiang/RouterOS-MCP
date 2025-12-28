@@ -8,11 +8,13 @@ detailed requirements.
 """
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from authlib.integrations.starlette_client import OAuth
 from authlib.jose import jwt
 from authlib.jose.errors import JoseError
@@ -200,6 +202,15 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Mount admin routes
+    from routeros_mcp.api.admin import router as admin_router
+    app.include_router(admin_router)
+
+    # Mount static files
+    static_dir = Path(__file__).parent / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     # Middleware for correlation ID
     @app.middleware("http")
