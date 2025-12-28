@@ -87,7 +87,7 @@
                                 <tbody>
                                     <template x-for="plan in plans.slice(0, 5)" :key="plan.id">
                                         <tr>
-                                            <td x-text="plan.id.substring(0, 8) + '...'"></td>
+                                            <td x-text="(plan.id || '').substring(0, 8) + '...'"></td>
                                             <td>
                                                 <span class="status-badge" :class="'status-' + plan.status" x-text="plan.status"></span>
                                             </td>
