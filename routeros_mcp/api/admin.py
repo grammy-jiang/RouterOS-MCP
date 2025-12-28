@@ -238,7 +238,6 @@ async def approve_plan(
 
     Args:
         plan_id: Plan identifier
-        request: Optional approval request with reason
         user: Current authenticated user (must have admin role)
         plan_service: Plan service dependency
 

@@ -11,6 +11,13 @@ from routeros_mcp.api.admin import router
 from routeros_mcp.api.http import create_http_app
 
 
+def async_gen_mock(return_value):
+    """Create an async generator mock that yields a value."""
+    async def _async_gen():
+        yield return_value
+    return _async_gen
+
+
 @pytest.fixture
 def settings():
     """Create test settings with OIDC disabled."""
@@ -74,21 +81,24 @@ class TestAdminDashboard:
 class TestDevicesList:
     """Tests for device list endpoint."""
 
-    @patch("routeros_mcp.api.admin.get_device_service")
-    def test_list_devices_empty(self, mock_get_service, client, mock_device_service):
+    def test_list_devices_empty(self, app, mock_device_service):
         """Test listing devices when none exist."""
-        mock_get_service.return_value = mock_device_service
+        from routeros_mcp.api.admin import get_device_service
+        
         mock_device_service.list_devices.return_value = []
-
+        app.dependency_overrides[get_device_service] = lambda: async_gen_mock(mock_device_service)()
+        
+        client = TestClient(app)
         response = client.get("/admin/api/devices")
         assert response.status_code == 200
         data = response.json()
         assert "devices" in data
         assert len(data["devices"]) == 0
 
-    @patch("routeros_mcp.api.admin.get_device_service")
-    def test_list_devices_with_data(self, mock_get_service, client, mock_device_service):
+    def test_list_devices_with_data(self, app, mock_device_service):
         """Test listing devices with data."""
+        from routeros_mcp.api.admin import get_device_service
+        
         mock_device = SimpleNamespace(
             id="dev-1",
             name="router-1",
@@ -99,9 +109,10 @@ class TestDevicesList:
             capabilities={"allow_firewall_writes": True},
             last_seen=datetime.now(UTC),
         )
-        mock_get_service.return_value = mock_device_service
         mock_device_service.list_devices.return_value = [mock_device]
+        app.dependency_overrides[get_device_service] = lambda: async_gen_mock(mock_device_service)()
 
+        client = TestClient(app)
         response = client.get("/admin/api/devices")
         assert response.status_code == 200
         data = response.json()
@@ -111,9 +122,10 @@ class TestDevicesList:
         assert data["devices"][0]["environment"] == "lab"
         assert data["devices"][0]["status"] == "online"
 
-    @patch("routeros_mcp.api.admin.get_device_service")
-    def test_list_devices_offline(self, mock_get_service, client, mock_device_service):
+    def test_list_devices_offline(self, app, mock_device_service):
         """Test listing devices with offline status."""
+        from routeros_mcp.api.admin import get_device_service
+        
         mock_device = SimpleNamespace(
             id="dev-2",
             name="router-2",
@@ -124,9 +136,10 @@ class TestDevicesList:
             capabilities={},
             last_seen=None,
         )
-        mock_get_service.return_value = mock_device_service
         mock_device_service.list_devices.return_value = [mock_device]
+        app.dependency_overrides[get_device_service] = lambda: async_gen_mock(mock_device_service)()
 
+        client = TestClient(app)
         response = client.get("/admin/api/devices")
         assert response.status_code == 200
         data = response.json()
@@ -136,21 +149,24 @@ class TestDevicesList:
 class TestPlansList:
     """Tests for plan list endpoint."""
 
-    @patch("routeros_mcp.api.admin.get_plan_service")
-    def test_list_plans_empty(self, mock_get_service, client, mock_plan_service):
+    def test_list_plans_empty(self, app, mock_plan_service):
         """Test listing plans when none exist."""
-        mock_get_service.return_value = mock_plan_service
+        from routeros_mcp.api.admin import get_plan_service
+        
         mock_plan_service.list_plans.return_value = []
+        app.dependency_overrides[get_plan_service] = lambda: async_gen_mock(mock_plan_service)()
 
+        client = TestClient(app)
         response = client.get("/admin/api/plans")
         assert response.status_code == 200
         data = response.json()
         assert "plans" in data
         assert len(data["plans"]) == 0
 
-    @patch("routeros_mcp.api.admin.get_plan_service")
-    def test_list_plans_with_data(self, mock_get_service, client, mock_plan_service):
+    def test_list_plans_with_data(self, app, mock_plan_service):
         """Test listing plans with data."""
+        from routeros_mcp.api.admin import get_plan_service
+        
         now = datetime.now(UTC)
         mock_plan = {
             "id": "plan-1",
@@ -163,9 +179,10 @@ class TestPlansList:
             "approved_by": None,
             "approved_at": None,
         }
-        mock_get_service.return_value = mock_plan_service
         mock_plan_service.list_plans.return_value = [mock_plan]
+        app.dependency_overrides[get_plan_service] = lambda: async_gen_mock(mock_plan_service)()
 
+        client = TestClient(app)
         response = client.get("/admin/api/plans")
         assert response.status_code == 200
         data = response.json()
@@ -173,12 +190,14 @@ class TestPlansList:
         assert data["plans"][0]["id"] == "plan-1"
         assert data["plans"][0]["status"] == "pending"
 
-    @patch("routeros_mcp.api.admin.get_plan_service")
-    def test_list_plans_with_filter(self, mock_get_service, client, mock_plan_service):
+    def test_list_plans_with_filter(self, app, mock_plan_service):
         """Test listing plans with status filter."""
-        mock_get_service.return_value = mock_plan_service
+        from routeros_mcp.api.admin import get_plan_service
+        
         mock_plan_service.list_plans.return_value = []
+        app.dependency_overrides[get_plan_service] = lambda: async_gen_mock(mock_plan_service)()
 
+        client = TestClient(app)
         response = client.get("/admin/api/plans?status_filter=approved")
         assert response.status_code == 200
         mock_plan_service.list_plans.assert_called_once()
@@ -189,9 +208,10 @@ class TestPlansList:
 class TestPlanDetail:
     """Tests for plan detail endpoint."""
 
-    @patch("routeros_mcp.api.admin.get_plan_service")
-    def test_get_plan_detail(self, mock_get_service, client, mock_plan_service):
+    def test_get_plan_detail(self, app, mock_plan_service):
         """Test getting plan detail."""
+        from routeros_mcp.api.admin import get_plan_service
+        
         now = datetime.now(UTC)
         mock_plan = {
             "id": "plan-1",
@@ -207,9 +227,10 @@ class TestPlanDetail:
             "approval_token": None,
             "approval_token_expires_at": None,
         }
-        mock_get_service.return_value = mock_plan_service
         mock_plan_service.get_plan.return_value = mock_plan
+        app.dependency_overrides[get_plan_service] = lambda: async_gen_mock(mock_plan_service)()
 
+        client = TestClient(app)
         response = client.get("/admin/api/plans/plan-1")
         assert response.status_code == 200
         data = response.json()
@@ -217,12 +238,14 @@ class TestPlanDetail:
         assert data["status"] == "pending"
         assert "changes" in data
 
-    @patch("routeros_mcp.api.admin.get_plan_service")
-    def test_get_plan_not_found(self, mock_get_service, client, mock_plan_service):
+    def test_get_plan_not_found(self, app, mock_plan_service):
         """Test getting non-existent plan."""
-        mock_get_service.return_value = mock_plan_service
+        from routeros_mcp.api.admin import get_plan_service
+        
         mock_plan_service.get_plan.side_effect = ValueError("Plan not found")
+        app.dependency_overrides[get_plan_service] = lambda: async_gen_mock(mock_plan_service)()
 
+        client = TestClient(app)
         response = client.get("/admin/api/plans/invalid")
         assert response.status_code == 404
 
@@ -230,46 +253,52 @@ class TestPlanDetail:
 class TestPlanApproval:
     """Tests for plan approval endpoint."""
 
-    @patch("routeros_mcp.api.admin.get_plan_service")
-    def test_approve_plan_success(self, mock_get_service, client, mock_plan_service):
+    def test_approve_plan_success(self, app, mock_plan_service):
         """Test approving a plan successfully."""
+        from routeros_mcp.api.admin import get_plan_service
+        
         now = datetime.now(UTC)
         mock_result = {
             "approval_token": "approve-abc123-xyz",
             "expires_at": now + timedelta(minutes=15),
         }
-        mock_get_service.return_value = mock_plan_service
         mock_plan_service.approve_plan.return_value = mock_result
+        app.dependency_overrides[get_plan_service] = lambda: async_gen_mock(mock_plan_service)()
 
+        client = TestClient(app)
         response = client.post("/admin/api/plans/plan-1/approve", json={})
         assert response.status_code == 200
         data = response.json()
         assert "approval_token" in data
         assert data["approval_token"] == "approve-abc123-xyz"
 
-    @patch("routeros_mcp.api.admin.get_plan_service")
-    def test_approve_plan_invalid_status(self, mock_get_service, client, mock_plan_service):
+    def test_approve_plan_invalid_status(self, app, mock_plan_service):
         """Test approving a plan with invalid status."""
-        mock_get_service.return_value = mock_plan_service
+        from routeros_mcp.api.admin import get_plan_service
+        
         mock_plan_service.approve_plan.side_effect = ValueError("Invalid plan status")
+        app.dependency_overrides[get_plan_service] = lambda: async_gen_mock(mock_plan_service)()
 
+        client = TestClient(app)
         response = client.post("/admin/api/plans/plan-1/approve", json={})
         assert response.status_code == 400
 
-    @patch("routeros_mcp.api.admin.get_current_user")
-    @patch("routeros_mcp.api.admin.get_plan_service")
-    def test_approve_plan_insufficient_permissions(
-        self, mock_get_service, mock_get_user, client, mock_plan_service
-    ):
+    def test_approve_plan_insufficient_permissions(self, app, mock_plan_service):
         """Test approving plan with read-only role."""
-        # Override the dependency to return read-only user
-        mock_get_user.return_value = {
-            "sub": "test-user",
-            "email": "test@example.com",
-            "role": "read_only",
-        }
-        mock_get_service.return_value = mock_plan_service
+        from routeros_mcp.api.admin import get_plan_service, get_current_user_dep
+        
+        # Override the user dependency to return read-only user
+        async def mock_get_user():
+            return {
+                "sub": "test-user",
+                "email": "test@example.com",
+                "role": "read_only",
+            }
+        
+        app.dependency_overrides[get_plan_service] = lambda: async_gen_mock(mock_plan_service)()
+        app.dependency_overrides[get_current_user_dep()] = mock_get_user
 
+        client = TestClient(app)
         response = client.post("/admin/api/plans/plan-1/approve", json={})
         assert response.status_code == 403
 
@@ -277,16 +306,13 @@ class TestPlanApproval:
 class TestPlanRejection:
     """Tests for plan rejection endpoint."""
 
-    @patch("routeros_mcp.api.admin.get_session")
-    @patch("routeros_mcp.api.admin.get_plan_service")
-    def test_reject_plan_success(
-        self, mock_get_service, mock_get_session, client, mock_plan_service
-    ):
+    def test_reject_plan_success(self, app, mock_plan_service):
         """Test rejecting a plan successfully."""
-        mock_session = AsyncMock()
-        mock_get_session.return_value = mock_session
-        mock_get_service.return_value = mock_plan_service
+        from routeros_mcp.api.admin import get_plan_service
+        
+        app.dependency_overrides[get_plan_service] = lambda: async_gen_mock(mock_plan_service)()
 
+        client = TestClient(app)
         response = client.post(
             "/admin/api/plans/plan-1/reject",
             json={"reason": "Not meeting requirements"},
@@ -295,27 +321,33 @@ class TestPlanRejection:
         data = response.json()
         assert "Plan rejected successfully" in data["message"]
 
-    @patch("routeros_mcp.api.admin.get_plan_service")
-    def test_reject_plan_without_reason(self, mock_get_service, client, mock_plan_service):
+    def test_reject_plan_without_reason(self, app, mock_plan_service):
         """Test rejecting plan without reason."""
-        mock_get_service.return_value = mock_plan_service
+        from routeros_mcp.api.admin import get_plan_service
+        
+        app.dependency_overrides[get_plan_service] = lambda: async_gen_mock(mock_plan_service)()
 
+        client = TestClient(app)
         # Missing reason field
         response = client.post("/admin/api/plans/plan-1/reject", json={})
         assert response.status_code == 422  # FastAPI validation error
 
-    @patch("routeros_mcp.api.admin.get_current_user")
-    @patch("routeros_mcp.api.admin.get_plan_service")
-    def test_reject_plan_insufficient_permissions(
-        self, mock_get_service, mock_get_user, client, mock_plan_service
-    ):
+    def test_reject_plan_insufficient_permissions(self, app, mock_plan_service):
         """Test rejecting plan with insufficient permissions."""
-        mock_get_user.return_value = {
-            "sub": "test-user",
-            "email": "test@example.com",
-            "role": "read_only",
-        }
-        mock_get_service.return_value = mock_plan_service
+        from routeros_mcp.api.admin import get_plan_service, get_current_user_dep
+        
+        # Override the user dependency to return read-only user
+        async def mock_get_user():
+            return {
+                "sub": "test-user",
+                "email": "test@example.com",
+                "role": "read_only",
+            }
+        
+        app.dependency_overrides[get_plan_service] = lambda: async_gen_mock(mock_plan_service)()
+        app.dependency_overrides[get_current_user_dep()] = mock_get_user
+
+        client = TestClient(app)
 
         response = client.post(
             "/admin/api/plans/plan-1/reject",
