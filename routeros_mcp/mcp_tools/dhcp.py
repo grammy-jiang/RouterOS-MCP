@@ -797,10 +797,17 @@ def register_dhcp_tools(mcp: FastMCP, settings: Settings) -> None:
                     except Exception as e:
                         logger.error(f"Failed to execute plan on device {device_id}: {e}")
                         failed_devices.append(device_id)
+                        snapshot = snapshots.get(device_id)
+                        if snapshot is not None:
+                            logger.info(
+                                "Using DHCP snapshot for potential rollback on device %s",
+                                device_id,
+                            )
                         device_results.append({
                             "device_id": device_id,
                             "status": "failed",
                             "message": f"Execution failed: {str(e)}",
+                            "rollback_snapshot": snapshot if snapshot is not None else None,
                         })
 
                 # Update plan status
