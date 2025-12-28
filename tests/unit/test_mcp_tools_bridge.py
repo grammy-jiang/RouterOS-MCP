@@ -264,6 +264,259 @@ class TestBridgeTools(unittest.TestCase):
 
         asyncio.run(_run())
 
+    def test_plan_add_bridge_port_registered(self) -> None:
+        """Test that plan_add_bridge_port tool is registered."""
+        mcp = DummyMCP()
+        settings = Settings()
+        bridge_tools.register_bridge_tools(mcp, settings)
+        
+        self.assertIn("plan_add_bridge_port", mcp.tools)
+        self.assertIn("plan_remove_bridge_port", mcp.tools)
+        self.assertIn("plan_modify_bridge_settings", mcp.tools)
+        self.assertIn("apply_bridge_plan", mcp.tools)
+
+
+class TestBridgePlanService(unittest.TestCase):
+    """Tests for BridgePlanService."""
+    
+    def test_validate_bridge_params_add_port_success(self) -> None:
+        """Test successful bridge parameter validation for add port."""
+        from routeros_mcp.domain.services.bridge import BridgePlanService
+        
+        service = BridgePlanService()
+        
+        result = service.validate_bridge_params(
+            bridge_name="bridge-lan",
+            interface="ether2",
+            settings=None,
+            operation="add_bridge_port"
+        )
+        
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["bridge_name"], "bridge-lan")
+        self.assertEqual(result["interface"], "ether2")
+    
+    def test_validate_bridge_params_modify_settings_success(self) -> None:
+        """Test successful bridge parameter validation for modify settings."""
+        from routeros_mcp.domain.services.bridge import BridgePlanService
+        
+        service = BridgePlanService()
+        
+        result = service.validate_bridge_params(
+            bridge_name="bridge-lan",
+            interface=None,
+            settings={"protocol_mode": "rstp", "vlan_filtering": True},
+            operation="modify_bridge_settings"
+        )
+        
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["bridge_name"], "bridge-lan")
+    
+    def test_validate_bridge_params_empty_bridge_name(self) -> None:
+        """Test bridge parameter validation with empty bridge name."""
+        from routeros_mcp.domain.services.bridge import BridgePlanService
+        
+        service = BridgePlanService()
+        
+        with self.assertRaises(ValueError) as context:
+            service.validate_bridge_params(
+                bridge_name="",
+                interface="ether2",
+                settings=None,
+                operation="add_bridge_port"
+            )
+        
+        self.assertIn("Bridge name cannot be empty", str(context.exception))
+    
+    def test_validate_bridge_params_missing_interface_for_add(self) -> None:
+        """Test bridge parameter validation with missing interface for add port."""
+        from routeros_mcp.domain.services.bridge import BridgePlanService
+        
+        service = BridgePlanService()
+        
+        with self.assertRaises(ValueError) as context:
+            service.validate_bridge_params(
+                bridge_name="bridge-lan",
+                interface="",
+                settings=None,
+                operation="add_bridge_port"
+            )
+        
+        self.assertIn("Interface name is required", str(context.exception))
+    
+    def test_validate_bridge_params_invalid_protocol_mode(self) -> None:
+        """Test bridge parameter validation with invalid protocol mode."""
+        from routeros_mcp.domain.services.bridge import BridgePlanService
+        
+        service = BridgePlanService()
+        
+        with self.assertRaises(ValueError) as context:
+            service.validate_bridge_params(
+                bridge_name="bridge-lan",
+                interface=None,
+                settings={"protocol_mode": "invalid"},
+                operation="modify_bridge_settings"
+            )
+        
+        self.assertIn("Invalid protocol_mode", str(context.exception))
+    
+    def test_check_interface_available_success(self) -> None:
+        """Test interface availability check with available interface."""
+        from routeros_mcp.domain.services.bridge import BridgePlanService
+        
+        service = BridgePlanService()
+        
+        existing_ports = [
+            {"interface": "ether1", "bridge": "bridge-lan"},
+        ]
+        
+        result = service.check_interface_available(
+            interface="ether2",
+            existing_ports=existing_ports
+        )
+        
+        self.assertTrue(result["available"])
+    
+    def test_check_interface_available_already_bridged(self) -> None:
+        """Test interface availability check with already bridged interface."""
+        from routeros_mcp.domain.services.bridge import BridgePlanService
+        
+        service = BridgePlanService()
+        
+        existing_ports = [
+            {"interface": "ether2", "bridge": "bridge-lan"},
+        ]
+        
+        with self.assertRaises(ValueError) as context:
+            service.check_interface_available(
+                interface="ether2",
+                existing_ports=existing_ports
+            )
+        
+        self.assertIn("already a member", str(context.exception))
+        self.assertIn("bridge-lan", str(context.exception))
+    
+    def test_check_stp_safety_production_bridge(self) -> None:
+        """Test STP safety check blocks changes on production bridge."""
+        from routeros_mcp.domain.services.bridge import BridgePlanService
+        
+        service = BridgePlanService()
+        
+        with self.assertRaises(ValueError) as context:
+            service.check_stp_safety(
+                bridge_name="bridge-lan",
+                settings={"protocol_mode": "rstp"},
+                device_environment="prod"
+            )
+        
+        self.assertIn("STP/protocol changes are blocked", str(context.exception))
+        self.assertIn("production bridge", str(context.exception))
+    
+    def test_check_stp_safety_lab_environment(self) -> None:
+        """Test STP safety check allows changes on lab bridge."""
+        from routeros_mcp.domain.services.bridge import BridgePlanService
+        
+        service = BridgePlanService()
+        
+        result = service.check_stp_safety(
+            bridge_name="bridge-lan",
+            settings={"protocol_mode": "rstp"},
+            device_environment="lab"
+        )
+        
+        self.assertTrue(result["safe"])
+        self.assertTrue(result["is_stp_change"])
+    
+    def test_check_stp_safety_non_stp_change(self) -> None:
+        """Test STP safety check with non-STP change."""
+        from routeros_mcp.domain.services.bridge import BridgePlanService
+        
+        service = BridgePlanService()
+        
+        result = service.check_stp_safety(
+            bridge_name="bridge-lan",
+            settings={"ageing_time": "10m"},
+            device_environment="prod"
+        )
+        
+        self.assertTrue(result["safe"])
+        self.assertFalse(result["is_stp_change"])
+    
+    def test_assess_risk_production(self) -> None:
+        """Test risk assessment for production environment."""
+        from routeros_mcp.domain.services.bridge import BridgePlanService
+        
+        service = BridgePlanService()
+        
+        risk = service.assess_risk(
+            operation="add_bridge_port",
+            device_environment="prod",
+            is_stp_change=False,
+            is_vlan_filtering_change=False
+        )
+        
+        self.assertEqual(risk, "high")
+    
+    def test_assess_risk_stp_change(self) -> None:
+        """Test risk assessment for STP change."""
+        from routeros_mcp.domain.services.bridge import BridgePlanService
+        
+        service = BridgePlanService()
+        
+        risk = service.assess_risk(
+            operation="modify_bridge_settings",
+            device_environment="lab",
+            is_stp_change=True,
+            is_vlan_filtering_change=False
+        )
+        
+        self.assertEqual(risk, "high")
+    
+    def test_assess_risk_vlan_filtering_change(self) -> None:
+        """Test risk assessment for VLAN filtering change."""
+        from routeros_mcp.domain.services.bridge import BridgePlanService
+        
+        service = BridgePlanService()
+        
+        risk = service.assess_risk(
+            operation="modify_bridge_settings",
+            device_environment="lab",
+            is_stp_change=False,
+            is_vlan_filtering_change=True
+        )
+        
+        self.assertEqual(risk, "high")
+    
+    def test_assess_risk_port_removal(self) -> None:
+        """Test risk assessment for port removal."""
+        from routeros_mcp.domain.services.bridge import BridgePlanService
+        
+        service = BridgePlanService()
+        
+        risk = service.assess_risk(
+            operation="remove_bridge_port",
+            device_environment="lab",
+            is_stp_change=False,
+            is_vlan_filtering_change=False
+        )
+        
+        self.assertEqual(risk, "high")
+    
+    def test_assess_risk_medium(self) -> None:
+        """Test risk assessment for medium risk operation."""
+        from routeros_mcp.domain.services.bridge import BridgePlanService
+        
+        service = BridgePlanService()
+        
+        risk = service.assess_risk(
+            operation="add_bridge_port",
+            device_environment="lab",
+            is_stp_change=False,
+            is_vlan_filtering_change=False
+        )
+        
+        self.assertEqual(risk, "medium")
+
 
 if __name__ == "__main__":
     unittest.main()
