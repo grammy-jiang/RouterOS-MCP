@@ -11,6 +11,7 @@ Complements the MCP tools which are AI-facing.
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -22,12 +23,29 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from routeros_mcp.config import Settings, load_settings_from_file
-from routeros_mcp.domain.models import CredentialCreate, DeviceCreate
+from routeros_mcp.domain.models import (
+    CredentialCreate,
+    DeviceCreate,
+    DeviceUpdate,
+    PlanStatus,
+)
 from routeros_mcp.domain.services.device import DeviceService
 from routeros_mcp.domain.services.plan import PlanService
 from routeros_mcp.infra.db.session import get_session_factory
 
 console = Console()
+
+
+def get_cli_user_sub() -> str:
+    """Get user identifier for CLI operations.
+
+    Uses environment variable ROUTEROS_MCP_CLI_USER if set,
+    otherwise defaults to 'admin-cli-user'.
+
+    Returns:
+        User sub string for audit logging
+    """
+    return os.environ.get("ROUTEROS_MCP_CLI_USER", "admin-cli-user")
 
 
 def load_settings(config_path: str | None) -> Settings:
@@ -342,7 +360,6 @@ def device_update(
             async with session_factory.session() as session:
                 device_service = DeviceService(session, settings)
 
-                from routeros_mcp.domain.models import DeviceUpdate
                 device_update_data = DeviceUpdate(**updates)
 
                 await device_service.update_device(device_id, device_update_data)
@@ -502,7 +519,11 @@ def plan_show(ctx: click.Context, plan_id: str, output_format: str) -> None:
 @click.option("--non-interactive", is_flag=True, help="Non-interactive mode (no prompts)")
 @click.pass_context
 def plan_approve(ctx: click.Context, plan_id: str, non_interactive: bool) -> None:
-    """Approve a plan (admin-only operation)."""
+    """Generate approval token for a plan (admin-only operation).
+
+    Retrieves the approval token that was generated when the plan was created.
+    This token can be used to execute the plan via MCP tools.
+    """
     try:
         settings = load_settings(ctx.obj["config"])
 
@@ -525,22 +546,33 @@ def plan_approve(ctx: click.Context, plan_id: str, non_interactive: bool) -> Non
             console.print(f"Devices: {', '.join(plan_data['device_ids'])}")
             console.print(f"Summary: {plan_data['summary']}\n")
 
-            if not Confirm.ask("Are you sure you want to approve this plan?", default=False):
+            if not Confirm.ask("Do you want to retrieve the approval token for this plan?", default=False):
                 console.print("[yellow]Operation cancelled[/yellow]")
                 return
 
-        async def _approve_plan() -> dict[str, Any]:
+        async def _get_approval_token() -> dict[str, Any]:
             session_factory = get_session_factory(settings)
             await session_factory.init()
 
             async with session_factory.session() as session:
                 plan_service = PlanService(session, settings)
-                # Use a default admin user sub for CLI operations
-                return await plan_service.approve_plan(plan_id, "admin-cli-user", {})
+                plan_data = await plan_service.get_plan(plan_id)
 
-        result = asyncio.run(_approve_plan())
+                # Extract approval token from plan changes
+                approval_token = plan_data['changes'].get('approval_token')
+                approval_expires_at = plan_data['changes'].get('approval_expires_at')
 
-        console.print(f"\n[green]✓[/green] Plan '{plan_id}' approved successfully")
+                if not approval_token:
+                    raise ValueError(f"Plan {plan_id} does not have an approval token")
+
+                return {
+                    'approval_token': approval_token,
+                    'approval_expires_at': approval_expires_at,
+                }
+
+        result = asyncio.run(_get_approval_token())
+
+        console.print(f"\n[green]✓[/green] Approval token retrieved for plan '{plan_id}'")
         console.print(f"\nApproval Token: {result['approval_token']}")
         console.print(f"Expires At: {result['approval_expires_at']}")
         console.print("\n[yellow]Use this token to execute the plan via MCP tools[/yellow]")
@@ -566,12 +598,10 @@ def plan_reject(ctx: click.Context, plan_id: str, reason: str) -> None:
             async with session_factory.session() as session:
                 plan_service = PlanService(session, settings)
                 # Update plan status to cancelled with metadata
-                from routeros_mcp.domain.models import PlanStatus
                 await plan_service.update_plan_status(
                     plan_id,
-                    PlanStatus.CANCELLED,
-                    "admin-cli-user",
-                    {"rejection_reason": reason},
+                    PlanStatus.CANCELLED.value,
+                    get_cli_user_sub(),
                 )
 
         asyncio.run(_reject_plan())

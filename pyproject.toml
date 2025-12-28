@@ -74,6 +74,7 @@ dependencies = [
     
     # CLI
     "click>=8.1.0",
+    "rich>=13.7.0",
 ]
 
 [project.optional-dependencies]
@@ -95,7 +96,6 @@ dev = [
     
     # Development tools
     "ipython>=8.20.0",
-    "rich>=13.7.0",
 ]
 
 [project.scripts]

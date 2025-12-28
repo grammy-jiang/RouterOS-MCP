@@ -529,13 +529,16 @@ class TestPlanCommands:
     def test_plan_approve_non_interactive(
         self, cli_runner, mock_settings, mock_session_factory
     ):
-        """Test plan approval in non-interactive mode."""
+        """Test plan approval token retrieval in non-interactive mode."""
         with patch("routeros_mcp.cli.admin.PlanService") as mock_service_class:
             mock_service = MagicMock()
-            mock_service.approve_plan = AsyncMock(
+            mock_service.get_plan = AsyncMock(
                 return_value={
-                    "approval_token": "approve-abc123-xyz",
-                    "approval_expires_at": "2024-01-15T10:45:00Z",
+                    "plan_id": "plan-12345",
+                    "changes": {
+                        "approval_token": "approve-abc123-xyz",
+                        "approval_expires_at": "2024-01-15T10:45:00Z",
+                    }
                 }
             )
             mock_service_class.return_value = mock_service
@@ -551,7 +554,7 @@ class TestPlanCommands:
             )
 
             assert result.exit_code == 0
-            assert "approved successfully" in result.output
+            assert "Approval token retrieved" in result.output
             assert "approve-abc123-xyz" in result.output
 
     def test_plan_reject_success(
