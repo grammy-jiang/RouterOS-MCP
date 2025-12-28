@@ -334,8 +334,10 @@ class TestFirewallPlanApplyWorkflow(unittest.TestCase):
                     approval_token=approval_token,
                 )
 
-                # Validate apply result - should complete but with rollback
-                self.assertFalse(apply_result["isError"])
+                # Validate apply result - should return error since all devices failed
+                # (even though rollback succeeded)
+                self.assertTrue(apply_result["isError"])
+                self.assertIn("failed", apply_result["content"][0]["text"].lower())
                 
                 apply_meta = apply_result["_meta"]
                 self.assertEqual(apply_meta["plan_id"], plan_id)
@@ -461,6 +463,8 @@ class TestApprovalTokenValidation(unittest.TestCase):
 
                 # Step 2: Simulate time passing beyond token expiration (15 minutes + 1 second)
                 # Modify the plan record to have an expired approval_expires_at
+                from sqlalchemy.orm import attributes
+                
                 async with async_session_maker() as session:
                     stmt = select(Plan).where(Plan.id == plan_id)
                     result = await session.execute(stmt)
@@ -471,6 +475,8 @@ class TestApprovalTokenValidation(unittest.TestCase):
                     # Set expiration to 16 minutes ago
                     expired_time = datetime.now(UTC) - timedelta(minutes=16)
                     plan_record.changes["approval_expires_at"] = expired_time.isoformat()
+                    # Important: Flag the JSON field as modified for SQLAlchemy
+                    attributes.flag_modified(plan_record, "changes")
                     
                     await session.commit()
 

@@ -33,8 +33,8 @@ class MockRouterOSRestClient:
         Args:
             device_id: Device identifier
             rest_error: Error message to raise on REST calls (simulates connectivity failure)
-            health_check_failure: If True, health check returns failed status
-            degraded_health: If True, health check returns degraded status
+            health_check_failure: If True, health check returns failed status (after changes applied)
+            degraded_health: If True, health check returns degraded status (after changes applied)
         """
         self.device_id = device_id
         self.rest_error = rest_error
@@ -51,6 +51,9 @@ class MockRouterOSRestClient:
         self.wireless_interfaces: list[dict[str, Any]] = []
         self.dhcp_servers: list[dict[str, Any]] = []
         self.bridge_ports: list[dict[str, Any]] = []
+        
+        # Track if changes have been applied (to trigger health check failures)
+        self._changes_applied = False
 
     async def get(self, path: str) -> dict[str, Any] | list[dict[str, Any]]:
         """Simulate GET request to RouterOS REST API.
@@ -71,7 +74,9 @@ class MockRouterOSRestClient:
         
         # System resource endpoint (for health checks)
         if path == "/rest/system/resource":
-            if self.health_check_failure:
+            # If changes applied and health check configured to fail, return empty response
+            # This simulates device not responding properly to health check
+            if self._changes_applied and self.health_check_failure:
                 return {}
             return {
                 "cpu-load": 15.5,
@@ -86,8 +91,9 @@ class MockRouterOSRestClient:
         
         # Firewall filter rules endpoint
         if path == "/rest/ip/firewall/filter":
-            if self.health_check_failure:
-                raise Exception("Firewall subsystem unreachable")
+            # Note: We don't fail firewall access even if health check is configured to fail
+            # This allows rollback to work (rollback needs to access firewall rules)
+            # The health check failure is triggered by empty system/resource response above
             if self.degraded_health:
                 # Return partial response for degraded health
                 return []
@@ -133,6 +139,9 @@ class MockRouterOSRestClient:
         
         if self.rest_error:
             raise Exception(self.rest_error)
+        
+        # Mark that changes have been applied
+        self._changes_applied = True
         
         # Firewall rule creation
         if path == "/rest/ip/firewall/filter/add":
