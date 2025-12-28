@@ -27,10 +27,11 @@ def get_current_user_dep():
     return get_current_user
 
 
-def get_session_dep():
+async def get_session_dep():
     """Get database session dependency - import here to avoid namespace pollution."""
     from routeros_mcp.infra.db.session import get_session
-    return get_session()
+    async for session in get_session():
+        yield session
 
 
 async def get_device_service():
