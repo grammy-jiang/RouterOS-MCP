@@ -765,36 +765,33 @@ def register_dhcp_tools(mcp: FastMCP, settings: Settings) -> None:
                         )
                         snapshots[device_id] = snapshot
 
-                        # Execute operation (mock for now - would call RouterOS API)
+                        # Execute operation (currently mocked - RouterOS API calls not implemented)
                         # TODO: Implement actual RouterOS API calls for DHCP operations
-                        logger.info(f"Executing {operation} on device {device_id}")
+                        logger.info(f"Executing {operation} on device {device_id} (mocked execution)")
 
-                        # Perform health check
-                        expected_pool = None
-                        if operation == "create_dhcp_pool":
-                            expected_pool = plan["changes"].get("pool_name")
+                        # Since the DHCP RouterOS operations are not yet implemented, we cannot
+                        # reliably use a health check result as evidence that changes were applied.
+                        # Instead of performing a real health check here (which could pass even
+                        # though no changes were made), we explicitly mark the health check as
+                        # skipped and treat the device execution as not applied.
+                        health_result = {
+                            "status": "skipped",
+                            "reason": (
+                                "DHCP RouterOS API operations are not yet implemented; "
+                                "execution was mocked and no changes were applied to the device."
+                            ),
+                        }
 
-                        health_result = await dhcp_plan_service.perform_health_check(
-                            device_id, rest_client, expected_pool_name=expected_pool
-                        )
-
-                        if health_result["status"] != "passed":
-                            failed_devices.append(device_id)
-                            device_results.append({
-                                "device_id": device_id,
-                                "status": "failed",
-                                "message": "Health check failed after changes",
-                                "health_check": health_result,
-                            })
-                        else:
-                            successful_devices.append(device_id)
-                            device_results.append({
-                                "device_id": device_id,
-                                "status": "success",
-                                "message": "DHCP operation completed successfully",
-                                "health_check": health_result,
-                            })
-
+                        failed_devices.append(device_id)
+                        device_results.append({
+                            "device_id": device_id,
+                            "status": "skipped",
+                            "message": (
+                                "DHCP operation not applied: RouterOS API integration is "
+                                "not yet implemented; execution was mocked."
+                            ),
+                            "health_check": health_result,
+                        })
                         await rest_client.close()
 
                     except Exception as e:
