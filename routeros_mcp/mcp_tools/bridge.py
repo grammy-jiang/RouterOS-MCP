@@ -784,7 +784,7 @@ def register_bridge_tools(mcp: FastMCP, settings: Settings) -> None:
                         expected_port = None
                         if operation == "add_bridge_port":
                             expected_port = plan["changes"].get("interface")
-                        
+
                         health_result = await bridge_plan_service.perform_health_check(
                             device_id, rest_client, bridge_name=bridge_name, expected_port=expected_port
                         )
@@ -802,7 +802,7 @@ def register_bridge_tools(mcp: FastMCP, settings: Settings) -> None:
                             device_results.append({
                                 "device_id": device_id,
                                 "status": "success",
-                                "message": f"Bridge operation completed successfully",
+                                "message": "Bridge operation completed successfully",
                                 "health_check": health_result,
                             })
 

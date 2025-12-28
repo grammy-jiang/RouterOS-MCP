@@ -767,7 +767,7 @@ def register_dhcp_tools(mcp: FastMCP, settings: Settings) -> None:
                         expected_pool = None
                         if operation == "create_dhcp_pool":
                             expected_pool = plan["changes"].get("pool_name")
-                        
+
                         health_result = await dhcp_plan_service.perform_health_check(
                             device_id, rest_client, expected_pool_name=expected_pool
                         )
@@ -785,7 +785,7 @@ def register_dhcp_tools(mcp: FastMCP, settings: Settings) -> None:
                             device_results.append({
                                 "device_id": device_id,
                                 "status": "success",
-                                "message": f"DHCP operation completed successfully",
+                                "message": "DHCP operation completed successfully",
                                 "health_check": health_result,
                             })
 

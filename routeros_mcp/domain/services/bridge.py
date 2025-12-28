@@ -110,7 +110,7 @@ class BridgeService:
                 return bridges
             except Exception as ssh_exc:
                 logger.error(
-                    f"Both REST and SSH bridge listing failed",
+                    "Both REST and SSH bridge listing failed",
                     exc_info=ssh_exc,
                     extra={"device_id": device_id, "rest_error": str(rest_exc)},
                 )
@@ -370,7 +370,7 @@ class BridgeService:
                 return ports
             except Exception as ssh_exc:
                 logger.error(
-                    f"Both REST and SSH bridge port listing failed",
+                    "Both REST and SSH bridge port listing failed",
                     exc_info=ssh_exc,
                     extra={"device_id": device_id, "rest_error": str(rest_exc)},
                 )
@@ -589,7 +589,7 @@ class BridgePlanService:
     # High-risk conditions for risk assessment
     HIGH_RISK_ENVIRONMENTS = ["prod"]  # Production environment
     HIGH_RISK_OPERATIONS = ["modify_bridge_stp", "modify_bridge_vlan_filtering"]
-    
+
     # Production STP protection
     PROTECTED_PRODUCTION_BRIDGES = ["bridge-lan", "bridge-core", "bridge-prod"]
 
@@ -643,7 +643,7 @@ class BridgePlanService:
                         f"Invalid settings: {', '.join(invalid_settings)}. "
                         f"Valid settings: {', '.join(valid_settings)}"
                     )
-                
+
                 # Validate protocol_mode if present
                 if "protocol_mode" in settings:
                     valid_modes = ["none", "stp", "rstp", "mstp"]
@@ -850,13 +850,13 @@ class BridgePlanService:
                 & {"protocol_mode", "stp", "priority", "forward_delay", "max_message_age"}
             )
             is_vlan_change = "vlan_filtering" in (settings or {})
-            
+
             impact = "Medium - bridge settings will be updated"
             if is_stp_change:
                 impact = "High - STP changes can create loops or outages"
             elif is_vlan_change:
                 impact = "High - VLAN filtering affects network segmentation"
-            
+
             preview["preview"] = {
                 "operation": "modify_bridge_settings",
                 "bridge_name": bridge_name,
@@ -892,10 +892,10 @@ class BridgePlanService:
         try:
             # Fetch current bridge configuration
             bridges = await rest_client.get("/rest/interface/bridge")
-            
+
             # Fetch bridge ports
             bridge_ports = await rest_client.get("/rest/interface/bridge/port")
-            
+
             # Fetch bridge VLAN configuration
             bridge_vlans = await rest_client.get("/rest/interface/bridge/vlan")
 
@@ -1000,7 +1000,7 @@ class BridgePlanService:
 
             # Test 2: Verify bridge configuration is accessible
             bridges = await rest_client.get("/rest/interface/bridge")
-            
+
             if bridges is None:
                 return {
                     "status": "failed",
@@ -1035,7 +1035,7 @@ class BridgePlanService:
                     (b for b in bridge_list if b.get("name") == bridge_name),
                     None
                 )
-                
+
                 if target_bridge:
                     is_running = target_bridge.get("running", False)
                     checks.append({
@@ -1043,7 +1043,7 @@ class BridgePlanService:
                         "status": "passed",
                         "message": f"Bridge '{bridge_name}' exists (running={is_running})",
                     })
-                    
+
                     if not is_running:
                         checks.append({
                             "check": "bridge_running",
@@ -1067,12 +1067,12 @@ class BridgePlanService:
             if expected_port and bridge_name:
                 bridge_ports = await rest_client.get("/rest/interface/bridge/port")
                 port_list = bridge_ports if isinstance(bridge_ports, list) else []
-                
+
                 port_exists = any(
                     port.get("interface") == expected_port and port.get("bridge") == bridge_name
                     for port in port_list
                 )
-                
+
                 if port_exists:
                     checks.append({
                         "check": "expected_port_exists",

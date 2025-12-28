@@ -145,7 +145,7 @@ class DHCPService:
                     "address_pool": server.get("address-pool", ""),
                     "disabled": server.get("disabled", False),
                 }
-                
+
                 # Add optional fields if present
                 if "authoritative" in server:
                     server_data["authoritative"] = server.get("authoritative")
@@ -155,7 +155,7 @@ class DHCPService:
                     server_data["lease_script"] = server.get("lease-script")
                 if ".id" in server:
                     server_data["id"] = server.get(".id")
-                
+
                 servers.append(server_data)
 
             return {
@@ -296,7 +296,7 @@ class DHCPService:
         device_id: str,
     ) -> dict[str, Any]:
         """Fetch DHCP leases via REST API.
-        
+
         Filters to active leases only (status=bound).
         """
         client = await self.device_service.get_rest_client(device_id)
@@ -317,7 +317,7 @@ class DHCPService:
                 # Check if lease is active (bound status)
                 status = lease.get("status", "")
                 disabled = lease.get("disabled", False)
-                
+
                 # Only include bound and non-disabled leases
                 if status == "bound" and not disabled:
                     lease_data = {
@@ -328,7 +328,7 @@ class DHCPService:
                         "server": lease.get("server", ""),
                         "status": status,
                     }
-                    
+
                     # Add optional fields
                     if "expires-after" in lease:
                         lease_data["expires_after"] = lease.get("expires-after")
@@ -344,7 +344,7 @@ class DHCPService:
                         lease_data["active_server"] = lease.get("active-server")
                     if ".id" in lease:
                         lease_data["id"] = lease.get(".id")
-                    
+
                     active_leases.append(lease_data)
 
             return {
@@ -360,7 +360,7 @@ class DHCPService:
         device_id: str,
     ) -> dict[str, Any]:
         """Fetch DHCP leases via SSH CLI.
-        
+
         Filters to active leases only (bound status).
         """
         ssh_client = await self.device_service.get_ssh_client(device_id)
@@ -534,7 +534,7 @@ class DHCPPlanService:
         # Validate pool name
         if not pool_name or not pool_name.strip():
             errors.append("Pool name cannot be empty")
-        
+
         # Validate address range format and parse
         if not address_range or "-" not in address_range:
             errors.append(
@@ -546,17 +546,17 @@ class DHCPPlanService:
                 start_str, end_str = address_range.split("-", 1)
                 start_ip = ipaddress.ip_address(start_str.strip())
                 end_ip = ipaddress.ip_address(end_str.strip())
-                
+
                 # Validate range order
                 if start_ip >= end_ip:
                     errors.append(
                         f"Invalid address range: start IP {start_ip} must be less than end IP {end_ip}"
                     )
-                
+
                 # Store parsed IPs for subnet validation
                 range_start = start_ip
                 range_end = end_ip
-                
+
             except ValueError as e:
                 errors.append(f"Invalid IP address in range '{address_range}': {e}")
                 range_start = None
@@ -567,7 +567,7 @@ class DHCPPlanService:
         if gateway:
             try:
                 gateway_ip = ipaddress.ip_address(gateway.strip())
-                
+
                 # Check if gateway is in the same subnet as the address range
                 if range_start and range_end:
                     # Infer subnet from range (common /24 subnet assumption)
@@ -634,12 +634,12 @@ class DHCPPlanService:
             pool_range = pool.get("address_range") or pool.get("addresses", "")
             if not pool_range or "-" not in pool_range:
                 continue
-            
+
             try:
                 pool_start_str, pool_end_str = pool_range.split("-", 1)
                 pool_start = ipaddress.ip_address(pool_start_str.strip())
                 pool_end = ipaddress.ip_address(pool_end_str.strip())
-                
+
                 # Check for overlap: ranges overlap if one starts before the other ends
                 if not (new_end < pool_start or new_start > pool_end):
                     overlapping_pools.append({
@@ -801,10 +801,10 @@ class DHCPPlanService:
         try:
             # Fetch current DHCP server configuration
             dhcp_servers = await rest_client.get("/rest/ip/dhcp-server")
-            
+
             # Fetch DHCP pools
             dhcp_pools = await rest_client.get("/rest/ip/pool")
-            
+
             # Fetch DHCP server networks
             dhcp_networks = await rest_client.get("/rest/ip/dhcp-server/network")
 
@@ -906,7 +906,7 @@ class DHCPPlanService:
 
             # Test 2: Verify DHCP server configuration is accessible
             dhcp_servers = await rest_client.get("/rest/ip/dhcp-server")
-            
+
             if dhcp_servers is None:
                 return {
                     "status": "failed",
@@ -938,11 +938,11 @@ class DHCPPlanService:
             if expected_pool_name:
                 dhcp_pools = await rest_client.get("/rest/ip/pool")
                 pool_list = dhcp_pools if isinstance(dhcp_pools, list) else []
-                
+
                 pool_exists = any(
                     pool.get("name") == expected_pool_name for pool in pool_list
                 )
-                
+
                 if pool_exists:
                     checks.append({
                         "check": "expected_pool_exists",
