@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RouterOS MCP Admin Console</title>
+    <link rel="stylesheet" href="/static/admin.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" integrity="sha384-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" crossorigin="anonymous"></script>
+</head>
+<body>
+    <div x-data="adminApp()" x-init="init()">
+        <!-- Header -->
+        <header class="header">
+            <div class="container">
+                <h1>RouterOS MCP Admin Console</h1>
+                <div class="user-info">
+                    <span x-text="userEmail"></span>
+                    <span class="role-badge" x-text="userRole"></span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="nav">
+            <div class="container">
+                <button 
+                    @click="currentView = 'dashboard'" 
+                    :class="{'active': currentView === 'dashboard'}"
+                    class="nav-button">
+                    Dashboard
+                </button>
+                <button 
+                    @click="currentView = 'devices'" 
+                    :class="{'active': currentView === 'devices'}"
+                    class="nav-button">
+                    Devices
+                </button>
+                <button 
+                    @click="currentView = 'plans'" 
+                    :class="{'active': currentView === 'plans'}"
+                    class="nav-button">
+                    Plans
+                </button>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main">
+            <div class="container">
+                <!-- Dashboard View -->
+                <div x-show="currentView === 'dashboard'" class="view">
+                    <h2>Dashboard</h2>
+                    
+                    <!-- Device Summary -->
+                    <div class="card">
+                        <h3>Device Status Summary</h3>
+                        <div class="stats">
+                            <div class="stat-item">
+                                <div class="stat-value" x-text="devices.length"></div>
+                                <div class="stat-label">Total Devices</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value" x-text="devices.filter(d => d.status === 'online').length"></div>
+                                <div class="stat-label">Online</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value" x-text="devices.filter(d => d.status === 'offline').length"></div>
+                                <div class="stat-label">Offline</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Recent Plans -->
+                    <div class="card">
+                        <h3>Recent Plans</h3>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Status</th>
+                                        <th>Tool</th>
+                                        <th>Created</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="plan in plans.slice(0, 5)" :key="plan.id">
+                                        <tr>
+                                            <td x-text="(plan.id || '').substring(0, 8) + '...'"></td>
+                                            <td>
+                                                <span class="status-badge" :class="'status-' + plan.status" x-text="plan.status"></span>
+                                            </td>
+                                            <td x-text="plan.tool_name"></td>
+                                            <td x-text="formatDate(plan.created_at)"></td>
+                                            <td>
+                                                <button @click="viewPlanDetail(plan.id)" class="btn btn-sm">View</button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Devices View -->
+                <div x-show="currentView === 'devices'" class="view">
+                    <h2>Devices</h2>
+                    <div class="card">
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>IP Address</th>
+                                        <th>Environment</th>
+                                        <th>Status</th>
+                                        <th>Last Seen</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="device in devices" :key="device.id">
+                                        <tr>
+                                            <td x-text="device.name"></td>
+                                            <td x-text="device.management_ip + ':' + device.management_port"></td>
+                                            <td>
+                                                <span class="env-badge" :class="'env-' + device.environment" x-text="device.environment"></span>
+                                            </td>
+                                            <td>
+                                                <span class="status-badge" :class="'status-' + device.status" x-text="device.status"></span>
+                                            </td>
+                                            <td x-text="formatDate(device.last_seen)"></td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Plans View -->
+                <div x-show="currentView === 'plans'" class="view">
+                    <h2>Plans</h2>
+                    
+                    <!-- Filter -->
+                    <div class="card">
+                        <div class="filter-group">
+                            <label>Filter by status:</label>
+                            <select x-model="planFilter" @change="loadPlans()">
+                                <option value="">All</option>
+                                <option value="pending">Pending</option>
+                                <option value="approved">Approved</option>
+                                <option value="executing">Executing</option>
+                                <option value="completed">Completed</option>
+                                <option value="failed">Failed</option>
+                                <option value="cancelled">Cancelled</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Plans List -->
+                    <div class="card">
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Status</th>
+                                        <th>Tool</th>
+                                        <th>Summary</th>
+                                        <th>Created By</th>
+                                        <th>Created</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="plan in plans" :key="plan.id">
+                                        <tr>
+                                            <td x-text="plan.id ? plan.id.substring(0, 8) + '...' : ''"></td>
+                                            <td>
+                                                <span class="status-badge" :class="'status-' + plan.status" x-text="plan.status"></span>
+                                            </td>
+                                            <td x-text="plan.tool_name"></td>
+                                            <td x-text="(plan.summary ?? '').substring(0, 50) + '...'"></td>
+                                            <td x-text="plan.created_by"></td>
+                                            <td x-text="formatDate(plan.created_at)"></td>
+                                            <td>
+                                                <button @click="viewPlanDetail(plan.id)" class="btn btn-sm">View</button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Plan Detail Modal -->
+                <div x-show="showPlanDetail" class="modal" @click.self="showPlanDetail = false">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h3>Plan Details</h3>
+                            <button @click="showPlanDetail = false" class="close-btn">&times;</button>
+                        </div>
+                        <div class="modal-body" x-show="selectedPlan">
+                            <div class="detail-section">
+                                <label>Plan ID:</label>
+                                <span x-text="selectedPlan?.id"></span>
+                            </div>
+                            <div class="detail-section">
+                                <label>Status:</label>
+                                <span class="status-badge" :class="'status-' + selectedPlan?.status" x-text="selectedPlan?.status"></span>
+                            </div>
+                            <div class="detail-section">
+                                <label>Tool:</label>
+                                <span x-text="selectedPlan?.tool_name"></span>
+                            </div>
+                            <div class="detail-section">
+                                <label>Created By:</label>
+                                <span x-text="selectedPlan?.created_by"></span>
+                            </div>
+                            <div class="detail-section">
+                                <label>Created At:</label>
+                                <span x-text="formatDate(selectedPlan?.created_at)"></span>
+                            </div>
+                            <div class="detail-section full-width">
+                                <label>Summary:</label>
+                                <p x-text="selectedPlan?.summary"></p>
+                            </div>
+                            <div class="detail-section full-width">
+                                <label>Target Devices:</label>
+                                <div class="device-list">
+                                    <template x-for="deviceId in selectedPlan?.device_ids" :key="deviceId">
+                                        <span class="device-badge" x-text="deviceId"></span>
+                                    </template>
+                                </div>
+                            </div>
+                            <div class="detail-section full-width">
+                                <label>Changes Preview:</label>
+                                <pre class="code-preview" x-text="formatChanges(selectedPlan?.changes)"></pre>
+                            </div>
+                            <div x-show="selectedPlan?.approval_token" class="detail-section full-width">
+                                <label>Approval Token:</label>
+                                <code class="token" x-text="selectedPlan?.approval_token"></code>
+                                <small>Expires: <span x-text="formatDate(selectedPlan?.approval_token_expires_at)"></span></small>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <template x-if="selectedPlan?.status === 'pending'">
+                                <div>
+                                    <button @click="approvePlan()" class="btn btn-success">Approve</button>
+                                    <button @click="showRejectDialog = true" class="btn btn-danger">Reject</button>
+                                </div>
+                            </template>
+                            <button @click="showPlanDetail = false" class="btn btn-secondary">Close</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Reject Dialog -->
+                <div x-show="showRejectDialog" class="modal" @click.self="showRejectDialog = false">
+                    <div class="modal-content modal-sm">
+                        <div class="modal-header">
+                            <h3>Reject Plan</h3>
+                            <button @click="showRejectDialog = false" class="close-btn">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <label for="reject-reason">Reason for rejection:</label>
+                            <textarea 
+                                id="reject-reason"
+                                x-model="rejectReason" 
+                                rows="4" 
+                                placeholder="Enter reason..."
+                                class="textarea"></textarea>
+                        </div>
+                        <div class="modal-footer">
+                            <button @click="rejectPlan()" class="btn btn-danger">Confirm Rejection</button>
+                            <button @click="showRejectDialog = false" class="btn btn-secondary">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Loading Indicator -->
+                <div x-show="loading" class="loading">
+                    <div class="spinner"></div>
+                    <p>Loading...</p>
+                </div>
+
+                <!-- Error Message -->
+                <div x-show="errorMessage" class="alert alert-error">
+                    <span x-text="errorMessage"></span>
+                    <button @click="errorMessage = ''" class="close-btn">&times;</button>
+                </div>
+
+                <!-- Success Message -->
+                <div x-show="successMessage" class="alert alert-success">
+                    <span x-text="successMessage"></span>
+                    <button @click="successMessage = ''" class="close-btn">&times;</button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/admin.js"></script>
+</body>
+</html>
