@@ -819,7 +819,8 @@ class WirelessPlanService:
                 update_payload = {}
                 if channel:
                     # Note: May need to disable interface first
-                    update_payload["frequency"] = "auto"  # Let RouterOS calculate from channel
+                    # Use the provided channel value directly as the frequency setting.
+                    update_payload["frequency"] = str(channel)
                 if tx_power is not None:
                     update_payload["tx-power"] = tx_power
                     update_payload["tx-power-mode"] = "manual"
