@@ -568,10 +568,10 @@ def plan_reject(ctx: click.Context, plan_id: str, reason: str) -> None:
                 # Update plan status to cancelled with metadata
                 from routeros_mcp.domain.models import PlanStatus
                 await plan_service.update_plan_status(
-                    plan_id=plan_id,
-                    new_status=PlanStatus.CANCELLED,
-                    user_sub="admin-cli-user",
-                    result_meta={"rejection_reason": reason},
+                    plan_id,
+                    PlanStatus.CANCELLED,
+                    "admin-cli-user",
+                    {"rejection_reason": reason},
                 )
 
         asyncio.run(_reject_plan())
