@@ -2073,7 +2073,7 @@ Example: 1.2.3
 
 **Version History:**
 
-- `1.0.0` (2025-01-15): Initial Phase 1 release (46 tools: 23 fundamental, 8 advanced, 9 professional, 6 fallback)
+- `1.0.0` (2025-01-15): Initial Phase 1-3 release (62 tools: 14 fundamental, 21 advanced, 3 professional, 2 diagnostics)
 - `1.1.0` (planned): Phase 2 (add resources + prompts, subscriptions)
 - `1.2.0` (planned): Phase 4 (HTTP transport with OAuth 2.1)
 - `2.0.0` (planned): Breaking changes (if needed for RouterOS API changes)
@@ -2395,18 +2395,18 @@ async def handle_initialize(request: InitializeRequest) -> InitializeResponse:
 
 ### Capability Evolution
 
-**Phase 1 (Completed - v1.0.0):**
+**Phase 1-3 (Completed - v1.0.0):**
 
 ```python
 capabilities = {
-    "tools": {"supported": True},           # 39 tools implemented
+    "tools": {"supported": True},           # 62 tools implemented
     "resources": {"supported": True},       # 12+ resource URIs implemented
     "prompts": {"supported": True}          # 8 prompts implemented
 }
 transport = "stdio"  # Fully functional STDIO transport only
 ```
 
-**Phase 2 (Current - v1.1.0 target):**
+**Phase 4 (Planned - v1.2.0 target):**
 
 ```python
 capabilities = {
@@ -2481,18 +2481,21 @@ async def interface_list(device_id: str) -> list[dict]:
 
 ## Summary and Implementation Checklist
 
-### Phase 1 Status (COMPLETED)
+### Phase 1-3 Status (COMPLETED)
 
 - [x] FastMCP SDK integrated
 - [x] Stdio transport fully implemented with stderr logging
 - [x] JSON-RPC 2.0 error handling compliant
-- [x] 39 tools registered with complete schemas
+- [x] 62 tools registered with complete schemas (14 fundamental, 21 advanced, 3 professional, 2 diagnostics)
 - [x] 12+ resources defined with URI patterns
 - [x] 8 prompts created for common workflows
 - [x] Authorization middleware for all tools
 - [x] Configuration-driven transport selection
+- [x] Admin CLI for device management and plan approval
+- [x] Plan/apply framework with HMAC-signed approval tokens
+- [x] Single-device write operations (firewall, DHCP, bridge, wireless)
 
-### Phase 2 Requirements (HTTP/SSE Transport Completion)
+### Phase 4 Requirements (HTTP/SSE Transport & Multi-Device Coordination)
 
 **Transport Implementation:**
 

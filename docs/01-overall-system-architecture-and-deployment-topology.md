@@ -141,7 +141,7 @@ The MCP service architecture evolves across phases, with careful staging of comp
 
 **What's NOT Included:**
 
-- Write operations (deferred to Phase 3)
+- Write operations (Phase 3 COMPLETED: single-device writes with plan/apply framework)
 - Multi-user support (deferred to Phase 5)
 - CAPsMAN controller configuration changes (write operations)
 - Persistent subscription state across restarts
@@ -154,7 +154,7 @@ The MCP service architecture evolves across phases, with careful staging of comp
 
 ---
 
-### Phase 3: Admin Interface & Single-Device Writes (Plan/Apply)
+### Phase 3: Admin Interface & Single-Device Writes (Plan/Apply) ✅ COMPLETED
 
 **Goal:** Enable single-device advanced writes with mandatory plan/apply guardrails and admin tooling for lab/staging environments
 

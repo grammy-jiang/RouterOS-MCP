@@ -203,7 +203,7 @@ _04 – MCP Tools Interface & JSON Schemas_
 - Keep diagnostics (ping/traceroute/bandwidth-test) deferred to Phase 4
 - Keep SSH key auth and client compatibility modes deferred to Phase 4
 
-**Total Phase 1 tool count: ~39 tools** (14 fundamental + 10 advanced + 8 professional + 6 fallbacks + 1 admin onboarding tool; diagnostics deferred to Phase 4)
+**Total Phase 1-3 tool count: 62 tools** (14 fundamental + 21 advanced + 3 professional + 2 diagnostics [not registered]; firewall, DHCP, bridge, wireless write operations implemented in Phase 3)
 
 **Design principles for tool count:**
 
