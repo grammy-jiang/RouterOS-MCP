@@ -13,12 +13,17 @@ from typing import Any
 
 
 class MockRouterOSRestClient:
-    """Mock RouterOS REST client for Phase 3 e2e tests.
-    
+    """Stateful mock RouterOS REST client for Phase 3 e2e tests.
+
+    This client simulates RouterOS REST interactions and maintains in-memory
+    device configuration state (firewall rules, routes, wireless interfaces,
+    DHCP servers, bridge ports). It records all REST calls for later
+    verification and models post-change health checks used by the e2e tests.
+
     Supports configurable failure modes:
-    - rest_error: Simulate REST API errors
-    - health_check_failure: Simulate health check failures
-    - degraded_health: Simulate degraded device health
+    - rest_error: Simulate REST API errors on any REST call
+    - health_check_failure: Simulate failed health checks after changes are applied
+    - degraded_health: Simulate degraded device health after changes are applied
     """
 
     def __init__(
