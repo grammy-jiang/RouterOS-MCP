@@ -25,7 +25,7 @@ from sqlalchemy import select
 from routeros_mcp.infra.db.models import AuditEvent, Plan
 from routeros_mcp.mcp_tools import firewall_write as firewall_tools
 
-from .e2e_test_utils import DummyMCP, FakeSessionFactory, make_test_settings
+from .e2e_test_utils import DummyMCP, make_test_settings
 from .phase3_test_utils import MockDeviceService, MockRouterOSRestClient, create_mock_device
 
 
