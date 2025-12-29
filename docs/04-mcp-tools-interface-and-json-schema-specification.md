@@ -4,22 +4,26 @@
 
 Define the MCP-facing API—tool taxonomy, capability tiers (fundamental/advanced/professional), input/output JSON schemas, and safety guardrails that map cleanly to RouterOS operations. This document is the contract between MCP clients (including AI tools) and the RouterOS MCP service.
 
-## Phase 1 (current implementation) tool snapshot
+## Phase 1-3 (current implementation) tool snapshot
 
-The running service currently registers **34 tools**. This list is authoritative for Phase 1; the larger catalogs below remain forward-looking. SSH fallback commands used by these tools are documented in [Doc 15](15-mcp-resources-and-prompts-design.md#ssh-commands-used-by-phase-1-resourcestools-reference).
+The running service currently registers **62 tools** across 13 categories. This list is authoritative for Phase 1-3; the larger catalogs below remain forward-looking. SSH fallback commands used by these tools are documented in [Doc 15](15-mcp-resources-and-prompts-design.md#ssh-commands-used-by-phase-1-resourcestools-reference).
 
-- **Platform/health helpers (3):** `echo`, `service_health`, `device_health`
+- **Platform/health helpers (2):** `echo`, `service_health`
 - **Device registry (2):** `list_devices`, `check_connectivity`
 - **System (4):** `get_system_overview`, `get_system_packages`, `get_system_clock`, `set_system_identity` (advanced)
 - **Interface (3):** `list_interfaces`, `get_interface`, `get_interface_stats`
 - **IP addressing (5):** `list_ip_addresses`, `get_ip_address`, `get_arp_table`, `add_secondary_ip_address` (advanced), `remove_secondary_ip_address` (advanced)
 - **DNS / NTP (6):** `get_dns_status`, `get_dns_cache`, `get_ntp_status`, `update_dns_servers` (advanced), `flush_dns_cache` (advanced), `update_ntp_servers` (advanced)
-- **Routing (2):** `get_routing_summary`, `get_route`
+- **Routing (6):** `get_routing_summary`, `get_route`, `plan_add_static_route`, `plan_modify_static_route`, `plan_remove_static_route`, `apply_routing_plan`
 - **Firewall & logs (5):** `list_firewall_filter_rules`, `list_firewall_nat_rules`, `list_firewall_address_lists`, `get_recent_logs`, `get_logging_config`
-- **Firewall write (1):** `update_firewall_address_list` (advanced)
-- **Professional workflow (3):** `config_plan_dns_ntp_rollout`, `config_apply_dns_ntp_rollout`, `config_rollback_plan`
+- **Firewall write (5):** `update_firewall_address_list` (advanced), `plan_add_firewall_rule`, `plan_modify_firewall_rule`, `plan_remove_firewall_rule`, `apply_firewall_plan`
+- **DHCP (6):** `get_dhcp_server_status`, `get_dhcp_leases`, `plan_create_dhcp_pool`, `plan_modify_dhcp_pool`, `plan_remove_dhcp_pool`, `apply_dhcp_plan`
+- **Bridge (6):** `list_bridges`, `get_bridge`, `get_bridge_ports`, `plan_create_bridge`, `plan_modify_bridge_ports`, `apply_bridge_plan`
+- **Wireless (9):** `get_wireless_interfaces`, `get_wireless_clients`, `get_capsman_remote_caps`, `get_capsman_registrations`, `plan_create_wireless_ssid`, `plan_modify_wireless_ssid`, `plan_remove_wireless_ssid`, `plan_wireless_rf_settings`, `apply_wireless_plan`
+- **Config/Plan workflows (3):** `config_plan_dns_ntp_rollout`, `config_apply_dns_ntp_rollout`, `config_rollback_plan`
+- **Diagnostics (2):** `ping`, `traceroute` (implemented but not registered in Phase 1-3; enabled in Phase 4+)
 
-> Diagnostics (`ping`, `traceroute`) are implemented in code but **not registered** in Phase 1-2-3; they will be enabled in Phase 4+ once guardrails are finalized.
+> Diagnostics (`ping`, `traceroute`) are implemented in code but **not registered** in Phase 1-3; they will be enabled in Phase 4+ once guardrails are finalized.
 
 Prompts and resources currently exposed are listed in [Doc 15](15-mcp-resources-and-prompts-design.md#phase-1-current-implementation-snapshot).
 
@@ -3869,7 +3873,7 @@ Tip: Use tags for flexible device grouping (e.g., {"site": "dc1", "role": "edge"
 | `config/plan-address-list-sync`  | Config    | Professional | 4     | N/A (plan step)                       |
 | `config/apply-address-list-sync` | Config    | Professional | 4     | Multiple endpoints                    |
 
-**Total: 46 tools** (23 Phase 1 fundamental [including 6 fallback tools], 9 Phase 2 advanced, 14 Phase 4 professional)
+**Total: 62 tools** (14 Phase 1-3 fundamental [read-only], 21 Phase 3 advanced [single-device writes], 3 Phase 3-4 professional [multi-device workflows], 2 Phase 4 diagnostics)
 
 ---
 
@@ -4623,4 +4627,4 @@ print(f"Success: {result['_meta']['successful']}/{result['_meta']['total_devices
 
 ---
 
-**Document Status**: ✅ Complete with 46 tools (40 core tools + 6 Phase-1 fallback tools for resource compatibility), full JSON-RPC schemas, intent-based descriptions, and phase assignments
+**Document Status**: ✅ Complete with 62 tools (Phase 1-3 implemented: fundamental read-only, advanced single-device writes including firewall/DHCP/bridge/wireless; Phase 4 planned: diagnostics, multi-device coordination), full JSON-RPC schemas, intent-based descriptions, and phase assignments
