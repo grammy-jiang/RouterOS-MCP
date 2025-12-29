@@ -87,7 +87,7 @@ All design decisions for the 1.x line are captured in the [`docs/`](docs/) direc
   - Bridge (6 tools)
   - Wireless (9 tools)
   - Config/Plan (3 tools)
-  - Diagnostics (2 tools)
+- **Diagnostics tools (2 tools, ping + traceroute):** Implemented but intentionally not registered in Phase 1–3; planned for enablement in Phase 4+ per [docs/04-mcp-tools-interface](docs/04-mcp-tools-interface-and-json-schema-specification.md).
 - **12+ Resources (templates + 1 concrete):** Concrete resource `fleet://health-summary` plus templated URIs for device/fleet/plan/audit (e.g., `device://{device_id}/overview`, `plan://{plan_id}/details`)
 - **8 Prompts:** address-list-sync, comprehensive-device-review, device-onboarding, dns-ntp-rollout, fleet-health-review, security-audit, troubleshoot-device, troubleshoot-dns-ntp
 - **Transport:** STDIO fully functional (HTTP/SSE scaffold exists but not wired)
