@@ -78,10 +78,11 @@ class MockRouterOSRestClient:
         
         # System resource endpoint (for health checks)
         if path == "/rest/system/resource":
-            # If changes applied and health check configured to fail, return empty response
-            # This simulates device not responding properly to health check
+            # If changes applied and health check configured to fail, simulate device failure
+            # Real RouterOS devices under stress might return degraded metrics or empty responses
             if self._changes_applied and self.health_check_failure:
-                return {}
+                # Return None to simulate no response (most realistic for connectivity loss)
+                return None
             return {
                 "cpu-load": 15.5,
                 "cpu-count": 4,
