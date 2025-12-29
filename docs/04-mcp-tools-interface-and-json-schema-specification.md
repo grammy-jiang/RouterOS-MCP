@@ -3873,7 +3873,7 @@ Tip: Use tags for flexible device grouping (e.g., {"site": "dc1", "role": "edge"
 | `config/plan-address-list-sync`  | Config    | Professional | 4     | N/A (plan step)                       |
 | `config/apply-address-list-sync` | Config    | Professional | 4     | Multiple endpoints                    |
 
-**Total: 62 tools** (14 Phase 1-3 fundamental [read-only], 21 Phase 3 advanced [single-device writes], 3 Phase 3-4 professional [multi-device workflows], 2 Phase 4 diagnostics)
+**Note:** The table above is a Phase 1–2 REST endpoint snapshot and does **not** list all 62 currently implemented tools (Phase 3 wireless, DHCP, bridge, and additional routing/firewall plan/apply tools are documented in the sections above).
 
 ---
 
