@@ -21,11 +21,12 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from sqlalchemy import select
+from sqlalchemy.orm import attributes
 
 from routeros_mcp.infra.db.models import AuditEvent, Plan
 from routeros_mcp.mcp_tools import firewall_write as firewall_tools
 
-from .e2e_test_utils import DummyMCP, make_test_settings
+from .e2e_test_utils import DummyMCP, RealSessionFactory, make_test_settings
 from .phase3_test_utils import MockDeviceService, MockRouterOSRestClient, create_mock_device
 
 
@@ -96,13 +97,6 @@ class TestFirewallPlanApplyWorkflow(unittest.TestCase):
             mock_device_service = MockDeviceService(mock_devices, mock_rest_clients)
 
             # Create session factory that returns real session
-            class RealSessionFactory:
-                def __init__(self, session_maker: async_sessionmaker) -> None:
-                    self.session_maker = session_maker
-                
-                def session(self) -> AsyncSession:
-                    return self.session_maker()
-
             session_factory = RealSessionFactory(async_session_maker)
 
             with (
@@ -290,13 +284,6 @@ class TestFirewallPlanApplyWorkflow(unittest.TestCase):
             mock_device_service = MockDeviceService(mock_devices, mock_rest_clients)
 
             # Create session factory
-            class RealSessionFactory:
-                def __init__(self, session_maker: async_sessionmaker) -> None:
-                    self.session_maker = session_maker
-                
-                def session(self):
-                    return self.session_maker()
-
             session_factory = RealSessionFactory(async_session_maker)
 
             with (
@@ -427,13 +414,6 @@ class TestApprovalTokenValidation(unittest.TestCase):
             mock_device_service = MockDeviceService(mock_devices, mock_rest_clients)
 
             # Create session factory
-            class RealSessionFactory:
-                def __init__(self, session_maker: async_sessionmaker) -> None:
-                    self.session_maker = session_maker
-                
-                def session(self):
-                    return self.session_maker()
-
             session_factory = RealSessionFactory(async_session_maker)
 
             with (
@@ -463,8 +443,6 @@ class TestApprovalTokenValidation(unittest.TestCase):
 
                 # Step 2: Simulate time passing beyond token expiration (15 minutes + 1 second)
                 # Modify the plan record to have an expired approval_expires_at
-                from sqlalchemy.orm import attributes
-                
                 async with async_session_maker() as session:
                     stmt = select(Plan).where(Plan.id == plan_id)
                     result = await session.execute(stmt)
@@ -549,13 +527,6 @@ class TestCapabilityChecks(unittest.TestCase):
             mock_device_service = MockDeviceService(mock_devices, mock_rest_clients)
 
             # Create session factory
-            class RealSessionFactory:
-                def __init__(self, session_maker: async_sessionmaker) -> None:
-                    self.session_maker = session_maker
-                
-                def session(self):
-                    return self.session_maker()
-
             session_factory = RealSessionFactory(async_session_maker)
 
             with (

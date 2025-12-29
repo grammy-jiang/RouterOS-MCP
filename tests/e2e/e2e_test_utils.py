@@ -9,6 +9,7 @@ from routeros_mcp.config import Settings
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 # Deterministic, valid Fernet key (base64 urlsafe, 32-byte key).
@@ -57,6 +58,30 @@ class FakeSessionFactory:
 
     async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         return None
+
+
+class RealSessionFactory:
+    """Session factory that wraps SQLAlchemy async_sessionmaker for Phase 3 e2e tests.
+    
+    This factory allows Phase 3 tests to use real database sessions with in-memory
+    SQLite while maintaining compatibility with the DatabaseSessionManager interface.
+    """
+
+    def __init__(self, session_maker: "async_sessionmaker") -> None:
+        """Initialize with SQLAlchemy async_sessionmaker.
+        
+        Args:
+            session_maker: SQLAlchemy async_sessionmaker instance
+        """
+        self.session_maker = session_maker
+    
+    def session(self) -> "AsyncSession":
+        """Return async session context manager.
+        
+        Returns:
+            AsyncSession context manager from the session maker
+        """
+        return self.session_maker()
 
 
 @dataclass
