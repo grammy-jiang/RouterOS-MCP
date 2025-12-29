@@ -905,7 +905,7 @@ This design follows official MCP best practices from Anthropic:
 
 **Key Metrics (Phase 1-3)**:
 
-- **62 MCP tools** (14 fundamental, 21 advanced, 3 professional, 2 diagnostics, 2 platform)
+- **62 MCP tools** registered across 13 categories (Platform 2 + Device 2 + System 4 + Interface 3 + IP 5 + DNS/NTP 6 + Routing 6 + Firewall logs 5 + Firewall write 5 + DHCP 6 + Bridge 6 + Wireless 9 + Config 3)
 - **12+ resource URIs** (device, fleet, plan, audit)
 - **8 prompts** for guided workflows
 - **STDIO transport** fully functional
