@@ -2074,8 +2074,8 @@ Example: 1.2.3
 **Version History:**
 
 - `1.0.0` (2025-01-15): Initial Phase 1-3 release (62 tools: 14 fundamental, 21 advanced, 3 professional, 2 diagnostics)
-- `1.1.0` (planned): Phase 2 (add resources + prompts, subscriptions)
-- `1.2.0` (planned): Phase 4 (HTTP transport with OAuth 2.1)
+- `1.1.0` (planned): Phase 4 (HTTP transport + multi-device coordination + subscriptions)
+- `1.2.0` (planned): Security and auth enhancements for HTTP transport (OAuth 2.1)
 - `2.0.0` (planned): Breaking changes (if needed for RouterOS API changes)
 
 ### Version Declaration
