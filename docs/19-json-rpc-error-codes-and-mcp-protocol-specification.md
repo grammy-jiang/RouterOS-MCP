@@ -555,7 +555,7 @@ These extend JSON-RPC for MCP tool operations:
 
 ---
 
-### Plan/Apply Errors (Phase 3+)
+### Plan/Apply Errors (Phase 3 - Implemented)
 
 #### `PLAN_NOT_APPROVED` (-32030)
 
@@ -715,7 +715,7 @@ def raise_forbidden_tier(device: Device, tool_tier: str) -> None:
 | `-32000` to `-32009` | General MCP | Internal, Unauthorized, Forbidden, Not found |
 | `-32010` to `-32019` | Device communication | Unreachable, Auth failed, Device error |
 | `-32020` to `-32029` | Configuration | Invalid config, Unsafe operation |
-| `-32030` to `-32039` | Plan/Apply (Phase 3+) | Not approved, Expired |
+| `-32030` to `-32039` | Plan/Apply (Phase 3 Implemented) | Not approved, Expired |
 
 ### Phase 1 Most Common Errors
 
