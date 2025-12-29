@@ -4,7 +4,7 @@
 
 Define which high-risk operations exist on RouterOS (e.g., reboot, upgrade, reset configuration, interface shutdown on WAN, major routing and firewall changes), how and whether they are exposed via MCP, and what guardrails, approvals, and rollbacks are required to keep usage safe. This document serves as the “safety bible” for adding or changing MCP tools that can impact device reachability or production traffic.
 
-## **Phasing Note**: Phase 2.1 introduces read-only visibility enhancements (CAPsMAN tools, configuration snapshots, user guidance). Phase 3 introduces single-device writes (system identity, DNS/NTP, secondary IPs, limited DHCP/bridge/address-lists) as **single-device, lab/staging-only operations** with mandatory plan/apply workflows. Advanced writes for firewall filter rules, static routes, and wireless RF are deferred to Phase 4+. Multi-device coordination and diagnostics (ping/traceroute/bandwidth-test) are also deferred to Phase 4+. Phase 5 extends to multi-user RBAC and approval workflow engines.
+## **Phasing Note**: Phase 2 introduced read-only visibility enhancements (wireless, DHCP, bridge, CAPsMAN tools). Phase 3 (COMPLETED) introduced single-device writes including system identity, DNS/NTP, secondary IPs, firewall address-lists/rules, DHCP pools, bridge ports, and wireless SSID/RF configuration as **single-device, lab/staging-focused operations** with mandatory plan/apply workflows and HMAC-signed approval tokens. Multi-device coordination and diagnostics (ping/traceroute/bandwidth-test) are deferred to Phase 4+. Phase 5 extends to multi-user RBAC and approval workflow engines.
 
 ## Catalog of high-risk actions (reboot, system upgrade, reset, interface disable on WAN, routing/firewall changes, wireless RF changes)
 

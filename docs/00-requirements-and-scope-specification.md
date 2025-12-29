@@ -52,23 +52,34 @@ This service leverages the three core MCP primitives to provide safe, ergonomic 
 
 - Phase 1 (COMPLETED): Tools + Resources + Prompts + STDIO transport + OS-level security
   - Full local MCP client support (Claude Desktop, VS Code)
-  - 39 tools, 12+ resource URIs, 8 prompts
+  - Core read-only tools (system, interface, IP, routing, firewall logs)
+  - 12+ resource URIs, 8 prompts
   - STDIO transport fully functional
-- Phase 2 (CURRENT): HTTP/SSE transport completion + read-only feature expansion
-  - Complete HTTP/SSE transport implementation (currently scaffold only)
-  - OAuth/OIDC integration for remote access
+- Phase 2 (COMPLETED): Read-only feature expansion
   - Additional read-only tools (wireless, DHCP, bridge visibility)
   - Resource caching and performance optimization
-- Phase 2.1 (EXTENDING PHASE 2): Resource Management & Real-Time Updates
-  - Resource subscriptions (SSE for real-time health monitoring)
-  - Configuration snapshots (read-only backup/audit)
-  - CAPsMAN visibility (read-only controller tools)
-  - User guidance in responses (contextual hints for wireless/CAPsMAN)
-- Phase 3: Admin UI/CLI, single-device advanced writes (DNS/NTP, secondary IPs, address-lists, DHCP, bridge). Diagnostics and SSH key auth postponed to Phase 4.
-- Phase 4: Coordinated multi-device workflows, diagnostics (ping/traceroute/bandwidth-test), SSH key auth/client compatibility, and automated approval tokens.
-- Phase 5: Multi-user RBAC, approval workflow engine, per-user device scopes, enterprise governance & observability.
+  - HTTP/SSE transport documentation complete (implementation scaffold exists)
+- Phase 3 (COMPLETED): Admin CLI & single-device writes
+  - Admin CLI for device management and plan approval
+  - Single-device advanced writes (DNS/NTP, secondary IPs, firewall address-lists, DHCP pools, bridge ports, wireless SSID/RF)
+  - Plan/apply framework with HMAC-signed approval tokens
+  - Automatic rollback on health check failures
+  - Total: 62 tools (14 fundamental, 21 advanced, 3 professional, 2 diagnostics)
+- Phase 4 (PLANNED): HTTP/SSE transport completion + multi-device coordination
+  - Complete HTTP/SSE transport implementation
+  - OAuth/OIDC integration for remote access
+  - Web-based admin UI
+  - Coordinated multi-device workflows
+  - Diagnostics (ping/traceroute/bandwidth-test)
+  - SSH key auth/client compatibility
+  - Automated approval tokens
+- Phase 5 (PLANNED): Multi-user RBAC & enterprise governance
+  - Multi-user role-based access control
+  - Approval workflow engine
+  - Per-user device scopes
+  - Enterprise observability and compliance
 
-This approach ensures local deployments work fully in Phase 1, while Phase 2/2.1 expand read-only visibility and monitoring, Phase 3 enables safe single-device writes, and Phase 4+ handle multi-device and enterprise scenarios.
+This approach ensures local deployments work fully in Phase 1, Phase 2 expands read-only visibility, Phase 3 enables safe single-device writes with admin CLI, and Phase 4+ handle multi-device coordination, HTTP transport, and enterprise scenarios.
 
 ---
 
@@ -192,7 +203,7 @@ _04 – MCP Tools Interface & JSON Schemas_
 - Keep diagnostics (ping/traceroute/bandwidth-test) deferred to Phase 4
 - Keep SSH key auth and client compatibility modes deferred to Phase 4
 
-**Total Phase 1 tool count: ~39 tools** (14 fundamental + 10 advanced + 8 professional + 6 fallbacks + 1 admin onboarding tool; diagnostics deferred to Phase 4)
+**Total Phase 1-3 tool count: 62 tools** (Platform 2 + Device 2 + System 4 + Interface 3 + IP 5 + DNS/NTP 6 + Routing 6 + Firewall logs 5 + Firewall write 5 + DHCP 6 + Bridge 6 + Wireless 9 + Config 3 = 62; diagnostics tools are deferred to Phase 4 and not counted here; firewall, DHCP, bridge, wireless write operations implemented in Phase 3)
 
 **Design principles for tool count:**
 
