@@ -778,14 +778,19 @@ def register_firewall_write_tools(mcp: FastMCP, settings: Settings) -> None:
                     plan_id, plan["created_by"], approval_token, expires_at, token_timestamp
                 )
 
-                # Check plan status
-                if plan["status"] != "pending":
+                # Check plan status and approve if needed
+                if plan["status"] == "pending":
+                    # Approve the plan (validates token and transitions pending → approved)
+                    await plan_service.approve_plan(plan_id, approval_token, DEFAULT_MCP_USER)
+                    # Refresh plan to get updated status
+                    plan = await plan_service.get_plan(plan_id)
+                elif plan["status"] != "approved":
                     raise ValueError(
                         f"Plan cannot be applied from status '{plan['status']}'. "
-                        f"Plan must be in 'pending' status."
+                        f"Plan must be in 'pending' or 'approved' status."
                     )
 
-                # Update plan status to executing
+                # Update plan status to executing (approved → executing transition)
                 await plan_service.update_plan_status(plan_id, "executing", DEFAULT_MCP_USER)
 
                 # Get operation details from plan
