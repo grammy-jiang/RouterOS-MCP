@@ -912,7 +912,7 @@ This design follows official MCP best practices from Anthropic:
 - **HTTP/SSE transport** scaffold exists (Phase 4 completion)
 - **Admin CLI** complete with device management and plan approval
 - **Plan/Apply framework** with HMAC-signed tokens and automatic rollback
-- **24+ design documents** (~60,000 lines) with comprehensive specifications
+- **24+ design documents** (~40,000 lines) with comprehensive specifications
 - **3 security tiers** with OS-level auth (Phase 1) + OAuth 2.1/OIDC (Phase 4)
 - **Test coverage**: 80%+ overall (Phase 1-3), targeting 85% non-core / 95%+ core
 - **Test coverage targets**: at least 85% for non-core modules and at least 95% (ideally 100%) for core modules
