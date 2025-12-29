@@ -2486,7 +2486,7 @@ async def interface_list(device_id: str) -> list[dict]:
 - [x] FastMCP SDK integrated
 - [x] Stdio transport fully implemented with stderr logging
 - [x] JSON-RPC 2.0 error handling compliant
-- [x] 62 tools registered with complete schemas (14 fundamental, 21 advanced, 3 professional, 2 diagnostics)
+- [x] 38 tools registered with complete schemas (14 fundamental, 21 advanced, 3 professional); 2 diagnostics tools defined for later phases
 - [x] 12+ resources defined with URI patterns
 - [x] 8 prompts created for common workflows
 - [x] Authorization middleware for all tools
