@@ -203,7 +203,7 @@ _04 – MCP Tools Interface & JSON Schemas_
 - Keep diagnostics (ping/traceroute/bandwidth-test) deferred to Phase 4
 - Keep SSH key auth and client compatibility modes deferred to Phase 4
 
-**Total Phase 1-3 tool count: 62 tools** (14 fundamental + 21 advanced + 3 professional + 2 diagnostics [not registered]; firewall, DHCP, bridge, wireless write operations implemented in Phase 3)
+**Total Phase 1-3 tool count: 62 tools** (Platform 2 + Device 2 + System 4 + Interface 3 + IP 5 + DNS/NTP 6 + Routing 6 + Firewall logs 5 + Firewall write 5 + DHCP 6 + Bridge 6 + Wireless 9 + Config 3 = 62; diagnostics tools are deferred to Phase 4 and not counted here; firewall, DHCP, bridge, wireless write operations implemented in Phase 3)
 
 **Design principles for tool count:**
 
