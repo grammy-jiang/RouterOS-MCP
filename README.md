@@ -18,16 +18,15 @@ All design decisions for the 1.x line are captured in the [`docs/`](docs/) direc
 
 - ✅ **MCP Protocol Compliant** – Full support for tools, resources, and prompts
 - ✅ **STDIO Transport** – Fully functional local development transport
-- ✅ **39 Tools Implemented** – Fundamental, advanced, and professional tiers
+- ✅ **Core Read-Only Tools** – System, interface, IP, routing, firewall logs
 - ✅ **12+ Resources** – Device, fleet, plan, and audit resources
 - ✅ **8 Prompts** – Guided workflows for common operations
 - ✅ **Role-Based Authorization** – Three tiers (fundamental/advanced/professional)
 - ✅ **Environment Separation** – Lab, staging, production with capability flags
-- ✅ **Plan/Apply Workflows** – Safe multi-device operations with approvals
 - ✅ **Comprehensive Observability** – Structured logging, metrics, tracing
 - ✅ **Test-Driven Development** – 85%+ coverage for non-core, 95%+ for core modules
 
-### Phase 2 (CURRENT - In Progress)
+### Phase 2 (COMPLETED)
 
 - ✅ **HTTP/SSE Transport Documentation** – Production deployment guides complete
   - ✅ Deployment guide with system requirements, SSL/TLS, load balancing
@@ -35,30 +34,60 @@ All design decisions for the 1.x line are captured in the [`docs/`](docs/) direc
   - ✅ Troubleshooting guide for common issues
   - ✅ Python and curl client examples
   - ⚠️ HTTP/SSE transport implementation needs completion (code exists, needs testing)
-- 🔜 **Read-Only Expansion** – Wireless, DHCP, bridge visibility
-  - 6 new read-only tools for network topology
-  - Additional troubleshooting prompts
-- 🔜 **Resource Optimization** – Caching and performance
+- ✅ **Read-Only Expansion** – Wireless, DHCP, bridge visibility
+  - 9 wireless read-only tools (interfaces, clients, CAPsMAN)
+  - 6 DHCP tools (server status, leases, pool management)
+  - 6 bridge tools (topology, port management)
+- ✅ **Resource Optimization** – Caching and performance
   - TTL-based resource cache
   - Cache invalidation on state changes
   - Subscription support
 
-### Phase 3 (Planned)
+### Phase 3 (COMPLETED)
 
-- 🔮 **Admin Interface & Single-Device Writes** – Device management, plan approval UI, credential rotation
-- 🔮 **Single-Device Writes (Lab/Staging)** – System identity, DNS/NTP, secondary IPs, address-lists, DHCP/bridge config (plan/apply framework)
-- 🔮 **Plan/Apply Framework** – Mandatory approvals, dry-run preview, automatic rollback
-- ❌ Firewall filter rule writes, static routes, wireless RF writes deferred to Phase 4+
+- ✅ **Admin CLI Tools** – Device management, plan approval, credential rotation
+  - Device CRUD operations (add, list, update, remove)
+  - Plan approval workflow with HMAC-signed tokens
+  - Connectivity testing (REST + SSH)
+- ✅ **Single-Device Writes (Lab/Staging)** – Safe configuration changes with plan/apply
+  - Firewall management (5 tools: address lists, rules)
+  - DHCP configuration (6 tools: pools, leases)
+  - Bridge management (6 tools: topology, ports)
+  - Wireless configuration (9 tools: SSID, RF settings, CAPsMAN)
+  - System identity, DNS/NTP (10 tools)
+  - IP address management (5 tools)
+- ✅ **Plan/Apply Framework** – HMAC-signed approval tokens, automatic rollback
+  - Token expiration (15 minutes)
+  - State machine validation
+  - Comprehensive audit logging
+  - Health check verification
+- ❌ Web-based admin UI deferred to Phase 4
 - ❌ Diagnostics tools deferred to Phase 4+
 - ❌ SSH key authentication deferred to Phase 4+
 
+### Phase 4 (Planned)
+
 ## Current Implementation Status
 
-### Phase 1 (COMPLETED)
+### Phase 1-3 (COMPLETED)
 
 **MCP Surface:**
 
-- **39 Tools (registered):** Platform helpers (echo, service health), device management, system, interface, IP, DNS/NTP, routing, firewall/logs, firewall write, and professional DNS/NTP rollout workflows
+- **62 Tools (registered):** 
+  - Platform helpers (echo, service health)
+  - Device management (2 tools)
+  - System (4 tools)
+  - Interface (3 tools)
+  - IP (5 tools)
+  - DNS/NTP (6 tools)
+  - Routing (6 tools)
+  - Firewall logs (5 tools)
+  - Firewall write (5 tools)
+  - DHCP (6 tools)
+  - Bridge (6 tools)
+  - Wireless (9 tools)
+  - Config/Plan (3 tools)
+  - Diagnostics (2 tools)
 - **12+ Resources (templates + 1 concrete):** Concrete resource `fleet://health-summary` plus templated URIs for device/fleet/plan/audit (e.g., `device://{device_id}/overview`, `plan://{plan_id}/details`)
 - **8 Prompts:** address-list-sync, comprehensive-device-review, device-onboarding, dns-ntp-rollout, fleet-health-review, security-audit, troubleshoot-device, troubleshoot-dns-ntp
 - **Transport:** STDIO fully functional (HTTP/SSE scaffold exists but not wired)
@@ -68,9 +97,7 @@ All design decisions for the 1.x line are captured in the [`docs/`](docs/) direc
 - Read-only CLI commands (e.g., `/ip/route/print`, `/interface/print`, `/system/package/print`) used when REST data is incomplete
 - Details in [docs/15](docs/15-mcp-resources-and-prompts-design.md#ssh-commands-used-by-phase-1-resourcestools-reference)
 
-### Phase 2 (IN PROGRESS)
-
-**HTTP/SSE Transport Completion:**
+### Phase 2 Remaining Tasks (HTTP/SSE Transport Completion)
 
 - [ ] Add `sse-starlette` dependency
 - [ ] Complete `_process_mcp_request()` integration with FastMCP
@@ -78,20 +105,6 @@ All design decisions for the 1.x line are captured in the [`docs/`](docs/) direc
 - [ ] OAuth/OIDC middleware
 - [ ] Resource subscription via SSE
 - [ ] E2E testing
-
-**Read-Only Expansion:**
-
-- [ ] `wireless/get-interfaces` + `wireless/get-clients`
-- [ ] `dhcp/get-server-status` + `dhcp/get-leases`
-- [ ] `bridge/list-bridges` + `bridge/list-ports`
-- [ ] Wireless/DHCP troubleshooting prompts
-- ⚠️ Diagnostics tools (ping/traceroute/bandwidth-test) deferred to Phase 4
-
-**Resource Optimization:**
-
-- [ ] Resource cache with TTL
-- [ ] Cache invalidation
-- [ ] Performance benchmarking
 
 See [docs/04](docs/04-mcp-tools-interface-and-json-schema-specification.md#phase-1-current-implementation-tool-snapshot) for detailed tool list.
 
@@ -123,16 +136,23 @@ Built on the official **FastMCP SDK** for Python:
 **Fundamental Tier** (read-only):
 
 - System overview, interfaces, IP addresses, DNS/NTP status
-- Routing summaries, logs (bounded), diagnostics (ping/traceroute)
+- Routing summaries, logs (bounded)
+- Wireless interfaces, clients, CAPsMAN status
+- DHCP server status, leases
+- Bridge topology, port listings
+- Diagnostics (ping/traceroute) - Phase 4
 
 **Advanced Tier** (single-device, low-risk writes):
 
 - System identity, interface comments, DNS/NTP (lab/staging)
 - Secondary IPs, MCP-owned address lists
+- DHCP pool management (lab/staging)
+- Bridge port adjustments (lab/staging)
+- Wireless SSID management, RF settings (lab/staging)
 
 **Professional Tier** (multi-device, high-risk):
 
-- Multi-device DNS/NTP rollouts with plan/apply
+- Multi-device DNS/NTP rollouts with plan/apply (Phase 4)
 - Fleet-level health and drift reporting
 - Requires human approval tokens and immutable plans
 
@@ -169,7 +189,7 @@ Foundation and high-level design:
 | [01](docs/01-overall-system-architecture-and-deployment-topology.md)        | Architecture & Deployment  | High-level architecture, Cloudflare Tunnel integration                       |
 | [02](docs/02-security-oauth-integration-and-access-control.md)              | Security & Access Control  | Threat model, OAuth/OIDC, RBAC, device scopes                                |
 | [03](docs/03-routeros-integration-and-platform-constraints-rest-and-ssh.md) | RouterOS Integration       | 41 REST API endpoints, SSH whitelisting, idempotency                         |
-| [04](docs/04-mcp-tools-interface-and-json-schema-specification.md)          | MCP Tools Interface        | 46 tools (40 core + 6 fallback), JSON-RPC schemas, intent-based descriptions |
+| [04](docs/04-mcp-tools-interface-and-json-schema-specification.md)          | MCP Tools Interface        | 62 tools across 13 categories, JSON-RPC schemas, intent-based descriptions |
 | [05](docs/05-domain-model-persistence-and-task-job-model.md)                | Domain Model & Persistence | Business logic, workflows, retention policies                                |
 | [06](docs/06-system-information-and-metrics-collection-module-design.md)    | Metrics Collection         | Endpoint mappings, health thresholds, collection intervals                   |
 | [07](docs/07-device-control-and-high-risk-operations-safeguards.md)         | High-Risk Operations       | Risk catalog, safeguards, governance                                         |
@@ -203,7 +223,7 @@ Detailed implementation guidelines:
 
 All design documents have been enhanced with MCP best practices:
 
-- **Intent-Based Tool Descriptions**: All 46 tools include "Use when" guidance for optimal LLM tool selection
+- **Intent-Based Tool Descriptions**: All 62 tools include "Use when" guidance for optimal LLM tool selection
 - **Resource Metadata**: Comprehensive metadata with token estimation, size hints, and context safety flags
 - **Versioning & Capability Negotiation**: Semantic versioning with backward compatibility rules
 - **LLM-in-the-Loop Testing**: Testing strategy for tool selection accuracy (target: 90%+) and parameter inference (target: 85%+)
@@ -246,20 +266,23 @@ Implementation is organized into phases that reflect increasing capability and r
 - User guidance in responses (contextual hints for wireless/CAPsMAN)
 - All features remain read-only; no write operations
 
-### Phase 3 – Admin Interface & Single-Device Writes
+### Phase 3 – Admin Interface & Single-Device Writes ✅
 
 - System identity/comments, interface descriptions (production-safe)
 - DNS/NTP changes (lab/staging only by default)
 - Secondary IPs on non-management interfaces
-- MCP-owned address-lists (lab/staging)
-- Optional lab-only DHCP/bridge changes
-- Admin UI/CLI for device management
+- Firewall management (address lists, rules)
+- DHCP configuration (pools, leases)
+- Bridge management (topology, ports)
+- Wireless configuration (SSID, RF settings, CAPsMAN)
+- Admin CLI for device management and plan approval
 - Management path protection
-- Plan/apply framework for safe writes
+- Plan/apply framework with HMAC-signed tokens
 
-### Phase 4 – Multi-Device Coordination & Diagnostics
+### Phase 4 – Multi-Device Coordination & Diagnostics (Planned)
 
 - Coordinated multi-device plan/apply with staged rollout
+- Web-based admin UI for device and plan management
 - Diagnostics tools (ping/traceroute/bandwidth-test)
 - SSH key-based authentication
 - Client compatibility modes for legacy RouterOS
@@ -776,7 +799,7 @@ If you are implementing this service:
 
 - Read [docs/02](docs/02-security-oauth-integration-and-access-control.md) (OAuth, RBAC, threat model)
 - Review [docs/03](docs/03-routeros-integration-and-platform-constraints-rest-and-ssh.md) (41 REST endpoints)
-- Study [docs/04](docs/04-mcp-tools-interface-and-json-schema-specification.md) (46 tools with intent-based descriptions)
+- Study [docs/04](docs/04-mcp-tools-interface-and-json-schema-specification.md) (62 tools with intent-based descriptions)
 - Review [docs/15](docs/15-mcp-resources-and-prompts-design.md) (resources & prompts)
 
 ### 2. Use GitHub Copilot Agent for Implementation
@@ -835,7 +858,7 @@ This design follows official MCP best practices from Anthropic:
 
 - **FastMCP SDK**: Zero-boilerplate tool registration with automatic schema generation
 - **Transport Safety**: Stdio (stderr only for logs) and HTTP/SSE with OAuth
-- **Intent-Based Descriptions**: All 46 tools include "Use when" guidance for optimal LLM selection
+- **Intent-Based Descriptions**: All 62 tools include "Use when" guidance for optimal LLM selection
 - **Resource Metadata**: Token estimation, size hints, safe_for_context flags
 - **Error Recovery**: Actionable error messages with recovery strategies
 - **Versioning**: Semantic versioning with capability negotiation
@@ -878,18 +901,20 @@ This design follows official MCP best practices from Anthropic:
 
 ---
 
-Phase 1 Complete, Phase 2 In Progress\*\* - This repository contains a production-ready design specification with 20 comprehensive documents. Phase 1 implementation is complete with 39 tools, 12+ resources, 8 prompts, and full STDIO transport. Phase 2 focuses on HTTP/SSE transport completion and read-only feature expansion.
+**Phase 1-3 Complete, Phase 4 Planned** - This repository contains a production-ready design specification with 24+ comprehensive documents. Phase 1-3 implementation is complete with 62 tools, 12+ resources, 8 prompts, and full STDIO transport. Phase 4 will focus on HTTP/SSE transport completion, web admin UI, and multi-device coordination.
 
-**Key Metrics (Phase 1)**:
+**Key Metrics (Phase 1-3)**:
 
-- **39 MCP tools** (14 fundamental, 10 advanced, 8 professional, 6 fallbacks, 1 admin)
+- **62 MCP tools** (14 fundamental, 21 advanced, 3 professional, 2 diagnostics, 2 platform)
 - **12+ resource URIs** (device, fleet, plan, audit)
 - **8 prompts** for guided workflows
 - **STDIO transport** fully functional
-- **HTTP/SSE transport** scaffold exists (Phase 2 completion)
-- **20 design documents** (~50,000 lines) with comprehensive specifications
-- **3 security tiers** with OS-level auth (Phase 1) + OAuth 2.1/OIDC (Phase 2)
-- **Test coverage**: 80%+ overall (Phase 1), targeting 85% non-core / 95%+ core
+- **HTTP/SSE transport** scaffold exists (Phase 4 completion)
+- **Admin CLI** complete with device management and plan approval
+- **Plan/Apply framework** with HMAC-signed tokens and automatic rollback
+- **24+ design documents** (~60,000 lines) with comprehensive specifications
+- **3 security tiers** with OS-level auth (Phase 1) + OAuth 2.1/OIDC (Phase 4)
+- **Test coverage**: 80%+ overall (Phase 1-3), targeting 85% non-core / 95%+ core
 - **Test coverage targets**: at least 85% for non-core modules and at least 95% (ideally 100%) for core modules
 
 For questions or contributions, please open an issue or discussion on GitHub.
