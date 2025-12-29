@@ -100,7 +100,7 @@ class TestFirewallPlanApplyWorkflow(unittest.TestCase):
                 def __init__(self, session_maker: async_sessionmaker) -> None:
                     self.session_maker = session_maker
                 
-                def session(self):
+                def session(self) -> AsyncSession:
                     return self.session_maker()
 
             session_factory = RealSessionFactory(async_session_maker)
