@@ -828,6 +828,9 @@ async def test_apply_routing_plan_success(monkeypatch: pytest.MonkeyPatch) -> No
         def _validate_approval_token(self, *args, **kwargs) -> None:
             return None
 
+        def validate_approval_token(self, *args, **kwargs) -> None:
+            return None
+
         async def update_plan_status(self, *args, **kwargs) -> None:
             pass
 
@@ -941,6 +944,9 @@ async def test_apply_routing_plan_health_check_failure_triggers_rollback(monkeyp
         def _validate_approval_token(self, *args, **kwargs) -> None:
             return None
 
+        def validate_approval_token(self, *args, **kwargs) -> None:
+            return None
+
         async def update_plan_status(self, *args, **kwargs) -> None:
             pass
 
@@ -1015,6 +1021,9 @@ async def test_apply_routing_plan_invalid_plan_status(monkeypatch: pytest.Monkey
             return fake_plan_service.get_plan.return_value
 
         def _validate_approval_token(self, *args, **kwargs) -> None:
+            return None
+
+        def validate_approval_token(self, *args, **kwargs) -> None:
             return None
 
     monkeypatch.setattr(routing_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
