@@ -7,7 +7,7 @@ See docs/09-operations-deployment-self-update-and-runbook.md for design.
 """
 
 import logging
-from typing import Any, Annotated
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, JSONResponse
