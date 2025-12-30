@@ -930,7 +930,8 @@ class TestFirewallApplyTool(unittest.TestCase):
                     },
                 }
             )
-            fake_plan_service._validate_approval_token = Mock(
+            # validate_approval_token is synchronous in the code, so use Mock not AsyncMock
+            fake_plan_service.validate_approval_token = Mock(
                 side_effect=ValueError("Approval token has expired")
             )
 
