@@ -85,7 +85,7 @@ async def admin_dashboard(
 @router.get("/api/devices")
 async def list_devices(
     user: dict[str, Any] = Depends(get_current_user_dep()),
-    device_service = Depends(get_device_service),
+    device_service: Any = Depends(get_device_service),
 ) -> JSONResponse:
     """Get list of all devices.
 
@@ -143,7 +143,7 @@ async def list_devices(
 async def list_plans(
     status_filter: str | None = None,
     user: dict[str, Any] = Depends(get_current_user_dep()),
-    plan_service = Depends(get_plan_service),
+    plan_service: Any = Depends(get_plan_service),
 ) -> JSONResponse:
     """Get list of plans with optional filtering.
 
@@ -198,7 +198,7 @@ async def list_plans(
 async def get_plan_detail(
     plan_id: str,
     user: dict[str, Any] = Depends(get_current_user_dep()),
-    plan_service = Depends(get_plan_service),
+    plan_service: Any = Depends(get_plan_service),
 ) -> JSONResponse:
     """Get detailed information about a specific plan.
 
@@ -258,7 +258,7 @@ async def get_plan_detail(
 async def approve_plan(
     plan_id: str,
     user: dict[str, Any] = Depends(get_current_user_dep()),
-    plan_service = Depends(get_plan_service),
+    plan_service: Any = Depends(get_plan_service),
 ) -> JSONResponse:
     """Approve a plan and generate approval token.
 
@@ -317,7 +317,7 @@ async def reject_plan(
     plan_id: str,
     rejection: RejectionRequest,
     user: dict[str, Any] = Depends(get_current_user_dep()),
-    plan_service = Depends(get_plan_service),
+    plan_service: Any = Depends(get_plan_service),
 ) -> JSONResponse:
     """Reject a plan with a reason.
 

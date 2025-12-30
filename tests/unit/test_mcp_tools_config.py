@@ -406,7 +406,7 @@ class TestMCPToolsConfig(unittest.TestCase):
                     approved_by="user",
                 )
 
-                self.assertEqual(("plan-123", "applied"), plan_service.status_updates[-1])
+                self.assertEqual(("plan-123", "completed"), plan_service.status_updates[-1])
                 self.assertEqual("success", result["_meta"]["status"])
                 self.assertTrue(dns_service.dns_updates)
                 self.assertTrue(dns_service.ntp_updates)
