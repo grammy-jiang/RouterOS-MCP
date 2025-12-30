@@ -26,6 +26,15 @@ from routeros_mcp.infra.observability.logging import get_correlation_id, set_cor
 logger = logging.getLogger(__name__)
 
 
+def get_settings() -> Settings:  # pragma: no cover
+    """Dependency to get application settings.
+    
+    Returns:
+        Settings instance
+    """
+    return Settings()
+
+
 class OIDCValidator:
     """OIDC token validator for HTTP transport authentication."""
 
@@ -121,14 +130,14 @@ class OIDCValidator:
             )
 
 
-def get_validator(settings: Settings = Depends()) -> OIDCValidator:  # pragma: no cover
+def get_validator(settings: Settings = Depends(get_settings)) -> OIDCValidator:  # pragma: no cover
     """Factory for OIDCValidator with injected settings."""
     return OIDCValidator(settings)
 
 
 async def get_current_user(  # pragma: no cover
     request: Request,
-    settings: Settings = Depends(),
+    settings: Settings = Depends(get_settings),
     validator: OIDCValidator = Depends(get_validator),
 ) -> dict[str, Any]:
     """Extract and validate user from request.
