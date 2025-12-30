@@ -566,6 +566,11 @@ class TestDomainServiceInvalidation:
             software_id="test",
             allow_advanced_writes=True,
             allow_professional_workflows=True,
+            allow_firewall_writes=False,
+            allow_routing_writes=False,
+            allow_wireless_writes=False,
+            allow_dhcp_writes=False,
+            allow_bridge_writes=False,
             created_at=now,
             updated_at=now,
         )
@@ -625,6 +630,11 @@ class TestDomainServiceInvalidation:
             software_id="test",
             allow_advanced_writes=True,
             allow_professional_workflows=True,
+            allow_firewall_writes=False,
+            allow_routing_writes=False,
+            allow_wireless_writes=False,
+            allow_dhcp_writes=False,
+            allow_bridge_writes=False,
             created_at=now,
             updated_at=now,
         )
