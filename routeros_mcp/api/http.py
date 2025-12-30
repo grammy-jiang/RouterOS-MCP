@@ -28,9 +28,9 @@ logger = logging.getLogger(__name__)
 
 def get_settings() -> Settings:  # pragma: no cover
     """Dependency to get application settings.
-    
+
     Returns:
-        Settings instance
+        Settings instance.
     """
     return Settings()
 
