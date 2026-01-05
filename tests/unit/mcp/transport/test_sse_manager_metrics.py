@@ -260,3 +260,177 @@ async def test_resource_pattern_extraction() -> None:
     
     pattern = manager._get_resource_pattern("")
     assert pattern == "unknown"
+
+
+# Phase 4: Additional SSE metrics tests
+@pytest.mark.asyncio
+async def test_sse_events_sent_total_metric() -> None:
+    """Test that sse_events_sent_total metric is recorded with correct labels."""
+    manager = SSEManager(update_batch_interval_seconds=0.05)
+    
+    metric_name = "routeros_mcp_sse_events_sent"
+    
+    # Get initial count
+    initial_count = get_metric_value(
+        metric_name,
+        labels={"resource_type": "health", "device_id": "dev-001"}
+    )
+    
+    # Subscribe and broadcast
+    await manager.subscribe("client-1", "device://dev-001/health")
+    await manager.broadcast(
+        resource_uri="device://dev-001/health",
+        data={"status": "healthy"},
+    )
+    
+    # Wait for debounce
+    await asyncio.sleep(0.15)
+    
+    # Should have recorded 1 event
+    final_count = get_metric_value(
+        metric_name,
+        labels={"resource_type": "health", "device_id": "dev-001"}
+    )
+    assert final_count == initial_count + 1
+
+
+@pytest.mark.asyncio
+async def test_sse_active_connections_metric() -> None:
+    """Test that sse_active_connections metric is tracked correctly."""
+    manager = SSEManager()
+    metric_name = "routeros_mcp_sse_active_connections"
+    
+    initial_count = get_metric_value(metric_name)
+    
+    sub = await manager.subscribe("client-1", "device://dev-001/health")
+    
+    # Start stream
+    stream_started = asyncio.Event()
+    
+    async def consume_stream():
+        async for event in manager.stream_events(sub):
+            stream_started.set()
+            if event["event"] == "connected":
+                await asyncio.sleep(0.1)
+                break
+    
+    stream_task = asyncio.create_task(consume_stream())
+    await asyncio.wait_for(stream_started.wait(), timeout=1.0)
+    await asyncio.sleep(0.05)
+    
+    # Connection should be active
+    current_count = get_metric_value(metric_name)
+    assert current_count == initial_count + 1
+    
+    # Cancel stream
+    stream_task.cancel()
+    try:
+        await stream_task
+    except asyncio.CancelledError:
+        pass
+    
+    await asyncio.sleep(0.1)
+    
+    # Connection should be closed
+    final_count = get_metric_value(metric_name)
+    assert final_count == initial_count
+
+
+@pytest.mark.asyncio
+async def test_sse_active_subscriptions_metric() -> None:
+    """Test that sse_active_subscriptions metric tracks per-resource subscriptions."""
+    manager = SSEManager()
+    metric_name = "routeros_mcp_sse_active_subscriptions"
+    
+    resource_uri = "device://dev-001/health"
+    
+    initial_count = get_metric_value(
+        metric_name,
+        labels={"resource_uri": resource_uri}
+    )
+    
+    # Subscribe
+    sub1 = await manager.subscribe("client-1", resource_uri)
+    
+    # Should have 1 subscription
+    assert get_metric_value(
+        metric_name,
+        labels={"resource_uri": resource_uri}
+    ) == initial_count + 1
+    
+    # Subscribe another client
+    sub2 = await manager.subscribe("client-2", resource_uri)
+    
+    # Should have 2 subscriptions
+    assert get_metric_value(
+        metric_name,
+        labels={"resource_uri": resource_uri}
+    ) == initial_count + 2
+    
+    # Unsubscribe one
+    await manager.unsubscribe(sub1.subscription_id)
+    
+    # Should have 1 subscription
+    assert get_metric_value(
+        metric_name,
+        labels={"resource_uri": resource_uri}
+    ) == initial_count + 1
+    
+    # Unsubscribe the other
+    await manager.unsubscribe(sub2.subscription_id)
+    
+    # Should be back to initial
+    assert get_metric_value(
+        metric_name,
+        labels={"resource_uri": resource_uri}
+    ) == initial_count
+
+
+@pytest.mark.asyncio
+async def test_sse_subscription_errors_total_metric() -> None:
+    """Test that sse_subscription_errors_total metric is recorded for errors."""
+    manager = SSEManager(max_subscriptions_per_device=1)
+    metric_name = "routeros_mcp_sse_subscription_errors"
+    
+    # Test invalid_uri error
+    initial_invalid = get_metric_value(
+        metric_name,
+        labels={"error_type": "invalid_uri"}
+    )
+    
+    with pytest.raises(ValueError, match="not subscribable"):
+        await manager.subscribe("client-1", "device://dev-001/config")
+    
+    assert get_metric_value(
+        metric_name,
+        labels={"error_type": "invalid_uri"}
+    ) == initial_invalid + 1
+    
+    # Test limit_exceeded error
+    initial_limit = get_metric_value(
+        metric_name,
+        labels={"error_type": "limit_exceeded"}
+    )
+    
+    await manager.subscribe("client-1", "device://dev-001/health")
+    
+    with pytest.raises(ValueError, match="limit exceeded"):
+        await manager.subscribe("client-2", "device://dev-001/health")
+    
+    assert get_metric_value(
+        metric_name,
+        labels={"error_type": "limit_exceeded"}
+    ) == initial_limit + 1
+
+
+@pytest.mark.asyncio
+async def test_resource_type_extraction() -> None:
+    """Test that resource type is correctly extracted from URIs."""
+    manager = SSEManager()
+    
+    assert manager._extract_resource_type("device://dev-001/health") == "health"
+    assert manager._extract_resource_type("device://dev-002/config") == "config"
+    assert manager._extract_resource_type("device://dev-003/metrics") == "metrics"
+    assert manager._extract_resource_type("fleet://prod") is None
+    assert manager._extract_resource_type("invalid-uri") is None
+    assert manager._extract_resource_type("") is None

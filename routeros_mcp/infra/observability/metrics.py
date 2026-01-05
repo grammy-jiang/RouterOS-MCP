@@ -280,6 +280,34 @@ resource_notifications_dropped_total = Counter(
     registry=_registry,
 )
 
+# Phase 4: Additional SSE Metrics with granular labels
+sse_events_sent_total = Counter(
+    "routeros_mcp_sse_events_sent_total",
+    "Total number of SSE events sent to clients",
+    ["resource_type", "device_id"],
+    registry=_registry,
+)
+
+sse_active_connections = Gauge(
+    "routeros_mcp_sse_active_connections",
+    "Number of currently active SSE connections",
+    registry=_registry,
+)
+
+sse_active_subscriptions = Gauge(
+    "routeros_mcp_sse_active_subscriptions",
+    "Number of active SSE subscriptions",
+    ["resource_uri"],
+    registry=_registry,
+)
+
+sse_subscription_errors_total = Counter(
+    "routeros_mcp_sse_subscription_errors_total",
+    "Total number of SSE subscription errors",
+    ["error_type"],
+    registry=_registry,
+)
+
 # Authentication/Authorization Metrics
 auth_checks_total = Counter(
     "routeros_mcp_auth_checks_total",
@@ -650,6 +678,53 @@ def record_resource_notification_dropped(
     ).inc()
 
 
+# Phase 4: Additional SSE metrics helpers
+def record_sse_event_sent(resource_type: str, device_id: str) -> None:
+    """Record an SSE event sent to a client.
+
+    Args:
+        resource_type: Type of resource (e.g., "health", "config")
+        device_id: Device identifier
+    """
+    sse_events_sent_total.labels(
+        resource_type=resource_type,
+        device_id=device_id,
+    ).inc()
+
+
+def record_sse_active_connection_start() -> None:
+    """Record when an SSE connection becomes active."""
+    sse_active_connections.inc()
+
+
+def record_sse_active_connection_end() -> None:
+    """Record when an SSE connection ends."""
+    sse_active_connections.dec()
+
+
+def update_sse_active_subscriptions(resource_uri: str, count: int) -> None:
+    """Update active subscription count for a specific resource URI.
+
+    Args:
+        resource_uri: Specific resource URI (e.g., "device://dev-001/health")
+        count: Current number of active subscriptions for this URI
+    """
+    sse_active_subscriptions.labels(
+        resource_uri=resource_uri,
+    ).set(count)
+
+
+def record_sse_subscription_error(error_type: str) -> None:
+    """Record an SSE subscription error.
+
+    Args:
+        error_type: Type of error (e.g., "limit_exceeded", "invalid_uri", "timeout")
+    """
+    sse_subscription_errors_total.labels(
+        error_type=error_type,
+    ).inc()
+
+
 __all__ = [
     "get_registry",
     "get_metrics_text",
@@ -675,4 +750,10 @@ __all__ = [
     "update_resource_subscriptions",
     "record_resource_notification",
     "record_resource_notification_dropped",
+    # Phase 4: Additional SSE metrics
+    "record_sse_event_sent",
+    "record_sse_active_connection_start",
+    "record_sse_active_connection_end",
+    "update_sse_active_subscriptions",
+    "record_sse_subscription_error",
 ]

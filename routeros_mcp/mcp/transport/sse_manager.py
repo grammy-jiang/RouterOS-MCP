@@ -155,6 +155,8 @@ class SSEManager:
         async with self._subscription_lock:
             # Validate resource URI is subscribable (Phase 4: only device health)
             if not self._is_subscribable(resource_uri):
+                # Record subscription error
+                metrics.record_sse_subscription_error(error_type="invalid_uri")
                 raise ValueError(
                     f"Resource URI '{resource_uri}' is not subscribable. "
                     "In Phase 4, only 'device://<device_id>/health' resources support subscriptions."
@@ -170,6 +172,8 @@ class SSEManager:
                 )
 
                 if device_subscriptions >= self.max_subscriptions_per_device:
+                    # Record subscription error
+                    metrics.record_sse_subscription_error(error_type="limit_exceeded")
                     raise ValueError(
                         f"Subscription limit exceeded for device {device_id}: "
                         f"{device_subscriptions} active (max: {self.max_subscriptions_per_device})"
@@ -190,6 +194,9 @@ class SSEManager:
             resource_pattern = self._get_resource_pattern(resource_uri)
             self._resource_patterns[resource_uri] = resource_pattern
             self._update_subscription_metrics(resource_pattern)
+            
+            # Phase 4: Update per-resource subscription count
+            self._update_sse_active_subscriptions(resource_uri)
             
             # Start periodic health updates if this is a health resource and first subscriber
             if self._is_health_resource(resource_uri):
@@ -254,6 +261,9 @@ class SSEManager:
                 )
 
         self._update_subscription_metrics(resource_pattern)
+        
+        # Phase 4: Update per-resource subscription count
+        self._update_sse_active_subscriptions(resource_uri)
 
         # Remove from client tracking
         self._subscriptions_by_client[subscription.client_id].discard(subscription_id)
@@ -370,6 +380,16 @@ class SSEManager:
                 resource_notifications_total.labels(
                     resource_uri_pattern=resource_pattern,
                 ).inc(sent_count)
+                
+                # Phase 4: Record events sent with resource_type and device_id
+                device_id = self._extract_device_id(resource_uri)
+                resource_type = self._extract_resource_type(resource_uri)
+                if device_id and resource_type:
+                    for _ in range(sent_count):
+                        metrics.record_sse_event_sent(
+                            resource_type=resource_type,
+                            device_id=device_id,
+                        )
 
             logger.info(
                 "Broadcast event to subscribers",
@@ -405,8 +425,10 @@ class SSEManager:
         Yields:
             Event dictionaries with 'event' and 'data' keys
         """
-        # Record SSE connection start
+        # Record SSE connection start (existing Phase 2.1 metric)
         metrics.record_sse_connection_start()
+        # Phase 4: Record active connection
+        metrics.record_sse_active_connection_start()
         connection_start_time = datetime.now(UTC)
         
         try:
@@ -446,6 +468,8 @@ class SSEManager:
                     if self.client_timeout_seconds > 0:
                         inactive_seconds = (now - subscription.last_activity).total_seconds()
                         if inactive_seconds > self.client_timeout_seconds:
+                            # Phase 4: Record timeout error
+                            metrics.record_sse_subscription_error(error_type="timeout")
                             logger.warning(
                                 "Client timeout, closing subscription",
                                 extra={
@@ -462,9 +486,11 @@ class SSEManager:
             )
             raise
         finally:
-            # Record SSE connection end with duration
+            # Record SSE connection end with duration (existing Phase 2.1 metric)
             connection_duration = (datetime.now(UTC) - connection_start_time).total_seconds()
             metrics.record_sse_connection_end(duration=connection_duration)
+            # Phase 4: Record active connection end
+            metrics.record_sse_active_connection_end()
             
             # Cleanup subscription on disconnect
             await self.unsubscribe(subscription.subscription_id)
@@ -554,6 +580,26 @@ class SSEManager:
         return None
 
     @staticmethod
+    def _extract_resource_type(resource_uri: str) -> str | None:
+        """Extract resource type from resource URI.
+
+        Args:
+            resource_uri: Resource URI (e.g., "device://dev-001/health")
+
+        Returns:
+            Resource type (e.g., "health", "config") or None if not extractable
+        """
+        if not resource_uri.startswith("device://"):
+            return None
+
+        # Parse device://dev-001/health -> health
+        parts = resource_uri.split("/")
+        if len(parts) >= 4 and parts[3]:
+            return parts[3]
+
+        return None
+
+    @staticmethod
     def _get_resource_pattern(resource_uri: str) -> str:
         """Get resource URI pattern for metrics (generalized form).
 
@@ -595,6 +641,18 @@ class SSEManager:
         metrics.update_resource_subscriptions(
             resource_uri_pattern=resource_pattern,
             count=total_count,
+        )
+
+    def _update_sse_active_subscriptions(self, resource_uri: str) -> None:
+        """Update Phase 4 per-resource subscription count metric.
+        
+        Args:
+            resource_uri: Specific resource URI (e.g., "device://dev-001/health")
+        """
+        count = len(self._subscriptions_by_resource.get(resource_uri, set()))
+        metrics.update_sse_active_subscriptions(
+            resource_uri=resource_uri,
+            count=count,
         )
 
     def _get_pattern_subscription_count(self, resource_pattern: str) -> int:
