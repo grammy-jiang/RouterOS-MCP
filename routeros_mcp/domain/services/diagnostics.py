@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # Safety limits
 MAX_PING_COUNT = 10
-MAX_TRACEROUTE_HOPS = 30
+MAX_TRACEROUTE_HOPS = 64  # Updated to match requirement (1-64)
 MAX_TRACEROUTE_COUNT = 3
 
 
@@ -306,13 +306,24 @@ class DiagnosticsService:
         device_id: str,
         address: str,
         count: int = 1,
+        max_hops: int = 30,
     ) -> dict[str, Any]:
-        """Run traceroute to show network path with REST→SSH fallback."""
+        """Run traceroute to show network path with REST→SSH fallback.
+        
+        Args:
+            device_id: Device identifier
+            address: Target IP or hostname
+            count: Number of probes per hop (default: 1)
+            max_hops: Maximum number of hops (1-64, default: 30)
+            
+        Returns:
+            Dictionary with target and hops list
+        """
         from routeros_mcp.mcp.errors import AuthenticationError, ValidationError
 
         await self.device_service.get_device(device_id)
 
-        # Enforce safety limit
+        # Enforce safety limits for count
         if count > MAX_TRACEROUTE_COUNT:
             raise ValidationError(
                 f"Traceroute count cannot exceed {MAX_TRACEROUTE_COUNT}",
@@ -325,11 +336,24 @@ class DiagnosticsService:
                 data={"requested_count": count},
             )
 
+        # Enforce safety limits for max_hops
+        if max_hops > MAX_TRACEROUTE_HOPS:
+            raise ValidationError(
+                f"Traceroute max_hops cannot exceed {MAX_TRACEROUTE_HOPS}",
+                data={"requested_max_hops": max_hops, "max_hops": MAX_TRACEROUTE_HOPS},
+            )
+
+        if max_hops < 1:
+            raise ValidationError(
+                "Traceroute max_hops must be at least 1",
+                data={"requested_max_hops": max_hops},
+            )
+
         rest_error: Exception | None = None
 
         # REST first
         try:
-            result = await self._traceroute_via_rest(device_id, address, count)
+            result = await self._traceroute_via_rest(device_id, address, count, max_hops)
             result["transport"] = "rest"
             result["fallback_used"] = False
             result["rest_error"] = None
@@ -351,7 +375,7 @@ class DiagnosticsService:
 
         # SSH fallback
         try:
-            result = await self._traceroute_via_ssh(device_id, address, count)
+            result = await self._traceroute_via_ssh(device_id, address, count, max_hops)
             result["transport"] = "ssh"
             result["fallback_used"] = True
             result["rest_error"] = str(rest_error) if rest_error else None
@@ -369,6 +393,7 @@ class DiagnosticsService:
         device_id: str,
         address: str,
         count: int,
+        max_hops: int,
     ) -> dict[str, Any]:
         client = await self.device_service.get_rest_client(device_id)
 
@@ -377,6 +402,10 @@ class DiagnosticsService:
                 "address": address,
                 "count": count,
             }
+            
+            # Add max-hops parameter if not default
+            if max_hops != 30:
+                trace_params["max-hops"] = max_hops
 
             trace_data = await client.post("/rest/tool/traceroute", trace_params)
             hops = self._parse_rest_traceroute(trace_data)
@@ -421,10 +450,13 @@ class DiagnosticsService:
         device_id: str,
         address: str,
         count: int,
+        max_hops: int,
     ) -> dict[str, Any]:
         ssh_client = await self.device_service.get_ssh_client(device_id)
         try:
-            command = f"/tool/traceroute address={address} count={count}"
+            # Add max-hops parameter if not default
+            max_hops_param = f" max-hops={max_hops}" if max_hops != 30 else ""
+            command = f"/tool/traceroute address={address} count={count}{max_hops_param}"
             output = await ssh_client.execute(command)
             hops = self._parse_ssh_traceroute_output(output)
             return {

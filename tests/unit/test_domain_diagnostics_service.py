@@ -9,6 +9,7 @@ from routeros_mcp.config import Settings
 from routeros_mcp.domain.services.diagnostics import (
     MAX_PING_COUNT,
     MAX_TRACEROUTE_COUNT,
+    MAX_TRACEROUTE_HOPS,
     DiagnosticsService,
 )
 from routeros_mcp.infra.routeros.exceptions import RouterOSSSHError, RouterOSTimeoutError
@@ -261,6 +262,37 @@ async def test_traceroute_validates_count_limits() -> None:
 
     with pytest.raises(ValidationError):
         await service.traceroute("dev-1", "8.8.8.8", count=0)
+
+
+@pytest.mark.asyncio
+async def test_traceroute_validates_max_hops_limits() -> None:
+    """Test traceroute validates max_hops is within 1-64 range."""
+    from routeros_mcp.domain.services.diagnostics import MAX_TRACEROUTE_HOPS
+    
+    service = DiagnosticsService(session=None, settings=Settings())
+    service.device_service = _FakeDeviceService(
+        rest_exc=RouterOSTimeoutError("no rest"), ssh_client=_FakeSSHClient()
+    )
+
+    # max_hops too high
+    with pytest.raises(ValidationError, match="max_hops cannot exceed"):
+        await service.traceroute("dev-1", "8.8.8.8", count=1, max_hops=MAX_TRACEROUTE_HOPS + 1)
+
+    # max_hops too low
+    with pytest.raises(ValidationError, match="max_hops must be at least 1"):
+        await service.traceroute("dev-1", "8.8.8.8", count=1, max_hops=0)
+
+    # Valid max_hops should not raise
+    rest = _FakeRestClient(trace_data=[{"hop": 1, "address": "192.0.2.1", "time": "1ms"}])
+    service.device_service = _FakeDeviceService(rest_client=rest, ssh_client=_FakeSSHClient())
+    
+    # Should work with min value
+    result = await service.traceroute("dev-1", "8.8.8.8", count=1, max_hops=1)
+    assert result is not None
+    
+    # Should work with max value
+    result = await service.traceroute("dev-1", "8.8.8.8", count=1, max_hops=MAX_TRACEROUTE_HOPS)
+    assert result is not None
 
 
 @pytest.mark.asyncio

@@ -242,3 +242,241 @@ async def test_traceroute_tool_reraises_mcp_error(monkeypatch: pytest.MonkeyPatc
 
     with pytest.raises(MCPError, match="denied"):
         await mcp.tools["traceroute"](device_id="dev-1", target="1.1.1.1")
+
+
+@pytest.mark.asyncio
+async def test_traceroute_streaming_yields_progress_messages(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test traceroute with stream_progress=True yields progress messages."""
+    import routeros_mcp.mcp_tools.diagnostics as diagnostics_tools
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+        async def get_device(self, _device_id: str) -> object:
+            return SimpleNamespace(
+                environment="lab",
+                allow_advanced_writes=False,
+                allow_professional_workflows=False,
+                name="dev-1",
+            )
+
+    class StubDiagnosticsService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+        async def traceroute(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            return {
+                "hops": [
+                    {"hop": 1, "address": "192.168.1.1", "rtt_ms": 1.5},
+                    {"hop": 2, "address": "10.0.0.1", "rtt_ms": 12.3},
+                    {"hop": 3, "address": "8.8.8.8", "rtt_ms": 25.7},
+                ],
+                "target": "8.8.8.8",
+            }
+
+    monkeypatch.setattr(diagnostics_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(diagnostics_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(diagnostics_tools, "DiagnosticsService", StubDiagnosticsService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    diagnostics_tools.register_diagnostics_tools(mcp, settings)
+
+    # Call traceroute with stream_progress=True
+    result_generator = await mcp.tools["traceroute"](
+        device_id="dev-1", 
+        target="8.8.8.8",
+        stream_progress=True,
+    )
+
+    # Collect all yielded events
+    events = []
+    async for event in result_generator:
+        events.append(event)
+
+    # Verify we got progress events
+    progress_events = [e for e in events if e.get("type") == "progress"]
+    assert len(progress_events) >= 3, "Should have at least 3 progress events (starting + 3 hops)"
+
+    # Verify starting message
+    assert any("Starting traceroute" in e.get("message", "") for e in progress_events)
+
+    # Verify hop progress messages
+    hop_progress = [e for e in progress_events if "Hop" in e.get("message", "")]
+    assert len(hop_progress) == 3, "Should have 3 hop progress messages"
+
+    # Verify final result
+    final_result = events[-1]
+    assert "content" in final_result
+    assert "isError" in final_result
+    assert final_result["isError"] is False
+    assert "_meta" in final_result
+    assert final_result["_meta"]["total_hops"] == 3
+    assert final_result["_meta"]["reached_target"] is True
+
+
+@pytest.mark.asyncio
+async def test_traceroute_non_streaming_returns_dict(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test traceroute with stream_progress=False returns dict immediately."""
+    import routeros_mcp.mcp_tools.diagnostics as diagnostics_tools
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+        async def get_device(self, _device_id: str) -> object:
+            return SimpleNamespace(
+                environment="lab",
+                allow_advanced_writes=False,
+                allow_professional_workflows=False,
+                name="dev-1",
+            )
+
+    class StubDiagnosticsService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+        async def traceroute(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            return {
+                "hops": [
+                    {"hop": 1, "address": "192.168.1.1", "rtt_ms": 1.5},
+                    {"hop": 2, "address": "10.0.0.1", "rtt_ms": 12.3},
+                ],
+                "target": "8.8.8.8",
+            }
+
+    monkeypatch.setattr(diagnostics_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(diagnostics_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(diagnostics_tools, "DiagnosticsService", StubDiagnosticsService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    diagnostics_tools.register_diagnostics_tools(mcp, settings)
+
+    # Call traceroute with stream_progress=False (default)
+    result = await mcp.tools["traceroute"](device_id="dev-1", target="8.8.8.8")
+
+    # Should return dict immediately, not async generator
+    assert isinstance(result, dict)
+    assert result["isError"] is False
+    assert "Traceroute to 8.8.8.8" in result["content"][0]["text"]
+    assert len(result["_meta"]["hops"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_traceroute_streaming_handles_timeout_hops(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test traceroute streaming handles hops with timeouts (*)."""
+    import routeros_mcp.mcp_tools.diagnostics as diagnostics_tools
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+        async def get_device(self, _device_id: str) -> object:
+            return SimpleNamespace(
+                environment="lab",
+                allow_advanced_writes=False,
+                allow_professional_workflows=False,
+                name="dev-1",
+            )
+
+    class StubDiagnosticsService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+        async def traceroute(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            return {
+                "hops": [
+                    {"hop": 1, "address": "192.168.1.1", "rtt_ms": 1.5},
+                    {"hop": 2, "address": "*", "rtt_ms": 0.0},  # Timeout hop
+                    {"hop": 3, "address": "8.8.8.8", "rtt_ms": 25.7},
+                ],
+                "target": "8.8.8.8",
+            }
+
+    monkeypatch.setattr(diagnostics_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(diagnostics_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(diagnostics_tools, "DiagnosticsService", StubDiagnosticsService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    diagnostics_tools.register_diagnostics_tools(mcp, settings)
+
+    result_generator = await mcp.tools["traceroute"](
+        device_id="dev-1",
+        target="8.8.8.8",
+        stream_progress=True,
+    )
+
+    events = []
+    async for event in result_generator:
+        events.append(event)
+
+    # Verify timeout hop is handled
+    progress_events = [e for e in events if e.get("type") == "progress"]
+    timeout_messages = [e for e in progress_events if "timeout" in e.get("message", "").lower()]
+    assert len(timeout_messages) >= 1, "Should have at least one timeout message"
+
+    # Verify data field has null for timeout hop
+    timeout_data = [e.get("data", {}) for e in timeout_messages]
+    assert any(d.get("ip") is None for d in timeout_data)
+
+
+@pytest.mark.asyncio
+async def test_traceroute_streaming_unreachable_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test traceroute streaming when target is unreachable."""
+    import routeros_mcp.mcp_tools.diagnostics as diagnostics_tools
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+        async def get_device(self, _device_id: str) -> object:
+            return SimpleNamespace(
+                environment="lab",
+                allow_advanced_writes=False,
+                allow_professional_workflows=False,
+                name="dev-1",
+            )
+
+    class StubDiagnosticsService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+        async def traceroute(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            return {
+                "hops": [
+                    {"hop": 1, "address": "192.168.1.1", "rtt_ms": 1.5},
+                    {"hop": 2, "address": "*", "rtt_ms": 0.0},
+                    {"hop": 3, "address": "*", "rtt_ms": 0.0},
+                ],
+                "target": "10.255.255.1",
+            }
+
+    monkeypatch.setattr(diagnostics_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(diagnostics_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(diagnostics_tools, "DiagnosticsService", StubDiagnosticsService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    diagnostics_tools.register_diagnostics_tools(mcp, settings)
+
+    result_generator = await mcp.tools["traceroute"](
+        device_id="dev-1",
+        target="10.255.255.1",
+        stream_progress=True,
+    )
+
+    events = []
+    async for event in result_generator:
+        events.append(event)
+
+    # Verify final result shows target not reached
+    final_result = events[-1]
+    assert final_result["_meta"]["reached_target"] is False
+    assert "not reached" in final_result["content"][0]["text"]
