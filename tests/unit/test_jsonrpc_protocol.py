@@ -5,9 +5,11 @@ import pytest
 from routeros_mcp.mcp.errors import InternalError, ValidationError
 from routeros_mcp.mcp.protocol.jsonrpc import (
     create_error_response,
+    create_progress_message,
     create_success_response,
     extract_tool_arguments,
     format_tool_result,
+    is_streaming_request,
     validate_jsonrpc_request,
 )
 
@@ -142,3 +144,142 @@ class TestExtractToolArguments:
     def test_invalid_params_raise_value_error(self, params: dict, expected_message: str) -> None:
         with pytest.raises(ValueError, match=expected_message):
             extract_tool_arguments(params)
+
+
+class TestCreateProgressMessage:
+    """Tests for creating progress messages (Phase 4 streaming)."""
+
+    def test_simple_progress_message(self) -> None:
+        """Progress message with just a message."""
+        progress = create_progress_message("Pinging host...")
+
+        assert progress == {
+            "type": "progress",
+            "message": "Pinging host...",
+        }
+
+    def test_progress_message_with_percent(self) -> None:
+        """Progress message with completion percentage."""
+        progress = create_progress_message("Reply from 8.8.8.8: 25ms", percent=25)
+
+        assert progress == {
+            "type": "progress",
+            "message": "Reply from 8.8.8.8: 25ms",
+            "percent": 25,
+        }
+
+    def test_progress_message_with_data(self) -> None:
+        """Progress message with additional data."""
+        progress = create_progress_message(
+            "Hop 3 reached",
+            percent=30,
+            data={"hop": 3, "latency_ms": 15},
+        )
+
+        assert progress == {
+            "type": "progress",
+            "message": "Hop 3 reached",
+            "percent": 30,
+            "data": {"hop": 3, "latency_ms": 15},
+        }
+
+    def test_progress_message_with_zero_percent(self) -> None:
+        """Progress message with 0% completion."""
+        progress = create_progress_message("Starting...", percent=0)
+
+        assert progress["percent"] == 0
+
+    def test_progress_message_with_hundred_percent(self) -> None:
+        """Progress message with 100% completion."""
+        progress = create_progress_message("Complete!", percent=100)
+
+        assert progress["percent"] == 100
+
+    @pytest.mark.parametrize("invalid_percent", [-1, 101, 150])
+    def test_progress_message_with_invalid_percent_raises(
+        self, invalid_percent: int
+    ) -> None:
+        """Progress message with invalid percent should raise ValueError."""
+        with pytest.raises(ValueError, match="percent must be between 0 and 100"):
+            create_progress_message("Test", percent=invalid_percent)
+
+
+class TestIsStreamingRequest:
+    """Tests for detecting streaming requests (Phase 4 streaming)."""
+
+    def test_streaming_enabled_with_true_flag(self) -> None:
+        """Request with stream_progress=True should be detected."""
+        params = {
+            "name": "diagnostics/ping",
+            "arguments": {
+                "device_id": "dev-001",
+                "target": "8.8.8.8",
+                "stream_progress": True,
+            },
+        }
+
+        assert is_streaming_request(params) is True
+
+    def test_streaming_disabled_with_false_flag(self) -> None:
+        """Request with stream_progress=False should not be streaming."""
+        params = {
+            "name": "diagnostics/ping",
+            "arguments": {
+                "device_id": "dev-001",
+                "target": "8.8.8.8",
+                "stream_progress": False,
+            },
+        }
+
+        assert is_streaming_request(params) is False
+
+    def test_streaming_disabled_when_flag_missing(self) -> None:
+        """Request without stream_progress should not be streaming."""
+        params = {
+            "name": "diagnostics/ping",
+            "arguments": {
+                "device_id": "dev-001",
+                "target": "8.8.8.8",
+            },
+        }
+
+        assert is_streaming_request(params) is False
+
+    def test_streaming_disabled_with_no_arguments(self) -> None:
+        """Request without arguments should not be streaming."""
+        params = {
+            "name": "diagnostics/ping",
+        }
+
+        assert is_streaming_request(params) is False
+
+    def test_streaming_disabled_with_invalid_params(self) -> None:
+        """Request with invalid params should not be streaming."""
+        assert is_streaming_request("not-a-dict") is False
+        assert is_streaming_request({"arguments": "not-a-dict"}) is False
+
+    def test_streaming_disabled_with_non_boolean_flag(self) -> None:
+        """Request with non-boolean stream_progress should not be streaming."""
+        # Test with string value
+        params = {
+            "name": "diagnostics/ping",
+            "arguments": {
+                "device_id": "dev-001",
+                "stream_progress": "yes",  # String instead of bool
+            },
+        }
+
+        assert is_streaming_request(params) is False
+
+    def test_streaming_disabled_with_integer_flag(self) -> None:
+        """Request with integer stream_progress should not be streaming."""
+        # Test with integer value (truthy but not boolean)
+        params = {
+            "name": "diagnostics/ping",
+            "arguments": {
+                "device_id": "dev-001",
+                "stream_progress": 1,  # Integer instead of bool
+            },
+        }
+
+        assert is_streaming_request(params) is False
