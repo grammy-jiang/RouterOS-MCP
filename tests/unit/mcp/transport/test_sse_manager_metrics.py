@@ -39,7 +39,6 @@ def get_metric_value(metric_name, labels=None):
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="SSE connection metrics not yet implemented in SSEManager")
 async def test_sse_connection_metrics_on_stream() -> None:
     """Test that SSE connection metrics are recorded when streaming events."""
     manager = SSEManager()
@@ -47,10 +46,14 @@ async def test_sse_connection_metrics_on_stream() -> None:
 
     initial_active = get_metric_value("routeros_mcp_sse_connections_active")
     
+    # Track if stream started
+    stream_started = asyncio.Event()
+    
     # Create task that will consume events
     async def consume_stream():
         """Consume one event from stream."""
         async for event in manager.stream_events(sub):
+            stream_started.set()  # Signal that stream has started
             if event["event"] == "connected":
                 # Wait a bit to ensure metrics are recorded
                 await asyncio.sleep(0.1)
@@ -59,8 +62,11 @@ async def test_sse_connection_metrics_on_stream() -> None:
     # Start streaming in background
     stream_task = asyncio.create_task(consume_stream())
     
-    # Give it time to start and record metrics
-    await asyncio.sleep(0.15)
+    # Wait for stream to actually start
+    await asyncio.wait_for(stream_started.wait(), timeout=1.0)
+    
+    # Give it a tiny bit more time for metrics to be recorded
+    await asyncio.sleep(0.05)
     
     # Active connections should be incremented
     current_active = get_metric_value("routeros_mcp_sse_connections_active")
@@ -85,7 +91,6 @@ async def test_sse_connection_metrics_on_stream() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="SSE subscription metrics not yet implemented in SSEManager")
 async def test_subscription_metrics_on_subscribe() -> None:
     """Test that subscription metrics are updated when subscribing."""
     manager = SSEManager()
@@ -136,7 +141,6 @@ async def test_subscription_metrics_on_subscribe() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="SSE subscription metrics not yet implemented in SSEManager")
 async def test_subscription_metrics_aggregated_across_resources() -> None:
     """Ensure subscription gauge aggregates counts across same resource pattern."""
     manager = SSEManager()
@@ -171,16 +175,17 @@ async def test_subscription_metrics_aggregated_across_resources() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="SSE notification metrics not yet implemented in SSEManager")
 async def test_notification_metrics_on_broadcast() -> None:
     """Test that notification metrics are recorded when broadcasting."""
-    manager = SSEManager(update_batch_interval_seconds=0.1)
+    manager = SSEManager(update_batch_interval_seconds=0.05)  # Shorter debounce
     
+    # Use the base metric name (without _total suffix)
+    metric_name = "routeros_mcp_resource_notifications"
     resource_pattern = "device://*/health"
     
     # Get initial metric values
     initial_count = get_metric_value(
-        "routeros_mcp_resource_notifications_total",
+        metric_name,
         labels={"resource_uri_pattern": resource_pattern}
     )
     
@@ -194,26 +199,28 @@ async def test_notification_metrics_on_broadcast() -> None:
         data={"status": "healthy"},
     )
     
-    # Wait for debounce to complete
-    await asyncio.sleep(0.15)
+    # Wait for debounce to complete (longer wait)
+    await asyncio.sleep(0.20)
     
     # Should have recorded 2 notifications (one per subscriber)
     final_count = get_metric_value(
-        "routeros_mcp_resource_notifications_total",
+        metric_name,
         labels={"resource_uri_pattern": resource_pattern}
     )
     assert final_count == initial_count + 2, f"Expected {initial_count + 2}, got {final_count}"
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="SSE notification dropped metrics not yet implemented")
 async def test_notification_dropped_metrics() -> None:
     """Test that dropped notification metrics are recorded when queue is full."""
     # This is a simplified test since asyncio.Queue has unlimited size by default
     # We test the metric exists and can be incremented
     
+    # Use base metric name (without _total suffix)
+    metric_name = "routeros_mcp_resource_notifications_dropped"
+    
     initial_dropped = get_metric_value(
-        "routeros_mcp_resource_notifications_dropped_total",
+        metric_name,
         labels={"reason": "queue_full"}
     )
     
@@ -222,7 +229,7 @@ async def test_notification_dropped_metrics() -> None:
     
     # Dropped count should increase
     final_dropped = get_metric_value(
-        "routeros_mcp_resource_notifications_dropped_total",
+        metric_name,
         labels={"reason": "queue_full"}
     )
     assert final_dropped == initial_dropped + 1
