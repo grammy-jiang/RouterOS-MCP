@@ -143,11 +143,26 @@ class TestSettings:
             oidc_enabled=True,
             oidc_provider_url="https://auth.example.com",
             oidc_client_id="test-client",
+            oidc_client_secret="my-super-secret",
         )
         config_dict = settings.to_dict()
 
         assert config_dict["encryption_key"] == "***REDACTED***"
         assert config_dict["oidc_client_id"] == "test-client"  # Not masked
+        assert config_dict["oidc_client_secret"] == "***REDACTED***"  # Masked
+
+    def test_oidc_client_secret_field(self) -> None:
+        """Test OIDC client secret field is properly stored."""
+        settings = Settings(
+            oidc_enabled=True,
+            oidc_provider_url="https://auth.example.com",
+            oidc_client_id="test-client",
+            oidc_client_secret="my-client-secret",
+        )
+        # Secret should be stored (not masked in the object itself)
+        assert settings.oidc_client_secret == "my-client-secret"
+        # But masked when converted to dict
+        assert settings.to_dict()["oidc_client_secret"] == "***REDACTED***"
 
 
 class TestLoadSettingsFromFile:

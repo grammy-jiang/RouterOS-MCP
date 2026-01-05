@@ -108,8 +108,8 @@ class TestAuthMiddleware:
 
         assert response.status_code == 401
         assert response.json() == {
-            "error": "Unauthorized",
-            "message": "Invalid or missing authentication token",
+            "error": "unauthorized",
+            "message": "Missing or invalid Authorization header",
         }
 
     def test_protected_path_invalid_token(self, test_app, mock_validator):
@@ -125,8 +125,8 @@ class TestAuthMiddleware:
 
         assert response.status_code == 401
         assert response.json() == {
-            "error": "Unauthorized",
-            "message": "Invalid or missing authentication token",
+            "error": "unauthorized",
+            "message": "Invalid token",
         }
 
     def test_protected_path_malformed_header(self, test_app, mock_validator):
@@ -218,3 +218,74 @@ class TestAuthMiddleware:
 
         # Validator should be called twice (no caching in middleware)
         assert mock_validator.validate_token.call_count == 2
+
+    def test_invalid_bearer_format(self, test_app, mock_validator):
+        """Test malformed bearer token format returns 401."""
+        mock_validator.validate_token.side_effect = AuthenticationError(
+            "Invalid Authorization header format"
+        )
+
+        client = TestClient(test_app)
+        response = client.get(
+            "/api/protected",
+            headers={"Authorization": "InvalidFormat token123"},
+        )
+
+        assert response.status_code == 401
+        assert response.json()["error"] == "unauthorized"
+        assert "Authorization" in response.json()["message"]
+
+    def test_expired_token(self, test_app, mock_validator):
+        """Test expired token returns 401 with correct error."""
+        mock_validator.validate_token.side_effect = InvalidTokenError("Token expired")
+
+        client = TestClient(test_app)
+        response = client.get(
+            "/api/protected",
+            headers={"Authorization": "Bearer expired-token"},
+        )
+
+        assert response.status_code == 401
+        assert response.json() == {
+            "error": "unauthorized",
+            "message": "Invalid token",
+        }
+
+    def test_token_validation_network_timeout(self, test_app, mock_validator):
+        """Test network timeout during token validation returns 401."""
+        # Simulate OIDC provider timeout
+        mock_validator.validate_token.side_effect = AuthenticationError("OIDC provider unreachable")
+
+        client = TestClient(test_app)
+        response = client.get(
+            "/api/protected",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+
+        # Should fail closed (return 401)
+        assert response.status_code == 401
+        assert response.json()["error"] == "unauthorized"
+
+    def test_concurrent_token_validation(self, test_app, mock_validator):
+        """Test concurrent requests with same token are handled correctly."""
+        user = User(sub="user-123", email="test@example.com", role="admin")
+        mock_validator.validate_token.return_value = user
+
+        client = TestClient(test_app)
+
+        # Multiple concurrent requests (in test client they're sequential)
+        responses = []
+        for _ in range(5):
+            response = client.get(
+                "/api/protected",
+                headers={"Authorization": "Bearer same-token"},
+            )
+            responses.append(response)
+
+        # All should succeed
+        for response in responses:
+            assert response.status_code == 200
+
+        # Validator should be called for each request
+        # (caching happens inside validator, not middleware)
+        assert mock_validator.validate_token.call_count == 5
