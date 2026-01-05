@@ -16,6 +16,9 @@ from typing import Any
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
+from sqlalchemy import select, desc
+
+from routeros_mcp.infra.db.models import HealthCheck
 from routeros_mcp.infra.observability import metrics
 from routeros_mcp.infra.observability.metrics import resource_notifications_total
 
@@ -240,6 +243,11 @@ class SSEManager:
             if self._is_health_resource(resource_uri) and resource_uri in self._health_update_tasks:
                 task = self._health_update_tasks.pop(resource_uri)
                 task.cancel()
+                # Await the cancelled task to ensure proper cleanup
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass  # Expected when task is cancelled
                 logger.info(
                     "Stopped periodic health updates for resource",
                     extra={"resource_uri": resource_uri},
@@ -515,13 +523,15 @@ class SSEManager:
     def _is_health_resource(resource_uri: str) -> bool:
         """Check if a resource URI is a device health resource.
         
+        Uses the same validation logic as _is_subscribable to ensure consistency.
+        
         Args:
             resource_uri: Resource URI to check
             
         Returns:
             True if the URI is a device health resource
         """
-        return resource_uri.startswith("device://") and resource_uri.endswith("/health")
+        return SSEManager._is_subscribable(resource_uri)
 
     @staticmethod
     def _extract_device_id(resource_uri: str) -> str | None:
@@ -635,9 +645,6 @@ class SSEManager:
                 try:
                     # Query latest health check from database
                     async with self.session_factory.session() as session:
-                        from sqlalchemy import select, desc
-                        from routeros_mcp.infra.db.models import HealthCheck
-                        
                         result = await session.execute(
                             select(HealthCheck)
                             .where(HealthCheck.device_id == device_id)
@@ -662,7 +669,11 @@ class SSEManager:
                             }
                             
                             # Calculate memory usage percent if we have the data
-                            if health_check.memory_used_bytes and health_check.memory_total_bytes:
+                            if (
+                                health_check.memory_used_bytes is not None
+                                and health_check.memory_total_bytes is not None
+                                and health_check.memory_total_bytes > 0
+                            ):
                                 health_data["metrics"]["memory_usage_percent"] = (
                                     health_check.memory_used_bytes / health_check.memory_total_bytes * 100
                                 )
