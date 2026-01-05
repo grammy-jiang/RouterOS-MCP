@@ -182,18 +182,18 @@ async def test_subscription_limit_enforcement(sse_manager: SSEManager) -> None:
     """Test max subscriptions per device limit is enforced."""
 
     # Settings has max 10 subscriptions per device
-    # Create 10 subscriptions to dev-001
+    # Create 10 subscriptions to dev-001 (all to health since that's all we can subscribe to)
     for i in range(10):
         await sse_manager.subscribe(
             f"client-{i}",
-            f"device://dev-001/resource-{i}",
+            "device://dev-001/health",
         )
 
     assert sse_manager.get_subscription_count() == 10
 
     # 11th subscription should fail
     with pytest.raises(ValueError, match="Subscription limit exceeded"):
-        await sse_manager.subscribe("client-11", "device://dev-001/another")
+        await sse_manager.subscribe("client-11", "device://dev-001/health")
 
     # But subscription to different device should succeed
     sub = await sse_manager.subscribe("client-11", "device://dev-002/health")
@@ -310,9 +310,9 @@ async def test_subscription_stats(sse_manager: SSEManager) -> None:
     assert stats["total_clients"] == 0
     assert stats["total_broadcasts"] == 0
 
-    # Add subscriptions
+    # Add subscriptions (only health resources are subscribable in Phase 4)
     await sse_manager.subscribe("client-1", "device://dev-001/health")
-    await sse_manager.subscribe("client-1", "device://dev-001/config")
+    await sse_manager.subscribe("client-1", "device://dev-003/health")
     await sse_manager.subscribe("client-2", "device://dev-002/health")
 
     # Broadcast some events
@@ -335,37 +335,10 @@ async def test_subscription_stats(sse_manager: SSEManager) -> None:
 async def test_fleet_resource_subscription(sse_manager: SSEManager) -> None:
     """Test subscribing to fleet-wide resources (not device-specific)."""
 
-    # Fleet resources don't have device limits
-    sub = await sse_manager.subscribe(
-        "test-client",
-        "fleet://health-summary",
-    )
-
-    assert sub.resource_uri == "fleet://health-summary"
-
-    # Broadcast to fleet resource
-    events = []
-
-    async def collect_events() -> None:
-        count = 0
-        async for event in sse_manager.stream_events(sub):
-            events.append(event)
-            count += 1
-            if count >= 2:
-                break
-
-    stream_task = asyncio.create_task(collect_events())
-    await asyncio.sleep(0.05)
-
-    await sse_manager.broadcast(
-        "fleet://health-summary",
-        {"total_devices": 10, "healthy": 9, "degraded": 1},
-    )
-
-    try:
-        await asyncio.wait_for(stream_task, timeout=1.0)
-    except TimeoutError:
-        stream_task.cancel()
-
-    assert len(events) >= 2
-    assert events[1]["data"]["total_devices"] == 10
+    # In Phase 4, only device health resources are subscribable
+    # Fleet resources are NOT subscribable yet
+    with pytest.raises(ValueError, match="not subscribable"):
+        await sse_manager.subscribe(
+            "test-client",
+            "fleet://health-summary",
+        )

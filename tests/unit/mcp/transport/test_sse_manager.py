@@ -69,13 +69,16 @@ async def test_subscribe_enforces_device_limit() -> None:
     """Test subscription limit per device is enforced."""
     manager = SSEManager(max_subscriptions_per_device=2)
 
-    # First 2 subscriptions should succeed
+    # First 2 subscriptions should succeed (both to health since that's all we allow in Phase 4)
     await manager.subscribe("client-1", "device://dev-001/health")
-    await manager.subscribe("client-2", "device://dev-001/config")
+    # For second subscription, we need a different resource URI but same device
+    # Since only health is subscribable, we can't test with /config
+    # So let's just test the limit with two separate clients to same health resource
+    await manager.subscribe("client-2", "device://dev-001/health")
 
     # Third subscription to same device should fail
     with pytest.raises(ValueError, match="Subscription limit exceeded"):
-        await manager.subscribe("client-3", "device://dev-001/metrics")
+        await manager.subscribe("client-3", "device://dev-001/health")
 
     # Subscription to different device should succeed
     sub = await manager.subscribe("client-3", "device://dev-002/health")
@@ -253,14 +256,14 @@ async def test_get_stats() -> None:
     assert stats["total_clients"] == 0
     assert stats["total_broadcasts"] == 0
 
-    # Add subscriptions
+    # Add subscriptions (only health resources subscribable in Phase 4)
     await manager.subscribe("client-1", "device://dev-001/health")
-    await manager.subscribe("client-1", "device://dev-001/config")
+    await manager.subscribe("client-1", "device://dev-002/health")
     await manager.subscribe("client-2", "device://dev-001/health")
 
     stats = manager.get_stats()
     assert stats["total_subscriptions"] == 3
-    assert stats["total_resources"] == 2  # health + config
+    assert stats["total_resources"] == 2  # dev-001/health + dev-002/health
     assert stats["total_clients"] == 2  # client-1 + client-2
 
 
@@ -348,15 +351,54 @@ async def test_multiple_resources_per_client() -> None:
 
     client_id = "client-1"
     sub1 = await manager.subscribe(client_id, "device://dev-001/health")
-    await manager.subscribe(client_id, "device://dev-001/config")
+    # Note: In Phase 4, only health resources are subscribable
+    # So we can only subscribe to multiple health resources
     await manager.subscribe(client_id, "device://dev-002/health")
 
-    assert manager.get_subscription_count() == 3
+    assert manager.get_subscription_count() == 2
 
     # Cleanup one subscription
     await manager.unsubscribe(sub1.subscription_id)
-    assert manager.get_subscription_count() == 2
+    assert manager.get_subscription_count() == 1
 
     # Other subscriptions for same client should still exist
-    assert manager.get_subscription_count("device://dev-001/config") == 1
     assert manager.get_subscription_count("device://dev-002/health") == 1
+
+
+@pytest.mark.asyncio
+async def test_subscribe_validates_subscribable_uri() -> None:
+    """Test that subscribe() validates URI is subscribable."""
+    manager = SSEManager()
+    
+    # Valid: device health resource
+    sub = await manager.subscribe("client-1", "device://dev-001/health")
+    assert sub.resource_uri == "device://dev-001/health"
+    
+    # Invalid: device config resource (not subscribable in Phase 4)
+    with pytest.raises(ValueError, match="not subscribable"):
+        await manager.subscribe("client-2", "device://dev-001/config")
+    
+    # Invalid: fleet resource (not subscribable in Phase 4)
+    with pytest.raises(ValueError, match="not subscribable"):
+        await manager.subscribe("client-3", "fleet://health-summary")
+    
+    # Invalid: plan resource (not subscribable in Phase 4)
+    with pytest.raises(ValueError, match="not subscribable"):
+        await manager.subscribe("client-4", "plan://plan-001")
+
+
+@pytest.mark.asyncio
+async def test_is_subscribable_validation() -> None:
+    """Test _is_subscribable() method validates URIs correctly."""
+    # Valid subscribable URIs
+    assert SSEManager._is_subscribable("device://dev-001/health")
+    assert SSEManager._is_subscribable("device://test-device/health")
+    assert SSEManager._is_subscribable("device://router-01/health")
+    
+    # Invalid non-subscribable URIs
+    assert not SSEManager._is_subscribable("device://dev-001/config")
+    assert not SSEManager._is_subscribable("device://dev-001/overview")
+    assert not SSEManager._is_subscribable("fleet://health-summary")
+    assert not SSEManager._is_subscribable("plan://plan-001")
+    assert not SSEManager._is_subscribable("invalid-uri")
+    assert not SSEManager._is_subscribable("")
