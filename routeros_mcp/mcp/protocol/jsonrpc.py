@@ -311,4 +311,6 @@ def is_streaming_request(params: dict[str, Any]) -> bool:
     if not isinstance(arguments, dict):
         return False
 
-    return arguments.get("stream_progress", False) is True
+    stream_progress = arguments.get("stream_progress", False)
+    # Only accept True boolean value, not truthy values like "yes" or 1
+    return stream_progress is True
