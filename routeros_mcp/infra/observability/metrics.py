@@ -288,11 +288,10 @@ sse_events_sent_total = Counter(
     registry=_registry,
 )
 
-sse_active_connections = Gauge(
-    "routeros_mcp_sse_active_connections",
-    "Number of currently active SSE connections",
-    registry=_registry,
-)
+# Backwards-compatible alias to avoid registering a duplicate SSE
+# active-connections Gauge. The canonical metric is
+# `sse_connections_active`, defined earlier in this module.
+sse_active_connections = sse_connections_active
 
 sse_active_subscriptions = Gauge(
     "routeros_mcp_sse_active_subscriptions",
@@ -694,13 +693,28 @@ def record_sse_event_sent(resource_type: str, device_id: str, count: int = 1) ->
 
 
 def record_sse_active_connection_start() -> None:
-    """Record when an SSE connection becomes active."""
-    sse_active_connections.inc()
+    """Record when an SSE connection becomes active.
+
+    This is a compatibility wrapper that delegates to
+    ``record_sse_connection_start`` to ensure a single
+    canonical metric tracks active SSE connections.
+    """
+    record_sse_connection_start()
 
 
 def record_sse_active_connection_end() -> None:
-    """Record when an SSE connection ends."""
-    sse_active_connections.dec()
+    """Record when an SSE connection ends.
+
+    This is a compatibility wrapper that delegates to
+    ``record_sse_connection_end`` to ensure a single
+    canonical metric tracks active SSE connections.
+    
+    Note: This does not include duration tracking. For duration tracking,
+    use record_sse_connection_end(duration) directly.
+    """
+    # We can't call record_sse_connection_end() because it requires duration
+    # So we just decrement the gauge directly
+    sse_connections_active.dec()
 
 
 def update_sse_active_subscriptions(resource_uri: str, count: int) -> None:

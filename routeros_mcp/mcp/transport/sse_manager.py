@@ -425,10 +425,8 @@ class SSEManager:
         Yields:
             Event dictionaries with 'event' and 'data' keys
         """
-        # Record SSE connection start (existing Phase 2.1 metric)
+        # Record SSE connection start
         metrics.record_sse_connection_start()
-        # Phase 4: Record active connection
-        metrics.record_sse_active_connection_start()
         connection_start_time = datetime.now(UTC)
 
         try:
@@ -486,11 +484,9 @@ class SSEManager:
             )
             raise
         finally:
-            # Record SSE connection end with duration (existing Phase 2.1 metric)
+            # Record SSE connection end with duration
             connection_duration = (datetime.now(UTC) - connection_start_time).total_seconds()
             metrics.record_sse_connection_end(duration=connection_duration)
-            # Phase 4: Record active connection end
-            metrics.record_sse_active_connection_end()
 
             # Cleanup subscription on disconnect
             await self.unsubscribe(subscription.subscription_id)

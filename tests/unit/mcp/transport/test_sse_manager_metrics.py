@@ -298,7 +298,8 @@ async def test_sse_events_sent_total_metric() -> None:
 async def test_sse_active_connections_metric() -> None:
     """Test that sse_active_connections metric is tracked correctly."""
     manager = SSEManager()
-    metric_name = "routeros_mcp_sse_active_connections"
+    # sse_active_connections is aliased to sse_connections_active
+    metric_name = "routeros_mcp_sse_connections_active"
 
     initial_count = get_metric_value(metric_name)
 
@@ -327,6 +328,7 @@ async def test_sse_active_connections_metric() -> None:
     try:
         await stream_task
     except asyncio.CancelledError:
+        # Expected when cancelling the background stream task during test cleanup
         pass
 
     await asyncio.sleep(0.1)
