@@ -150,8 +150,6 @@ async def test_handle_request_success() -> None:
     mock_mcp = MagicMock()
 
     # Mock FastMCP tool result
-    from types import SimpleNamespace
-
     mock_content = SimpleNamespace(
         type="text", text="Tool result", model_dump=lambda **kwargs: {"text": "Tool result"}
     )
@@ -258,8 +256,6 @@ async def test_handle_request_with_user_context() -> None:
     mock_mcp = MagicMock()
 
     # Mock FastMCP tool result
-    from types import SimpleNamespace
-
     mock_content = SimpleNamespace(
         type="text", text="Result", model_dump=lambda **kwargs: {"text": "Result"}
     )
@@ -340,8 +336,6 @@ async def test_process_mcp_request_with_user_context() -> None:
     mock_mcp = MagicMock()
 
     # Mock FastMCP tool result
-    from types import SimpleNamespace
-
     mock_content = SimpleNamespace(
         type="text", text="Result", model_dump=lambda **kwargs: {"text": "Result"}
     )
@@ -382,8 +376,6 @@ async def test_process_mcp_request_without_user_context() -> None:
     mock_mcp = MagicMock()
 
     # Mock FastMCP tools list result
-    from types import SimpleNamespace
-
     mock_tool = SimpleNamespace(
         name="echo", description="Echo tool", inputSchema={"type": "object"}
     )
@@ -749,8 +741,6 @@ async def test_process_mcp_request_tools_call_success() -> None:
     mock_mcp = MagicMock()
 
     # Mock FastMCP tool execution result
-    from types import SimpleNamespace
-
     mock_content = SimpleNamespace(
         type="text", text="Tool result", model_dump=lambda **kwargs: {"text": "Tool result"}
     )
@@ -811,8 +801,6 @@ async def test_process_mcp_request_tools_list_success() -> None:
     mock_mcp = MagicMock()
 
     # Mock FastMCP tools list result
-    from types import SimpleNamespace
-
     mock_tool = SimpleNamespace(
         name="echo", description="Echo back a message", inputSchema={"type": "object"}
     )
@@ -844,8 +832,6 @@ async def test_process_mcp_request_resources_read_success() -> None:
     mock_mcp = MagicMock()
 
     # Mock FastMCP resource read result
-    from types import SimpleNamespace
-
     mock_content = SimpleNamespace(
         uri="device://dev-001/health", mimeType="application/json", text='{"status": "ok"}', blob=None
     )
@@ -904,8 +890,6 @@ async def test_process_mcp_request_resources_list_success() -> None:
     mock_mcp = MagicMock()
 
     # Mock FastMCP resources list result
-    from types import SimpleNamespace
-
     mock_resource = SimpleNamespace(
         uri="device://dev-001/health",
         name="Device Health",
@@ -940,8 +924,6 @@ async def test_process_mcp_request_prompts_get_success() -> None:
     mock_mcp = MagicMock()
 
     # Mock FastMCP prompt result
-    from types import SimpleNamespace
-
     mock_message_content = SimpleNamespace(type="text", text="Prompt text")
     mock_message = SimpleNamespace(role="user", content=mock_message_content)
     mock_prompt_result = SimpleNamespace(description="Test prompt", messages=[mock_message])
@@ -999,8 +981,6 @@ async def test_process_mcp_request_prompts_list_success() -> None:
     mock_mcp = MagicMock()
 
     # Mock FastMCP prompts list result
-    from types import SimpleNamespace
-
     mock_prompt = SimpleNamespace(
         name="test-prompt", description="Test prompt description", arguments=[]
     )
@@ -1083,8 +1063,6 @@ async def test_process_mcp_request_with_user_context() -> None:
     mock_mcp = MagicMock()
 
     # Mock FastMCP tool execution
-    from types import SimpleNamespace
-
     mock_content = SimpleNamespace(
         type="text", text="Result", model_dump=lambda **kwargs: {"text": "Result"}
     )
