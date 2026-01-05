@@ -140,8 +140,8 @@ def main() -> int:  # pragma: no cover
         logger.info("Configuration validation passed")
 
         # Step 5: Start MCP server based on transport mode
-        if settings.mcp_transport == "stdio":
-            logger.info("Starting MCP server in stdio mode")
+        if settings.mcp_transport in ("stdio", "http"):
+            logger.info(f"Starting MCP server in {settings.mcp_transport} mode")
 
             # Import here to avoid circular dependencies
             import asyncio
@@ -161,11 +161,6 @@ def main() -> int:  # pragma: no cover
 
             asyncio.run(run_server())
             return 0
-            
-        elif settings.mcp_transport == "http":
-            # TODO: HTTP transport in T7
-            logger.error("HTTP transport not yet implemented (covered in T7)")
-            return 1
         else:
             logger.error(f"Unknown transport mode: {settings.mcp_transport}")
             return 1

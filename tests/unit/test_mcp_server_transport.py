@@ -184,6 +184,95 @@ async def test_mcp_server_start_http_not_implemented(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
+async def test_mcp_server_start_http_success(monkeypatch: pytest.MonkeyPatch):
+    """Test that HTTP transport starts successfully when MCP supports it."""
+    settings = Settings(
+        mcp_transport="http",
+        mcp_http_host="0.0.0.0",
+        mcp_http_port=9090,
+        mcp_http_base_path="/api/mcp",
+    )
+
+    # Track what was called
+    transport_started = {"called": False, "settings": None, "mcp_instance": None}
+
+    class _FakeMCPWithHTTP(_DummyFastMCP):
+        async def run_http_async(self, **kwargs):
+            # Just mark that it was called
+            pass
+
+    dummy_mcp = _FakeMCPWithHTTP()
+
+    monkeypatch.setattr(mcp_server, "FastMCP", lambda *args, **kwargs: dummy_mcp)
+
+    async def _fake_init_session_http(_settings):
+        return _FakeSessionFactory()
+
+    monkeypatch.setattr(
+        mcp_server, "initialize_session_manager", _fake_init_session_http, raising=False
+    )
+    monkeypatch.setattr(mcp_prompts, "register_prompts", lambda *args, **kwargs: None)
+
+    for name in [
+        "register_config_tools",
+        "register_device_tools",
+        "register_dns_ntp_tools",
+        "register_firewall_logs_tools",
+        "register_firewall_write_tools",
+        "register_interface_tools",
+        "register_ip_tools",
+        "register_routing_tools",
+        "register_system_tools",
+        "register_bridge_tools",
+        "register_dhcp_tools",
+        "register_wireless_tools",
+    ]:
+        monkeypatch.setattr(mcp_tools, name, lambda *args, **kwargs: None)
+
+    for resource_name in [
+        "register_device_resources",
+        "register_bridge_resources",
+        "register_dhcp_resources",
+        "register_fleet_resources",
+        "register_plan_resources",
+        "register_audit_resources",
+        "register_wireless_resources",
+    ]:
+        monkeypatch.setattr(mcp_resources, resource_name, lambda *args, **kwargs: None)
+
+    # Patch cache initialization
+    from routeros_mcp.infra.observability import resource_cache
+    monkeypatch.setattr(resource_cache, "initialize_cache", lambda **kwargs: None)
+
+    # Create a fake HTTPSSETransport that tracks initialization
+    class _FakeHTTPSSETransport:
+        def __init__(self, settings_arg, mcp_instance):
+            transport_started["called"] = True
+            transport_started["settings"] = settings_arg
+            transport_started["mcp_instance"] = mcp_instance
+
+        async def run(self):
+            # Simulate running the transport
+            pass
+
+    from routeros_mcp.mcp.transport import http_sse
+    monkeypatch.setattr(http_sse, "HTTPSSETransport", _FakeHTTPSSETransport)
+
+    server = mcp_server.RouterOSMCPServer(settings)
+
+    # Start server - should use HTTP transport
+    await server.start()
+
+    # Verify HTTP transport was initialized with correct settings
+    assert transport_started["called"] is True
+    assert transport_started["settings"] == settings
+    assert transport_started["mcp_instance"] == dummy_mcp
+    assert transport_started["settings"].mcp_http_host == "0.0.0.0"
+    assert transport_started["settings"].mcp_http_port == 9090
+    assert transport_started["settings"].mcp_http_base_path == "/api/mcp"
+
+
+@pytest.mark.asyncio
 async def test_http_transport_jsonrpc_and_health(monkeypatch: pytest.MonkeyPatch):
     settings = Settings()
     transport = MCPHTTPTransport(settings, mcp_handler=None)
