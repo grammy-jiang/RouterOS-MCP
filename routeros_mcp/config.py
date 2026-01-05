@@ -144,6 +144,10 @@ class Settings(BaseSettings):
 
     oidc_client_id: str | None = Field(default=None, description="OIDC client ID")
 
+    oidc_client_secret: str | None = Field(
+        default=None, description="OIDC client secret (for service account token validation)"
+    )
+
     oidc_audience: str | None = Field(default=None, description="Expected token audience")
 
     oidc_skip_verification: bool = Field(
@@ -394,6 +398,8 @@ class Settings(BaseSettings):
         # Mask sensitive fields
         if data.get("encryption_key"):
             data["encryption_key"] = "***REDACTED***"
+        if data.get("oidc_client_secret"):
+            data["oidc_client_secret"] = "***REDACTED***"
         return data
 
 

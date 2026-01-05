@@ -92,11 +92,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     "error": str(e),
                 },
             )
+            # Determine specific error message based on error type
+            error_str = str(e).lower()
+            if "missing" in error_str or "authorization" in error_str:
+                message = "Missing or invalid Authorization header"
+            else:
+                message = "Invalid token"
+            
             # Return 401 Unauthorized without exposing token details
             return JSONResponse(
                 status_code=401,
                 content={
-                    "error": "Unauthorized",
-                    "message": "Invalid or missing authentication token",
+                    "error": "unauthorized",
+                    "message": message,
                 },
             )
