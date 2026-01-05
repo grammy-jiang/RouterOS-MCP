@@ -98,7 +98,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 message = "Missing or invalid Authorization header"
             else:
                 message = "Invalid token"
-            
+
             # Return 401 Unauthorized without exposing token details
             return JSONResponse(
                 status_code=401,

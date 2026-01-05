@@ -254,9 +254,7 @@ class TestAuthMiddleware:
     def test_token_validation_network_timeout(self, test_app, mock_validator):
         """Test network timeout during token validation returns 401."""
         # Simulate OIDC provider timeout
-        mock_validator.validate_token.side_effect = AuthenticationError(
-            "OIDC provider unreachable"
-        )
+        mock_validator.validate_token.side_effect = AuthenticationError("OIDC provider unreachable")
 
         client = TestClient(test_app)
         response = client.get(
