@@ -280,6 +280,33 @@ resource_notifications_dropped_total = Counter(
     registry=_registry,
 )
 
+# Phase 4: Additional SSE Metrics with granular labels
+sse_events_sent_total = Counter(
+    "routeros_mcp_sse_events_sent_total",
+    "Total number of SSE events sent to clients",
+    ["resource_type", "device_id"],
+    registry=_registry,
+)
+
+# Backwards-compatible alias to avoid registering a duplicate SSE
+# active-connections Gauge. The canonical metric is
+# `sse_connections_active`, defined earlier in this module.
+sse_active_connections = sse_connections_active
+
+sse_active_subscriptions = Gauge(
+    "routeros_mcp_sse_active_subscriptions",
+    "Number of active SSE subscriptions",
+    ["resource_uri"],
+    registry=_registry,
+)
+
+sse_subscription_errors_total = Counter(
+    "routeros_mcp_sse_subscription_errors_total",
+    "Total number of SSE subscription errors",
+    ["error_type"],
+    registry=_registry,
+)
+
 # Authentication/Authorization Metrics
 auth_checks_total = Counter(
     "routeros_mcp_auth_checks_total",
@@ -650,6 +677,69 @@ def record_resource_notification_dropped(
     ).inc()
 
 
+# Phase 4: Additional SSE metrics helpers
+def record_sse_event_sent(resource_type: str, device_id: str, count: int = 1) -> None:
+    """Record SSE event(s) sent to client(s).
+
+    Args:
+        resource_type: Type of resource (e.g., "health", "config")
+        device_id: Device identifier
+        count: Number of events sent (default: 1)
+    """
+    sse_events_sent_total.labels(
+        resource_type=resource_type,
+        device_id=device_id,
+    ).inc(count)
+
+
+def record_sse_active_connection_start() -> None:
+    """Record when an SSE connection becomes active.
+
+    This is a compatibility wrapper that delegates to
+    ``record_sse_connection_start`` to ensure a single
+    canonical metric tracks active SSE connections.
+    """
+    record_sse_connection_start()
+
+
+def record_sse_active_connection_end() -> None:
+    """Record when an SSE connection ends.
+
+    This is a compatibility wrapper that delegates to
+    ``record_sse_connection_end`` to ensure a single
+    canonical metric tracks active SSE connections.
+    
+    Note: This does not include duration tracking. For duration tracking,
+    use record_sse_connection_end(duration) directly.
+    """
+    # We can't call record_sse_connection_end() because it requires duration
+    # So we just decrement the gauge directly
+    sse_connections_active.dec()
+
+
+def update_sse_active_subscriptions(resource_uri: str, count: int) -> None:
+    """Update active subscription count for a specific resource URI.
+
+    Args:
+        resource_uri: Specific resource URI (e.g., "device://dev-001/health")
+        count: Current number of active subscriptions for this URI
+    """
+    sse_active_subscriptions.labels(
+        resource_uri=resource_uri,
+    ).set(count)
+
+
+def record_sse_subscription_error(error_type: str) -> None:
+    """Record an SSE subscription error.
+
+    Args:
+        error_type: Type of error (e.g., "limit_exceeded", "invalid_uri", "timeout")
+    """
+    sse_subscription_errors_total.labels(
+        error_type=error_type,
+    ).inc()
+
+
 __all__ = [
     "get_registry",
     "get_metrics_text",
@@ -675,4 +765,10 @@ __all__ = [
     "update_resource_subscriptions",
     "record_resource_notification",
     "record_resource_notification_dropped",
+    # Phase 4: Additional SSE metrics
+    "record_sse_event_sent",
+    "record_sse_active_connection_start",
+    "record_sse_active_connection_end",
+    "update_sse_active_subscriptions",
+    "record_sse_subscription_error",
 ]
