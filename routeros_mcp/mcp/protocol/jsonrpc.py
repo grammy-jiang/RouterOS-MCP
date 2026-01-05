@@ -3,6 +3,30 @@
 Implements JSON-RPC 2.0 message construction, error response formatting,
 and protocol-level utilities for the MCP server.
 
+Streaming Protocol Support (Phase 4):
+--------------------------------------
+Tools can stream progress updates by yielding progress dictionaries when
+`stream_progress=true` is passed in tool arguments. This enables real-time
+feedback for long-running operations like ping, traceroute, and bandwidth tests.
+
+Progress Message Format:
+    {
+        "type": "progress",
+        "message": "Reply from 8.8.8.8: 25ms",
+        "percent": 25  # Optional: 0-100
+    }
+
+Transport-Specific Behavior:
+    - HTTP/SSE Transport: Progress messages sent as SSE events:
+        event: progress
+        data: {"type":"progress","message":"...","percent":25}
+
+        event: result
+        data: {"result": {...}}
+
+    - STDIO Transport: Progress messages collected but not streamed.
+        Only final result returned (backward compatible).
+
 See docs/19-json-rpc-error-codes-and-mcp-protocol-specification.md
 """
 
@@ -213,3 +237,85 @@ def extract_tool_arguments(
         raise ValueError("params.arguments must be an object")
 
     return tool_name, arguments
+
+
+def create_progress_message(
+    message: str,
+    percent: int | None = None,
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create a progress message for streaming operations.
+
+    Progress messages are yielded by tools during long-running operations
+    to provide real-time feedback. These are sent as SSE events in HTTP
+    transport, or collected silently in STDIO transport.
+
+    Args:
+        message: Human-readable progress message
+        percent: Optional completion percentage (0-100)
+        data: Optional additional progress data
+
+    Returns:
+        Progress message dictionary
+
+    Example:
+        # Simple progress message
+        progress = create_progress_message("Pinging host...")
+
+        # Progress with percentage
+        progress = create_progress_message("Reply from 8.8.8.8", percent=25)
+
+        # Progress with additional data
+        progress = create_progress_message(
+            "Hop 3 reached",
+            percent=30,
+            data={"hop": 3, "latency_ms": 15}
+        )
+    """
+    progress: dict[str, Any] = {
+        "type": "progress",
+        "message": message,
+    }
+
+    if percent is not None:
+        if not (0 <= percent <= 100):
+            raise ValueError("percent must be between 0 and 100")
+        progress["percent"] = percent
+
+    if data:
+        progress["data"] = data
+
+    return progress
+
+
+def is_streaming_request(params: dict[str, Any]) -> bool:
+    """Check if a request should use streaming protocol.
+
+    Streaming is enabled when the `stream_progress` parameter is set to True
+    in the tool arguments.
+
+    Args:
+        params: Tool call params from JSON-RPC request
+
+    Returns:
+        True if streaming is requested, False otherwise
+
+    Example:
+        params = {
+            "name": "diagnostics/ping",
+            "arguments": {
+                "device_id": "dev-001",
+                "target": "8.8.8.8",
+                "stream_progress": True
+            }
+        }
+        is_streaming = is_streaming_request(params)  # True
+    """
+    if not isinstance(params, dict):
+        return False
+
+    arguments = params.get("arguments", {})
+    if not isinstance(arguments, dict):
+        return False
+
+    return arguments.get("stream_progress", False) is True
