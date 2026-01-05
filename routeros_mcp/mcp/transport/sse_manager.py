@@ -385,11 +385,11 @@ class SSEManager:
                 device_id = self._extract_device_id(resource_uri)
                 resource_type = self._extract_resource_type(resource_uri)
                 if device_id and resource_type:
-                    for _ in range(sent_count):
-                        metrics.record_sse_event_sent(
-                            resource_type=resource_type,
-                            device_id=device_id,
-                        )
+                    metrics.record_sse_event_sent(
+                        resource_type=resource_type,
+                        device_id=device_id,
+                        count=sent_count,
+                    )
 
             logger.info(
                 "Broadcast event to subscribers",

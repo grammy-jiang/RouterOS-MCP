@@ -679,17 +679,18 @@ def record_resource_notification_dropped(
 
 
 # Phase 4: Additional SSE metrics helpers
-def record_sse_event_sent(resource_type: str, device_id: str) -> None:
-    """Record an SSE event sent to a client.
+def record_sse_event_sent(resource_type: str, device_id: str, count: int = 1) -> None:
+    """Record SSE event(s) sent to client(s).
 
     Args:
         resource_type: Type of resource (e.g., "health", "config")
         device_id: Device identifier
+        count: Number of events sent (default: 1)
     """
     sse_events_sent_total.labels(
         resource_type=resource_type,
         device_id=device_id,
-    ).inc()
+    ).inc(count)
 
 
 def record_sse_active_connection_start() -> None:
