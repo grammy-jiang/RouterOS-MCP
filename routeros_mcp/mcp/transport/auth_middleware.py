@@ -15,7 +15,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from routeros_mcp.security.auth import AuthenticationError, extract_bearer_token
+from routeros_mcp.security.auth import (
+    AuthenticationError,
+    InvalidTokenError,
+    MissingClaimError,
+    extract_bearer_token,
+)
 from routeros_mcp.security.oidc import OIDCValidator
 
 logger = logging.getLogger(__name__)
@@ -83,27 +88,39 @@ class AuthMiddleware(BaseHTTPMiddleware):
             # Proceed to next handler
             return await call_next(request)
 
+        except (InvalidTokenError, MissingClaimError) as e:
+            # Token validation failures (expired, invalid, missing claims)
+            logger.warning(
+                "Token validation failed",
+                extra={
+                    "path": request.url.path,
+                    "method": request.method,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+            )
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "error": "unauthorized",
+                    "message": "Invalid token",
+                },
+            )
         except AuthenticationError as e:
+            # Header-related errors (missing, malformed) or OIDC provider issues
             logger.warning(
                 "Authentication failed",
                 extra={
                     "path": request.url.path,
                     "method": request.method,
                     "error": str(e),
+                    "error_type": type(e).__name__,
                 },
             )
-            # Determine specific error message based on error type
-            error_str = str(e).lower()
-            if "missing" in error_str or "authorization" in error_str:
-                message = "Missing or invalid Authorization header"
-            else:
-                message = "Invalid token"
-
-            # Return 401 Unauthorized without exposing token details
             return JSONResponse(
                 status_code=401,
                 content={
                     "error": "unauthorized",
-                    "message": message,
+                    "message": "Missing or invalid Authorization header",
                 },
             )
