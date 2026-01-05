@@ -345,6 +345,11 @@ class HTTPSSETransport:
             InvalidParamsError: If params are invalid
             MCPError: For other MCP-specific errors
         """
+        from routeros_mcp.mcp.errors import (
+            InvalidParamsError,
+            MethodNotFoundError,
+        )
+
         method = request.get("method")
         request_id = request.get("id")
         params = request.get("params", {})
@@ -358,46 +363,204 @@ class HTTPSSETransport:
             },
         )
 
-        # Add user context to params if available
-        # This allows tools to access authenticated user information
-        if user_context and isinstance(params, dict):
-            params["_user"] = user_context
-
-        # For now, delegate to the tools directly via FastMCP
-        # FastMCP's _mcp_server handles the actual tool execution
-        # In a full implementation, we would call:
-        # - server._mcp_server.call_tool() for tools/call
-        # - server._mcp_server.list_tools() for tools/list
-        # - etc.
-
-        # This is a simplified implementation that returns a proper structure
-        # The actual integration with FastMCP's internal processor would go here
-        # For Phase 2, we're implementing the request/response handling infrastructure
+        # For notifications (no id), we should not return a response per JSON-RPC 2.0
+        # For now, we require id to be present (validated earlier in handle_request)
+        # If request_id is None at this point, it's a server error
+        if request_id is None:
+            raise ValueError("Request ID is required for JSON-RPC responses")
 
         try:
-            # Return a placeholder response for now
-            # Real implementation would integrate with FastMCP's request handlers
-            result = {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"Method {method} processed successfully (Phase 2 placeholder)",
-                    }
-                ],
-                "_meta": {
-                    "method": method,
-                    "transport": "http/sse",
-                    "has_user_context": user_context is not None,
-                },
-            }
+            # Route to appropriate FastMCP internal handler based on method
+            if method == "tools/call":
+                # Extract tool name and arguments
+                tool_name = params.get("name")
+                arguments = params.get("arguments", {})
 
-            # For notifications (no id), we should not return a response per JSON-RPC 2.0
-            # For now, we require id to be present (validated earlier in handle_request)
-            # If request_id is None at this point, it's a server error
-            if request_id is None:
-                raise ValueError("Request ID is required for JSON-RPC responses")
+                if not tool_name:
+                    raise InvalidParamsError(
+                        "Missing required parameter: name",
+                        data={"field": "name", "details": "Tool name is required"},
+                    )
+
+                # Add user context to arguments if available
+                # This allows tools to access authenticated user information
+                if user_context and isinstance(arguments, dict):
+                    arguments = dict(arguments)  # Create a copy to avoid modifying original
+                    arguments["_user"] = user_context
+
+                # Call FastMCP's internal tool handler
+                tool_result = await self.mcp_instance._call_tool_mcp(tool_name, arguments)
+
+                # Convert FastMCP result to MCP format
+                if hasattr(tool_result, "content"):
+                    # CallToolResult object
+                    result = {
+                        "content": [
+                            {"type": item.type, **item.model_dump(exclude={"type"})}
+                            for item in tool_result.content
+                        ],
+                        "isError": getattr(tool_result, "isError", False),
+                    }
+                elif isinstance(tool_result, tuple):
+                    # Tuple of (content, metadata)
+                    content_list, metadata = tool_result
+                    result = {
+                        "content": [
+                            {"type": item.type, **item.model_dump(exclude={"type"})}
+                            for item in content_list
+                        ],
+                        "isError": False,
+                        "_meta": metadata,
+                    }
+                else:
+                    # List of content blocks
+                    result = {
+                        "content": [
+                            {"type": item.type, **item.model_dump(exclude={"type"})}
+                            for item in tool_result
+                        ],
+                        "isError": False,
+                    }
+
+            elif method == "tools/list":
+                # List all available tools
+                tools = await self.mcp_instance._list_tools_mcp()
+
+                # Convert to MCP format
+                result = {
+                    "tools": [
+                        {
+                            "name": tool.name,
+                            "description": tool.description or "",
+                            "inputSchema": tool.inputSchema,
+                        }
+                        for tool in tools
+                    ]
+                }
+
+            elif method == "resources/read":
+                # Read a resource
+                uri = params.get("uri")
+                if not uri:
+                    raise InvalidParamsError(
+                        "Missing required parameter: uri",
+                        data={"field": "uri", "details": "Resource URI is required"},
+                    )
+
+                # Call FastMCP's internal resource handler
+                resource_contents = await self.mcp_instance._read_resource_mcp(uri)
+
+                # Convert to MCP format
+                result = {
+                    "contents": [
+                        {
+                            "uri": str(content.uri),
+                            "mimeType": content.mimeType or "text/plain",
+                            **({"text": content.text} if content.text else {}),
+                            **({"blob": content.blob} if content.blob else {}),
+                        }
+                        for content in resource_contents
+                    ]
+                }
+
+            elif method == "resources/list":
+                # List all available resources
+                resources = await self.mcp_instance._list_resources_mcp()
+
+                # Convert to MCP format
+                result = {
+                    "resources": [
+                        {
+                            "uri": str(resource.uri),
+                            "name": resource.name,
+                            "description": resource.description or "",
+                            "mimeType": resource.mimeType or "text/plain",
+                        }
+                        for resource in resources
+                    ]
+                }
+
+            elif method == "prompts/get":
+                # Get a specific prompt
+                name = params.get("name")
+                arguments = params.get("arguments", {})
+
+                if not name:
+                    raise InvalidParamsError(
+                        "Missing required parameter: name",
+                        data={"field": "name", "details": "Prompt name is required"},
+                    )
+
+                # Call FastMCP's internal prompt handler
+                prompt_result = await self.mcp_instance._get_prompt_mcp(name, arguments)
+
+                # Convert to MCP format
+                result = {
+                    "description": prompt_result.description or "",
+                    "messages": [
+                        {
+                            "role": msg.role,
+                            "content": {
+                                "type": msg.content.type,
+                                **({"text": msg.content.text} if hasattr(msg.content, "text") else {}),
+                            },
+                        }
+                        for msg in prompt_result.messages
+                    ],
+                }
+
+            elif method == "prompts/list":
+                # List all available prompts
+                prompts = await self.mcp_instance._list_prompts_mcp()
+
+                # Convert to MCP format
+                result = {
+                    "prompts": [
+                        {
+                            "name": prompt.name,
+                            "description": prompt.description or "",
+                            "arguments": prompt.arguments or [],
+                        }
+                        for prompt in prompts
+                    ]
+                }
+
+            elif method == "initialize":
+                # Handle initialize (should be handled by FastMCP but provide fallback)
+                result = {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {},
+                        "resources": {"subscribe": True, "listChanged": True},
+                        "prompts": {"listChanged": True},
+                        "logging": {},
+                    },
+                    "serverInfo": {
+                        "name": self.mcp_instance.name,
+                        "version": self.mcp_instance.version,
+                    },
+                }
+
+            else:
+                # Unknown method
+                raise MethodNotFoundError(
+                    f"Method '{method}' not found",
+                    data={"method": method, "supported_methods": [
+                        "initialize",
+                        "tools/call",
+                        "tools/list",
+                        "resources/read",
+                        "resources/list",
+                        "prompts/get",
+                        "prompts/list",
+                    ]},
+                )
 
             return create_success_response(request_id=request_id, result=result)
+
+        except (MethodNotFoundError, InvalidParamsError):
+            # Re-raise MCP errors as-is
+            raise
 
         except Exception as e:
             logger.error(
@@ -405,7 +568,8 @@ class HTTPSSETransport:
                 extra={"method": method, "request_id": request_id},
                 exc_info=True,
             )
-            raise
+            # Map generic exceptions to MCP errors
+            raise map_exception_to_error(e)
 
     async def stop(self) -> None:
         """Stop the HTTP/SSE transport server.
