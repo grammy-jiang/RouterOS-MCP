@@ -10,7 +10,7 @@ from typing import Any
 from fastmcp import FastMCP
 
 from routeros_mcp.config import Settings
-from routeros_mcp.domain.services.diagnostics import DiagnosticsService
+from routeros_mcp.domain.services.diagnostics import DEFAULT_TRACEROUTE_HOPS, DiagnosticsService
 from routeros_mcp.domain.services.device import DeviceService
 from routeros_mcp.infra.db.session import get_session_factory
 from routeros_mcp.mcp.errors import MCPError, map_exception_to_error
@@ -100,7 +100,7 @@ def register_diagnostics_tools(mcp: FastMCP, settings: Settings) -> None:
     async def traceroute(
         device_id: str,
         target: str,
-        max_hops: int = 30,
+        max_hops: int = DEFAULT_TRACEROUTE_HOPS,
         timeout_seconds: int = 60,
         stream_progress: bool = False,
     ) -> dict[str, Any] | AsyncIterator[dict[str, Any]]:

@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 MAX_PING_COUNT = 10
 MAX_TRACEROUTE_HOPS = 64  # Updated to match requirement (1-64)
 MAX_TRACEROUTE_COUNT = 3
+DEFAULT_TRACEROUTE_HOPS = 30  # Default max hops for traceroute
 
 
 class DiagnosticsService:
@@ -306,7 +307,7 @@ class DiagnosticsService:
         device_id: str,
         address: str,
         count: int = 1,
-        max_hops: int = 30,
+        max_hops: int = DEFAULT_TRACEROUTE_HOPS,
     ) -> dict[str, Any]:
         """Run traceroute to show network path with REST→SSH fallback.
         
@@ -404,7 +405,7 @@ class DiagnosticsService:
             }
             
             # Add max-hops parameter if not default
-            if max_hops != 30:
+            if max_hops != DEFAULT_TRACEROUTE_HOPS:
                 trace_params["max-hops"] = max_hops
 
             trace_data = await client.post("/rest/tool/traceroute", trace_params)
@@ -455,7 +456,7 @@ class DiagnosticsService:
         ssh_client = await self.device_service.get_ssh_client(device_id)
         try:
             # Add max-hops parameter if not default
-            max_hops_param = f" max-hops={max_hops}" if max_hops != 30 else ""
+            max_hops_param = f" max-hops={max_hops}" if max_hops != DEFAULT_TRACEROUTE_HOPS else ""
             command = f"/tool/traceroute address={address} count={count}{max_hops_param}"
             output = await ssh_client.execute(command)
             hops = self._parse_ssh_traceroute_output(output)
