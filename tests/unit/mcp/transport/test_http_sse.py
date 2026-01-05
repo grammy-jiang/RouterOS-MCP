@@ -1113,3 +1113,286 @@ async def test_process_mcp_request_tool_exception_mapping() -> None:
 
     with pytest.raises(MCPError):
         await transport._process_mcp_request(request)
+
+
+# Phase 4 Streaming Tests
+
+
+@pytest.mark.asyncio
+async def test_handle_request_detects_streaming_request() -> None:
+    """Test handle_request detects stream_progress parameter."""
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+
+    # Mock the _handle_streaming_request method
+    mock_sse_response = EventSourceResponse(
+        async_event_generator(),
+        headers={"X-Correlation-ID": "test-123"},
+    )
+
+    transport = HTTPSSETransport(settings, mock_mcp)
+    transport._handle_streaming_request = AsyncMock(return_value=mock_sse_response)
+
+    # Create streaming request
+    request_body = {
+        "jsonrpc": "2.0",
+        "id": "test-streaming",
+        "method": "tools/call",
+        "params": {
+            "name": "diagnostics/ping",
+            "arguments": {
+                "device_id": "dev-001",
+                "target": "8.8.8.8",
+                "stream_progress": True,
+            },
+        },
+    }
+
+    # Create mock HTTP request
+    mock_request = MagicMock(spec=Request)
+    mock_request.json = AsyncMock(return_value=request_body)
+    mock_request.state = SimpleNamespace(user=None)
+
+    # Call handle_request
+    with patch("routeros_mcp.mcp.transport.http_sse.get_correlation_id", return_value="test-123"):
+        response = await transport.handle_request(mock_request)
+
+    # Verify streaming handler was called
+    assert transport._handle_streaming_request.called
+    assert isinstance(response, EventSourceResponse)
+
+
+@pytest.mark.asyncio
+async def test_handle_request_non_streaming_request() -> None:
+    """Test handle_request handles non-streaming request normally."""
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+
+    # Mock tool result
+    mock_tool_result = SimpleNamespace(
+        content=[SimpleNamespace(type="text", text="Result", model_dump=lambda exclude: {"text": "Result"})],
+        isError=False,
+    )
+    mock_mcp._call_tool_mcp = AsyncMock(return_value=mock_tool_result)
+
+    transport = HTTPSSETransport(settings, mock_mcp)
+
+    # Create non-streaming request (no stream_progress or stream_progress=False)
+    request_body = {
+        "jsonrpc": "2.0",
+        "id": "test-non-streaming",
+        "method": "tools/call",
+        "params": {
+            "name": "diagnostics/ping",
+            "arguments": {
+                "device_id": "dev-001",
+                "target": "8.8.8.8",
+                "stream_progress": False,
+            },
+        },
+    }
+
+    # Create mock HTTP request
+    mock_request = MagicMock(spec=Request)
+    mock_request.json = AsyncMock(return_value=request_body)
+    mock_request.state = SimpleNamespace(user=None)
+
+    # Call handle_request
+    with patch("routeros_mcp.mcp.transport.http_sse.get_correlation_id", return_value="test-123"):
+        from starlette.responses import JSONResponse
+
+        response = await transport.handle_request(mock_request)
+
+    # Verify normal JSON response
+    assert isinstance(response, JSONResponse)
+
+
+@pytest.mark.asyncio
+async def test_handle_streaming_request_with_progress() -> None:
+    """Test _handle_streaming_request with tool that yields progress."""
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+
+    # Mock streaming tool result (async generator)
+    async def mock_streaming_tool():
+        # Yield progress messages
+        yield {"type": "progress", "message": "Starting ping...", "percent": 0}
+        yield {"type": "progress", "message": "Reply from 8.8.8.8: 25ms", "percent": 25}
+        yield {"type": "progress", "message": "Reply from 8.8.8.8: 30ms", "percent": 50}
+        # Yield final result
+        yield SimpleNamespace(
+            content=[SimpleNamespace(type="text", text="Ping complete", model_dump=lambda exclude: {"text": "Ping complete"})],
+            isError=False,
+        )
+
+    mock_mcp._call_tool_mcp = AsyncMock(return_value=mock_streaming_tool())
+
+    transport = HTTPSSETransport(settings, mock_mcp)
+
+    request = {
+        "jsonrpc": "2.0",
+        "id": "test-streaming",
+        "method": "tools/call",
+        "params": {
+            "name": "diagnostics/ping",
+            "arguments": {"device_id": "dev-001", "target": "8.8.8.8", "stream_progress": True},
+        },
+    }
+
+    # Call _handle_streaming_request
+    response = await transport._handle_streaming_request(request, None, "test-123")
+
+    # Verify it returns EventSourceResponse
+    assert isinstance(response, EventSourceResponse)
+
+    # Collect events from the generator
+    events = []
+    async for event in response.body_iterator:
+        events.append(event)
+
+    # Verify we got progress events and final result
+    assert len(events) == 4  # 3 progress + 1 result
+    assert events[0]["event"] == "progress"
+    assert events[1]["event"] == "progress"
+    assert events[2]["event"] == "progress"
+    assert events[3]["event"] == "result"
+
+    # Verify progress event data
+    progress_data_0 = json.loads(events[0]["data"])
+    assert progress_data_0["type"] == "progress"
+    assert progress_data_0["message"] == "Starting ping..."
+    assert progress_data_0["percent"] == 0
+
+    # Verify result event data
+    result_data = json.loads(events[3]["data"])
+    assert result_data["jsonrpc"] == "2.0"
+    assert result_data["id"] == "test-streaming"
+    assert "result" in result_data
+
+
+@pytest.mark.asyncio
+async def test_handle_streaming_request_non_streaming_tool() -> None:
+    """Test _handle_streaming_request with tool that doesn't stream."""
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+
+    # Mock non-streaming tool result (regular result, not generator)
+    mock_tool_result = SimpleNamespace(
+        content=[SimpleNamespace(type="text", text="Result", model_dump=lambda exclude: {"text": "Result"})],
+        isError=False,
+    )
+    mock_mcp._call_tool_mcp = AsyncMock(return_value=mock_tool_result)
+
+    transport = HTTPSSETransport(settings, mock_mcp)
+
+    request = {
+        "jsonrpc": "2.0",
+        "id": "test-non-streaming-tool",
+        "method": "tools/call",
+        "params": {
+            "name": "system/get-overview",
+            "arguments": {"device_id": "dev-001", "stream_progress": True},
+        },
+    }
+
+    # Call _handle_streaming_request
+    response = await transport._handle_streaming_request(request, None, "test-123")
+
+    # Verify it returns EventSourceResponse
+    assert isinstance(response, EventSourceResponse)
+
+    # Collect events
+    events = []
+    async for event in response.body_iterator:
+        events.append(event)
+
+    # Should have single result event
+    assert len(events) == 1
+    assert events[0]["event"] == "result"
+
+
+@pytest.mark.asyncio
+async def test_handle_streaming_request_error_handling() -> None:
+    """Test _handle_streaming_request handles errors correctly."""
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+
+    # Mock tool that raises an error
+    mock_mcp._call_tool_mcp = AsyncMock(side_effect=RuntimeError("Tool failed"))
+
+    transport = HTTPSSETransport(settings, mock_mcp)
+
+    request = {
+        "jsonrpc": "2.0",
+        "id": "test-error",
+        "method": "tools/call",
+        "params": {
+            "name": "diagnostics/ping",
+            "arguments": {"device_id": "dev-001", "stream_progress": True},
+        },
+    }
+
+    # Call _handle_streaming_request
+    response = await transport._handle_streaming_request(request, None, "test-123")
+
+    # Collect events
+    events = []
+    async for event in response.body_iterator:
+        events.append(event)
+
+    # Should have single error event
+    assert len(events) == 1
+    assert events[0]["event"] == "error"
+
+    error_data = json.loads(events[0]["data"])
+    assert error_data["jsonrpc"] == "2.0"
+    assert "error" in error_data
+
+
+@pytest.mark.asyncio
+async def test_format_tool_result_with_content() -> None:
+    """Test _format_tool_result with CallToolResult object."""
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+    transport = HTTPSSETransport(settings, mock_mcp)
+
+    # Mock CallToolResult
+    mock_result = SimpleNamespace(
+        content=[
+            SimpleNamespace(type="text", text="Hello", model_dump=lambda exclude: {"text": "Hello"}),
+        ],
+        isError=False,
+    )
+
+    result = transport._format_tool_result(mock_result)
+
+    assert result["content"] == [{"type": "text", "text": "Hello"}]
+    assert result["isError"] is False
+
+
+@pytest.mark.asyncio
+async def test_format_tool_result_with_tuple() -> None:
+    """Test _format_tool_result with tuple (content, metadata)."""
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+    transport = HTTPSSETransport(settings, mock_mcp)
+
+    # Mock tuple result
+    content_list = [
+        SimpleNamespace(type="text", text="Data", model_dump=lambda exclude: {"text": "Data"}),
+    ]
+    metadata = {"device_id": "dev-001"}
+    mock_result = (content_list, metadata)
+
+    result = transport._format_tool_result(mock_result)
+
+    assert result["content"] == [{"type": "text", "text": "Data"}]
+    assert result["isError"] is False
+    assert result["_meta"] == {"device_id": "dev-001"}
+
+
+# Helper for async event generator
+async def async_event_generator() -> AsyncIterator[dict[str, str]]:
+    """Helper async generator for testing."""
+    yield {"event": "test", "data": "test"}
+

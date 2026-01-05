@@ -29,6 +29,7 @@ from routeros_mcp.mcp.errors import (
 from routeros_mcp.mcp.protocol.jsonrpc import (
     create_error_response,
     create_success_response,
+    is_streaming_request,
     validate_jsonrpc_request,
 )
 from routeros_mcp.mcp.transport.sse_manager import SSEManager
@@ -213,7 +214,7 @@ class HTTPSSETransport:
             middleware=middleware,
         )
 
-    async def handle_request(self, request: Request) -> JSONResponse:
+    async def handle_request(self, request: Request) -> JSONResponse | EventSourceResponse:
         """Handle MCP JSON-RPC request over HTTP POST.
 
         This method provides custom request processing on top of FastMCP's
@@ -221,11 +222,15 @@ class HTTPSSETransport:
         requests, propagates user context, and returns properly formatted
         JSON-RPC responses.
 
+        For streaming requests (stream_progress=true), returns an
+        EventSourceResponse with progress events and final result.
+        For non-streaming requests, returns a standard JSONResponse.
+
         Args:
             request: HTTP request containing JSON-RPC payload
 
         Returns:
-            JSON-RPC response (success or error)
+            JSON-RPC response (success or error) or SSE event stream
         """
         # Extract correlation ID (already set by middleware)
         correlation_id = get_correlation_id()
@@ -267,7 +272,19 @@ class HTTPSSETransport:
             # Extract user context from auth middleware (if available)
             user_context = getattr(getattr(request, "state", None), "user", None)
 
-            # Process MCP request
+            # Check if streaming is requested
+            params = body.get("params", {})
+            if is_streaming_request(params):
+                # Return SSE stream for streaming requests
+                logger.info(
+                    "Processing streaming request",
+                    extra={"correlation_id": correlation_id, "request_id": request_id},
+                )
+                return await self._handle_streaming_request(
+                    body, user_context, correlation_id
+                )
+
+            # Process MCP request (non-streaming)
             response = await self._process_mcp_request(body, user_context=user_context)
 
             return JSONResponse(
@@ -392,35 +409,7 @@ class HTTPSSETransport:
                 tool_result = await self.mcp_instance._call_tool_mcp(tool_name, arguments)
 
                 # Convert FastMCP result to MCP format
-                if hasattr(tool_result, "content"):
-                    # CallToolResult object
-                    result = {
-                        "content": [
-                            {"type": item.type, **item.model_dump(exclude={"type"})}
-                            for item in tool_result.content
-                        ],
-                        "isError": getattr(tool_result, "isError", False),
-                    }
-                elif isinstance(tool_result, tuple):
-                    # Tuple of (content, metadata)
-                    content_list, metadata = tool_result
-                    result = {
-                        "content": [
-                            {"type": item.type, **item.model_dump(exclude={"type"})}
-                            for item in content_list
-                        ],
-                        "isError": False,
-                        "_meta": metadata,
-                    }
-                else:
-                    # List of content blocks
-                    result = {
-                        "content": [
-                            {"type": item.type, **item.model_dump(exclude={"type"})}
-                            for item in tool_result
-                        ],
-                        "isError": False,
-                    }
+                result = self._format_tool_result(tool_result)
 
             elif method == "tools/list":
                 # List all available tools
@@ -570,6 +559,226 @@ class HTTPSSETransport:
             )
             # Map generic exceptions to MCP errors
             raise map_exception_to_error(e)
+
+    async def _handle_streaming_request(
+        self,
+        request: dict[str, Any],
+        user_context: dict[str, Any] | None,
+        correlation_id: str,
+    ) -> EventSourceResponse:
+        """Handle streaming MCP request with progress updates via SSE.
+
+        For streaming requests (stream_progress=true), this method:
+        1. Calls the tool which may yield progress dictionaries
+        2. Sends each progress as an SSE event: event: progress
+        3. Sends the final result as an SSE event: event: result
+
+        Args:
+            request: JSON-RPC request dictionary
+            user_context: Optional user context from authentication
+            correlation_id: Request correlation ID
+
+        Returns:
+            EventSourceResponse with progress and result events
+
+        Raises:
+            MethodNotFoundError: If method is not found
+            InvalidParamsError: If params are invalid
+            MCPError: For other MCP-specific errors
+        """
+        from routeros_mcp.mcp.errors import InvalidParamsError, MethodNotFoundError
+
+        method = request.get("method")
+        request_id = request.get("id")
+        params = request.get("params", {})
+
+        logger.info(
+            f"Processing streaming MCP method: {method}",
+            extra={
+                "method": method,
+                "request_id": request_id,
+                "has_user_context": user_context is not None,
+                "correlation_id": correlation_id,
+            },
+        )
+
+        async def event_generator() -> AsyncIterator[dict[str, str]]:
+            """Generate SSE events for streaming tool execution."""
+            try:
+                # Only tools/call supports streaming currently
+                if method != "tools/call":
+                    # Send error as SSE event
+                    error_response = create_error_response(
+                        request_id=request_id,
+                        error=MethodNotFoundError(
+                            f"Streaming not supported for method '{method}'",
+                            data={"method": method},
+                        ),
+                    )
+                    yield {
+                        "event": "error",
+                        "data": json.dumps(error_response),
+                    }
+                    return
+
+                # Extract tool name and arguments
+                tool_name = params.get("name")
+                arguments = params.get("arguments", {})
+
+                if not tool_name:
+                    error_response = create_error_response(
+                        request_id=request_id,
+                        error=InvalidParamsError(
+                            "Missing required parameter: name",
+                            data={"field": "name", "details": "Tool name is required"},
+                        ),
+                    )
+                    yield {
+                        "event": "error",
+                        "data": json.dumps(error_response),
+                    }
+                    return
+
+                # Add user context to arguments if available
+                if user_context and isinstance(arguments, dict):
+                    arguments = dict(arguments)
+                    arguments["_user"] = user_context
+
+                # Call FastMCP's internal tool handler
+                tool_result = await self.mcp_instance._call_tool_mcp(tool_name, arguments)
+
+                # Check if result is a generator (streaming tool)
+                if hasattr(tool_result, "__aiter__"):
+                    # Async generator - stream progress events
+                    final_result = None
+                    async for item in tool_result:
+                        if isinstance(item, dict) and item.get("type") == "progress":
+                            # Progress event
+                            yield {
+                                "event": "progress",
+                                "data": json.dumps(item),
+                            }
+                        else:
+                            # Final result or intermediate result
+                            final_result = item
+
+                    # Send final result
+                    if final_result is not None:
+                        result = self._format_tool_result(final_result)
+                        response = create_success_response(
+                            request_id=request_id, result=result
+                        )
+                        yield {
+                            "event": "result",
+                            "data": json.dumps(response),
+                        }
+                    else:
+                        # No final result received
+                        error_response = create_error_response(
+                            request_id=request_id,
+                            error=map_exception_to_error(
+                                RuntimeError("Tool did not return a final result")
+                            ),
+                        )
+                        yield {
+                            "event": "error",
+                            "data": json.dumps(error_response),
+                        }
+                else:
+                    # Non-streaming result - send as single result event
+                    result = self._format_tool_result(tool_result)
+                    response = create_success_response(request_id=request_id, result=result)
+                    yield {
+                        "event": "result",
+                        "data": json.dumps(response),
+                    }
+
+            except (MethodNotFoundError, InvalidParamsError) as e:
+                logger.error(
+                    f"MCP error in streaming request: {e}",
+                    extra={"correlation_id": correlation_id},
+                    exc_info=True,
+                )
+                error_response = create_error_response(request_id=request_id, error=e)
+                yield {
+                    "event": "error",
+                    "data": json.dumps(error_response),
+                }
+
+            except MCPError as e:
+                logger.error(
+                    f"MCP error in streaming request: {e}",
+                    extra={"correlation_id": correlation_id},
+                    exc_info=True,
+                )
+                error_response = create_error_response(request_id=request_id, error=e)
+                yield {
+                    "event": "error",
+                    "data": json.dumps(error_response),
+                }
+
+            except Exception as e:
+                logger.error(
+                    f"Unexpected error in streaming request: {e}",
+                    extra={"correlation_id": correlation_id},
+                    exc_info=True,
+                )
+                mapped_error = map_exception_to_error(e)
+                error_response = create_error_response(request_id=request_id, error=mapped_error)
+                yield {
+                    "event": "error",
+                    "data": json.dumps(error_response),
+                }
+
+        return EventSourceResponse(
+            event_generator(),
+            headers={
+                "X-Correlation-ID": correlation_id,
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    def _format_tool_result(self, tool_result: Any) -> dict[str, Any]:
+        """Format tool result into MCP result structure.
+
+        Handles different result types from FastMCP tools.
+
+        Args:
+            tool_result: Result from FastMCP tool call
+
+        Returns:
+            Formatted MCP result dictionary
+        """
+        if hasattr(tool_result, "content"):
+            # CallToolResult object
+            return {
+                "content": [
+                    {"type": item.type, **item.model_dump(exclude={"type"})}
+                    for item in tool_result.content
+                ],
+                "isError": getattr(tool_result, "isError", False),
+            }
+        elif isinstance(tool_result, tuple):
+            # Tuple of (content, metadata)
+            content_list, metadata = tool_result
+            return {
+                "content": [
+                    {"type": item.type, **item.model_dump(exclude={"type"})}
+                    for item in content_list
+                ],
+                "isError": False,
+                "_meta": metadata,
+            }
+        else:
+            # List of content blocks
+            return {
+                "content": [
+                    {"type": item.type, **item.model_dump(exclude={"type"})}
+                    for item in tool_result
+                ],
+                "isError": False,
+            }
 
     async def stop(self) -> None:
         """Stop the HTTP/SSE transport server.
