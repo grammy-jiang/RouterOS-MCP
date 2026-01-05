@@ -1272,7 +1272,7 @@ async def test_handle_streaming_request_with_progress() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_streaming_request_non_streaming_tool() -> None:
-    """Test _handle_streaming_request with tool that doesn't stream."""
+    """Test _handle_streaming_request when stream_progress=True for a tool without streaming support."""
     settings = Settings(mcp_transport="http")
     mock_mcp = MagicMock()
 

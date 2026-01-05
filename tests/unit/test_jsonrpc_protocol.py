@@ -260,11 +260,25 @@ class TestIsStreamingRequest:
 
     def test_streaming_disabled_with_non_boolean_flag(self) -> None:
         """Request with non-boolean stream_progress should not be streaming."""
+        # Test with string value
         params = {
             "name": "diagnostics/ping",
             "arguments": {
                 "device_id": "dev-001",
                 "stream_progress": "yes",  # String instead of bool
+            },
+        }
+
+        assert is_streaming_request(params) is False
+
+    def test_streaming_disabled_with_integer_flag(self) -> None:
+        """Request with integer stream_progress should not be streaming."""
+        # Test with integer value (truthy but not boolean)
+        params = {
+            "name": "diagnostics/ping",
+            "arguments": {
+                "device_id": "dev-001",
+                "stream_progress": 1,  # Integer instead of bool
             },
         }
 

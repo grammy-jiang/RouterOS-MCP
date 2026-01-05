@@ -650,6 +650,8 @@ class HTTPSSETransport:
                 # Check if result is a generator (streaming tool)
                 if hasattr(tool_result, "__aiter__"):
                     # Async generator - stream progress events
+                    # Note: Tools should yield progress messages followed by exactly one final result.
+                    # If multiple non-progress items are yielded, only the last one will be sent.
                     final_result = None
                     async for item in tool_result:
                         if isinstance(item, dict) and item.get("type") == "progress":
@@ -659,7 +661,7 @@ class HTTPSSETransport:
                                 "data": json.dumps(item),
                             }
                         else:
-                            # Final result or intermediate result
+                            # Final result (only last non-progress item is kept)
                             final_result = item
 
                     # Send final result
@@ -673,11 +675,12 @@ class HTTPSSETransport:
                             "data": json.dumps(response),
                         }
                     else:
-                        # No final result received
+                        # Streaming tool must yield at least one non-progress result
                         error_response = create_error_response(
                             request_id=request_id,
-                            error=map_exception_to_error(
-                                RuntimeError("Tool did not return a final result")
+                            error=InvalidParamsError(
+                                "Streaming tool must yield at least one non-progress result",
+                                data={"tool_name": tool_name},
                             ),
                         )
                         yield {
