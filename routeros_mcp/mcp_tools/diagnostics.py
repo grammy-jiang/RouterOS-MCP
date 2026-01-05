@@ -188,8 +188,8 @@ def register_diagnostics_tools(mcp: FastMCP, settings: Settings) -> None:
                             hop_address = hop.get("address", "*")
                             rtt_ms = hop.get("rtt_ms", 0.0)
                             
-                            # Calculate progress percentage
-                            percent = int(((idx + 1) / max(total_hops, 1)) * 100)
+                            # Calculate progress percentage based on max_hops
+                            percent = int(((idx + 1) / max_hops) * 100)
                             
                             # Create progress message
                             if hop_address == "*":
@@ -211,10 +211,16 @@ def register_diagnostics_tools(mcp: FastMCP, settings: Settings) -> None:
                         reached_target = False
                         if hops:
                             last_hop = hops[-1]
-                            # Target reached if last hop has valid address that matches target or got response
+                            last_address = last_hop.get("address", "*")
+                            last_rtt = last_hop.get("rtt_ms", 0.0)
+                            
+                            # Target reached if:
+                            # 1. Last hop has valid address (not timeout)
+                            # 2. Last hop has positive RTT (got a response)
+                            # 3. Last hop address matches target (if resolvable) or simply responded
                             reached_target = (
-                                last_hop.get("address") != "*" 
-                                and last_hop.get("rtt_ms", 0.0) > 0
+                                last_address != "*" 
+                                and last_rtt > 0
                             )
 
                         # Yield final result
