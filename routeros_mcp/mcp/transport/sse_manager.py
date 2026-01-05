@@ -117,7 +117,7 @@ class SSEManager:
         # Debouncing state
         self._pending_updates: dict[str, dict[str, Any]] = {}
         self._debounce_tasks: dict[str, asyncio.Task[None]] = {}
-        
+
         # Health update tasks (one per device health subscription)
         self._health_update_tasks: dict[str, asyncio.Task[None]] = {}
 
@@ -161,7 +161,7 @@ class SSEManager:
                     f"Resource URI '{resource_uri}' is not subscribable. "
                     "In Phase 4, only 'device://<device_id>/health' resources support subscriptions."
                 )
-            
+
             # Check subscription limits per device
             device_id = self._extract_device_id(resource_uri)
             if device_id:
@@ -194,10 +194,10 @@ class SSEManager:
             resource_pattern = self._get_resource_pattern(resource_uri)
             self._resource_patterns[resource_uri] = resource_pattern
             self._update_subscription_metrics(resource_pattern)
-            
+
             # Phase 4: Update per-resource subscription count
             self._update_sse_active_subscriptions(resource_uri)
-            
+
             # Start periodic health updates if this is a health resource and first subscriber
             if self._is_health_resource(resource_uri):
                 if resource_uri not in self._health_update_tasks and self.session_factory:
@@ -239,13 +239,13 @@ class SSEManager:
         # Remove from resource tracking
         resource_uri = subscription.resource_uri
         self._subscriptions_by_resource[resource_uri].discard(subscription_id)
-        
+
         resource_pattern = self._get_resource_pattern(resource_uri)
 
         if not self._subscriptions_by_resource[resource_uri]:
             del self._subscriptions_by_resource[resource_uri]
             self._resource_patterns.pop(resource_uri, None)
-            
+
             # Stop health update task if this was the last subscriber
             if self._is_health_resource(resource_uri) and resource_uri in self._health_update_tasks:
                 task = self._health_update_tasks.pop(resource_uri)
@@ -261,7 +261,7 @@ class SSEManager:
                 )
 
         self._update_subscription_metrics(resource_pattern)
-        
+
         # Phase 4: Update per-resource subscription count
         self._update_sse_active_subscriptions(resource_uri)
 
@@ -347,7 +347,7 @@ class SSEManager:
             sent_count = 0
             dropped_count = 0
             resource_pattern = self._get_resource_pattern(resource_uri)
-            
+
             for sub_id in list(subscriber_ids):  # Copy to avoid modification during iteration
                 subscription = self._subscriptions.get(sub_id)
                 if not subscription:
@@ -380,7 +380,7 @@ class SSEManager:
                 resource_notifications_total.labels(
                     resource_uri_pattern=resource_pattern,
                 ).inc(sent_count)
-                
+
                 # Phase 4: Record events sent with resource_type and device_id
                 device_id = self._extract_device_id(resource_uri)
                 resource_type = self._extract_resource_type(resource_uri)
@@ -430,7 +430,7 @@ class SSEManager:
         # Phase 4: Record active connection
         metrics.record_sse_active_connection_start()
         connection_start_time = datetime.now(UTC)
-        
+
         try:
             # Send initial connection confirmation
             yield {
@@ -491,7 +491,7 @@ class SSEManager:
             metrics.record_sse_connection_end(duration=connection_duration)
             # Phase 4: Record active connection end
             metrics.record_sse_active_connection_end()
-            
+
             # Cleanup subscription on disconnect
             await self.unsubscribe(subscription.subscription_id)
 
@@ -537,14 +537,14 @@ class SSEManager:
         # Phase 4: Only device://*/health is subscribable
         if not resource_uri.startswith("device://"):
             return False
-            
+
         # Parse device://<device_id>/health
         parts = resource_uri.split("/")
         if len(parts) >= 4 and parts[3] == "health":
             return True
-            
+
         return False
-    
+
     @staticmethod
     def _is_health_resource(resource_uri: str) -> bool:
         """Check if a resource URI is a device health resource.
@@ -680,7 +680,7 @@ class SSEManager:
                 extra={"resource_uri": resource_uri},
             )
             return
-            
+
         device_id = self._extract_device_id(resource_uri)
         if not device_id:
             logger.error(
@@ -688,7 +688,7 @@ class SSEManager:
                 extra={"resource_uri": resource_uri},
             )
             return
-        
+
         logger.info(
             "Starting periodic health updates",
             extra={
@@ -697,7 +697,7 @@ class SSEManager:
                 "interval_seconds": self.health_update_interval_seconds,
             },
         )
-        
+
         try:
             while True:
                 try:
@@ -710,7 +710,7 @@ class SSEManager:
                             .limit(1)
                         )
                         health_check = result.scalar_one_or_none()
-                        
+
                         if health_check:
                             # Build health data
                             health_data = {
@@ -725,7 +725,7 @@ class SSEManager:
                                     "uptime_seconds": health_check.uptime_seconds,
                                 },
                             }
-                            
+
                             # Calculate memory usage percent if we have the data
                             if (
                                 health_check.memory_used_bytes is not None
@@ -735,14 +735,14 @@ class SSEManager:
                                 health_data["metrics"]["memory_usage_percent"] = (
                                     health_check.memory_used_bytes / health_check.memory_total_bytes * 100
                                 )
-                            
+
                             # Broadcast to subscribers
                             await self.broadcast(
                                 resource_uri=resource_uri,
                                 data=health_data,
                                 event_type="health",
                             )
-                            
+
                             logger.debug(
                                 "Broadcasted health update",
                                 extra={
@@ -761,12 +761,12 @@ class SSEManager:
                                 },
                                 event_type="error",
                             )
-                            
+
                             logger.debug(
                                 "No health check data found for device",
                                 extra={"resource_uri": resource_uri, "device_id": device_id},
                             )
-                
+
                 except Exception as e:
                     logger.error(
                         "Error querying health data",
@@ -789,10 +789,10 @@ class SSEManager:
                         )
                     except Exception:
                         pass  # Ignore broadcast errors
-                
+
                 # Wait for next update
                 await asyncio.sleep(self.health_update_interval_seconds)
-                
+
         except asyncio.CancelledError:
             logger.info(
                 "Periodic health updates cancelled",
