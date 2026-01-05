@@ -6,26 +6,19 @@ and protocol-level utilities for the MCP server.
 Streaming Protocol Support (Phase 4):
 --------------------------------------
 Tools can stream progress updates by yielding progress dictionaries when
-`stream_progress=true` is passed in tool arguments. This enables real-time
+stream_progress=true is passed in tool arguments. This enables real-time
 feedback for long-running operations like ping, traceroute, and bandwidth tests.
 
 Progress Message Format:
-    {
-        "type": "progress",
-        "message": "Reply from 8.8.8.8: 25ms",
-        "percent": 25  # Optional: 0-100
-    }
+    Progress messages are dictionaries with type, message, and optional
+    percent (0-100) and data fields. Example:
+    {"type": "progress", "message": "Reply from 8.8.8.8: 25ms", "percent": 25}
 
 Transport-Specific Behavior:
-    - HTTP/SSE Transport: Progress messages sent as SSE events:
-        event: progress
-        data: {"type":"progress","message":"...","percent":25}
-
-        event: result
-        data: {"result": {...}}
-
+    - HTTP/SSE Transport: Progress messages sent as SSE events with event
+      type "progress" followed by final result with event type "result"
     - STDIO Transport: Progress messages collected but not streamed.
-        Only final result returned (backward compatible).
+      Only final result returned (backward compatible).
 
 See docs/19-json-rpc-error-codes-and-mcp-protocol-specification.md
 """
