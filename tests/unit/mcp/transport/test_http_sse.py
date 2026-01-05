@@ -148,6 +148,14 @@ async def test_handle_request_success() -> None:
     """Test handle_request processes valid JSON-RPC request successfully."""
     settings = Settings(mcp_transport="http")
     mock_mcp = MagicMock()
+
+    # Mock FastMCP tool result
+    mock_content = SimpleNamespace(
+        type="text", text="Tool result", model_dump=lambda **kwargs: {"text": "Tool result"}
+    )
+    mock_tool_result = SimpleNamespace(content=[mock_content], isError=False)
+    mock_mcp._call_tool_mcp = AsyncMock(return_value=mock_tool_result)
+
     transport = HTTPSSETransport(settings, mock_mcp)
 
     # Mock request
@@ -246,6 +254,14 @@ async def test_handle_request_with_user_context() -> None:
     """Test handle_request propagates user context from auth middleware."""
     settings = Settings(mcp_transport="http")
     mock_mcp = MagicMock()
+
+    # Mock FastMCP tool result
+    mock_content = SimpleNamespace(
+        type="text", text="Result", model_dump=lambda **kwargs: {"text": "Result"}
+    )
+    mock_tool_result = SimpleNamespace(content=[mock_content], isError=False)
+    mock_mcp._call_tool_mcp = AsyncMock(return_value=mock_tool_result)
+
     transport = HTTPSSETransport(settings, mock_mcp)
 
     # Mock request with user context
@@ -257,7 +273,7 @@ async def test_handle_request_with_user_context() -> None:
             "jsonrpc": "2.0",
             "id": "req-user-123",
             "method": "tools/call",
-            "params": {"name": "test"},
+            "params": {"name": "test", "arguments": {}},
         }
     )
     mock_request.state.user = {"user_id": "user-123", "roles": ["admin"]}
@@ -266,10 +282,19 @@ async def test_handle_request_with_user_context() -> None:
     with patch("routeros_mcp.mcp.transport.http_sse.get_correlation_id", return_value="corr-user"):
         response = await transport.handle_request(mock_request)
 
-    # Verify response includes user context in metadata
+    # Verify response
+    assert response.status_code == 200
     assert isinstance(response.body, bytes)
     body = json.loads(response.body.decode())
-    assert body["result"]["_meta"]["has_user_context"] is True
+    assert "result" in body
+    assert "content" in body["result"]
+
+    # Verify user context was passed to FastMCP
+    call_args = mock_mcp._call_tool_mcp.call_args
+    assert call_args is not None
+    arguments = call_args[0][1]  # Second positional argument
+    assert "_user" in arguments
+    assert arguments["_user"]["user_id"] == "user-123"
 
 
 @pytest.mark.asyncio
@@ -309,6 +334,14 @@ async def test_process_mcp_request_with_user_context() -> None:
     """Test _process_mcp_request adds user context to params."""
     settings = Settings(mcp_transport="http")
     mock_mcp = MagicMock()
+
+    # Mock FastMCP tool result
+    mock_content = SimpleNamespace(
+        type="text", text="Result", model_dump=lambda **kwargs: {"text": "Result"}
+    )
+    mock_tool_result = SimpleNamespace(content=[mock_content], isError=False)
+    mock_mcp._call_tool_mcp = AsyncMock(return_value=mock_tool_result)
+
     transport = HTTPSSETransport(settings, mock_mcp)
 
     request = {
@@ -326,7 +359,14 @@ async def test_process_mcp_request_with_user_context() -> None:
     assert response["jsonrpc"] == "2.0"
     assert response["id"] == "test-123"
     assert "result" in response
-    assert response["result"]["_meta"]["has_user_context"] is True
+    assert "content" in response["result"]
+
+    # Verify user context was passed to FastMCP
+    call_args = mock_mcp._call_tool_mcp.call_args
+    assert call_args is not None
+    arguments = call_args[0][1]  # Second positional argument
+    assert "_user" in arguments
+    assert arguments["_user"] == user_context
 
 
 @pytest.mark.asyncio
@@ -334,6 +374,13 @@ async def test_process_mcp_request_without_user_context() -> None:
     """Test _process_mcp_request works without user context."""
     settings = Settings(mcp_transport="http")
     mock_mcp = MagicMock()
+
+    # Mock FastMCP tools list result
+    mock_tool = SimpleNamespace(
+        name="echo", description="Echo tool", inputSchema={"type": "object"}
+    )
+    mock_mcp._list_tools_mcp = AsyncMock(return_value=[mock_tool])
+
     transport = HTTPSSETransport(settings, mock_mcp)
 
     request = {
@@ -350,7 +397,8 @@ async def test_process_mcp_request_without_user_context() -> None:
     assert response["jsonrpc"] == "2.0"
     assert response["id"] == "test-no-user"
     assert "result" in response
-    assert response["result"]["_meta"]["has_user_context"] is False
+    assert "tools" in response["result"]
+    assert len(response["result"]["tools"]) == 1
 
 
 @pytest.mark.asyncio
@@ -679,3 +727,389 @@ async def test_subscription_route_fallback_when_custom_route_unavailable() -> No
         message = call.args[0]
         assert "does not support custom routes" in message
         assert "SSE subscriptions unavailable" in message
+
+
+# ====================================================================================
+# NEW TESTS FOR _process_mcp_request() INTEGRATION WITH FASTMCP
+# ====================================================================================
+
+
+@pytest.mark.asyncio
+async def test_process_mcp_request_tools_call_success() -> None:
+    """Test _process_mcp_request routes tools/call to FastMCP successfully."""
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+
+    # Mock FastMCP tool execution result
+    mock_content = SimpleNamespace(
+        type="text", text="Tool result", model_dump=lambda **kwargs: {"text": "Tool result"}
+    )
+    mock_tool_result = SimpleNamespace(content=[mock_content], isError=False)
+
+    mock_mcp._call_tool_mcp = AsyncMock(return_value=mock_tool_result)
+
+    transport = HTTPSSETransport(settings, mock_mcp)
+
+    request = {
+        "jsonrpc": "2.0",
+        "id": "test-123",
+        "method": "tools/call",
+        "params": {"name": "echo", "arguments": {"message": "test"}},
+    }
+
+    response = await transport._process_mcp_request(request)
+
+    # Verify response structure
+    assert response["jsonrpc"] == "2.0"
+    assert response["id"] == "test-123"
+    assert "result" in response
+    assert "content" in response["result"]
+    assert len(response["result"]["content"]) == 1
+    assert response["result"]["content"][0]["type"] == "text"
+    assert response["result"]["content"][0]["text"] == "Tool result"
+
+    # Verify FastMCP was called correctly
+    mock_mcp._call_tool_mcp.assert_called_once_with("echo", {"message": "test"})
+
+
+@pytest.mark.asyncio
+async def test_process_mcp_request_tools_call_missing_name() -> None:
+    """Test _process_mcp_request returns error for tools/call without name."""
+    from routeros_mcp.mcp.errors import InvalidParamsError
+
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+    transport = HTTPSSETransport(settings, mock_mcp)
+
+    request = {
+        "jsonrpc": "2.0",
+        "id": "test-456",
+        "method": "tools/call",
+        "params": {"arguments": {"message": "test"}},  # Missing 'name'
+    }
+
+    with pytest.raises(InvalidParamsError) as exc_info:
+        await transport._process_mcp_request(request)
+
+    assert "name" in str(exc_info.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_process_mcp_request_tools_list_success() -> None:
+    """Test _process_mcp_request routes tools/list to FastMCP successfully."""
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+
+    # Mock FastMCP tools list result
+    mock_tool = SimpleNamespace(
+        name="echo", description="Echo back a message", inputSchema={"type": "object"}
+    )
+    mock_mcp._list_tools_mcp = AsyncMock(return_value=[mock_tool])
+
+    transport = HTTPSSETransport(settings, mock_mcp)
+
+    request = {"jsonrpc": "2.0", "id": "test-789", "method": "tools/list", "params": {}}
+
+    response = await transport._process_mcp_request(request)
+
+    # Verify response structure
+    assert response["jsonrpc"] == "2.0"
+    assert response["id"] == "test-789"
+    assert "result" in response
+    assert "tools" in response["result"]
+    assert len(response["result"]["tools"]) == 1
+    assert response["result"]["tools"][0]["name"] == "echo"
+    assert response["result"]["tools"][0]["description"] == "Echo back a message"
+
+    # Verify FastMCP was called
+    mock_mcp._list_tools_mcp.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_process_mcp_request_resources_read_success() -> None:
+    """Test _process_mcp_request routes resources/read to FastMCP successfully."""
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+
+    # Mock FastMCP resource read result
+    mock_content = SimpleNamespace(
+        uri="device://dev-001/health", mimeType="application/json", text='{"status": "ok"}', blob=None
+    )
+    mock_mcp._read_resource_mcp = AsyncMock(return_value=[mock_content])
+
+    transport = HTTPSSETransport(settings, mock_mcp)
+
+    request = {
+        "jsonrpc": "2.0",
+        "id": "test-res-123",
+        "method": "resources/read",
+        "params": {"uri": "device://dev-001/health"},
+    }
+
+    response = await transport._process_mcp_request(request)
+
+    # Verify response structure
+    assert response["jsonrpc"] == "2.0"
+    assert response["id"] == "test-res-123"
+    assert "result" in response
+    assert "contents" in response["result"]
+    assert len(response["result"]["contents"]) == 1
+    assert response["result"]["contents"][0]["uri"] == "device://dev-001/health"
+    assert response["result"]["contents"][0]["text"] == '{"status": "ok"}'
+
+    # Verify FastMCP was called correctly
+    mock_mcp._read_resource_mcp.assert_called_once_with("device://dev-001/health")
+
+
+@pytest.mark.asyncio
+async def test_process_mcp_request_resources_read_missing_uri() -> None:
+    """Test _process_mcp_request returns error for resources/read without uri."""
+    from routeros_mcp.mcp.errors import InvalidParamsError
+
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+    transport = HTTPSSETransport(settings, mock_mcp)
+
+    request = {
+        "jsonrpc": "2.0",
+        "id": "test-res-456",
+        "method": "resources/read",
+        "params": {},  # Missing 'uri'
+    }
+
+    with pytest.raises(InvalidParamsError) as exc_info:
+        await transport._process_mcp_request(request)
+
+    assert "uri" in str(exc_info.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_process_mcp_request_resources_list_success() -> None:
+    """Test _process_mcp_request routes resources/list to FastMCP successfully."""
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+
+    # Mock FastMCP resources list result
+    mock_resource = SimpleNamespace(
+        uri="device://dev-001/health",
+        name="Device Health",
+        description="Device health status",
+        mimeType="application/json",
+    )
+    mock_mcp._list_resources_mcp = AsyncMock(return_value=[mock_resource])
+
+    transport = HTTPSSETransport(settings, mock_mcp)
+
+    request = {"jsonrpc": "2.0", "id": "test-res-list", "method": "resources/list", "params": {}}
+
+    response = await transport._process_mcp_request(request)
+
+    # Verify response structure
+    assert response["jsonrpc"] == "2.0"
+    assert response["id"] == "test-res-list"
+    assert "result" in response
+    assert "resources" in response["result"]
+    assert len(response["result"]["resources"]) == 1
+    assert response["result"]["resources"][0]["uri"] == "device://dev-001/health"
+    assert response["result"]["resources"][0]["name"] == "Device Health"
+
+    # Verify FastMCP was called
+    mock_mcp._list_resources_mcp.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_process_mcp_request_prompts_get_success() -> None:
+    """Test _process_mcp_request routes prompts/get to FastMCP successfully."""
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+
+    # Mock FastMCP prompt result
+    mock_message_content = SimpleNamespace(type="text", text="Prompt text")
+    mock_message = SimpleNamespace(role="user", content=mock_message_content)
+    mock_prompt_result = SimpleNamespace(description="Test prompt", messages=[mock_message])
+    mock_mcp._get_prompt_mcp = AsyncMock(return_value=mock_prompt_result)
+
+    transport = HTTPSSETransport(settings, mock_mcp)
+
+    request = {
+        "jsonrpc": "2.0",
+        "id": "test-prompt-123",
+        "method": "prompts/get",
+        "params": {"name": "test-prompt", "arguments": {"key": "value"}},
+    }
+
+    response = await transport._process_mcp_request(request)
+
+    # Verify response structure
+    assert response["jsonrpc"] == "2.0"
+    assert response["id"] == "test-prompt-123"
+    assert "result" in response
+    assert response["result"]["description"] == "Test prompt"
+    assert len(response["result"]["messages"]) == 1
+    assert response["result"]["messages"][0]["role"] == "user"
+
+    # Verify FastMCP was called correctly
+    mock_mcp._get_prompt_mcp.assert_called_once_with("test-prompt", {"key": "value"})
+
+
+@pytest.mark.asyncio
+async def test_process_mcp_request_prompts_get_missing_name() -> None:
+    """Test _process_mcp_request returns error for prompts/get without name."""
+    from routeros_mcp.mcp.errors import InvalidParamsError
+
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+    transport = HTTPSSETransport(settings, mock_mcp)
+
+    request = {
+        "jsonrpc": "2.0",
+        "id": "test-prompt-456",
+        "method": "prompts/get",
+        "params": {"arguments": {}},  # Missing 'name'
+    }
+
+    with pytest.raises(InvalidParamsError) as exc_info:
+        await transport._process_mcp_request(request)
+
+    assert "name" in str(exc_info.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_process_mcp_request_prompts_list_success() -> None:
+    """Test _process_mcp_request routes prompts/list to FastMCP successfully."""
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+
+    # Mock FastMCP prompts list result
+    mock_prompt = SimpleNamespace(
+        name="test-prompt", description="Test prompt description", arguments=[]
+    )
+    mock_mcp._list_prompts_mcp = AsyncMock(return_value=[mock_prompt])
+
+    transport = HTTPSSETransport(settings, mock_mcp)
+
+    request = {"jsonrpc": "2.0", "id": "test-prompt-list", "method": "prompts/list", "params": {}}
+
+    response = await transport._process_mcp_request(request)
+
+    # Verify response structure
+    assert response["jsonrpc"] == "2.0"
+    assert response["id"] == "test-prompt-list"
+    assert "result" in response
+    assert "prompts" in response["result"]
+    assert len(response["result"]["prompts"]) == 1
+    assert response["result"]["prompts"][0]["name"] == "test-prompt"
+
+    # Verify FastMCP was called
+    mock_mcp._list_prompts_mcp.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_process_mcp_request_initialize_method() -> None:
+    """Test _process_mcp_request handles initialize method."""
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+    mock_mcp.name = "routeros-mcp"
+    mock_mcp.version = "1.0.0"
+
+    transport = HTTPSSETransport(settings, mock_mcp)
+
+    request = {
+        "jsonrpc": "2.0",
+        "id": "test-init",
+        "method": "initialize",
+        "params": {"protocolVersion": "2024-11-05", "capabilities": {}},
+    }
+
+    response = await transport._process_mcp_request(request)
+
+    # Verify response structure
+    assert response["jsonrpc"] == "2.0"
+    assert response["id"] == "test-init"
+    assert "result" in response
+    assert response["result"]["protocolVersion"] == "2024-11-05"
+    assert "capabilities" in response["result"]
+    assert "serverInfo" in response["result"]
+    assert response["result"]["serverInfo"]["name"] == "routeros-mcp"
+
+
+@pytest.mark.asyncio
+async def test_process_mcp_request_unknown_method() -> None:
+    """Test _process_mcp_request returns MethodNotFoundError for unknown methods."""
+    from routeros_mcp.mcp.errors import MethodNotFoundError
+
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+    transport = HTTPSSETransport(settings, mock_mcp)
+
+    request = {
+        "jsonrpc": "2.0",
+        "id": "test-unknown",
+        "method": "unknown/method",
+        "params": {},
+    }
+
+    with pytest.raises(MethodNotFoundError) as exc_info:
+        await transport._process_mcp_request(request)
+
+    assert "unknown/method" in str(exc_info.value)
+    assert exc_info.value.code == -32601  # Method not found
+
+
+@pytest.mark.asyncio
+async def test_process_mcp_request_with_user_context() -> None:
+    """Test _process_mcp_request propagates user context to tool calls."""
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+
+    # Mock FastMCP tool execution
+    mock_content = SimpleNamespace(
+        type="text", text="Result", model_dump=lambda **kwargs: {"text": "Result"}
+    )
+    mock_tool_result = SimpleNamespace(content=[mock_content], isError=False)
+    mock_mcp._call_tool_mcp = AsyncMock(return_value=mock_tool_result)
+
+    transport = HTTPSSETransport(settings, mock_mcp)
+
+    user_context = {"user_id": "user-123", "roles": ["admin"]}
+
+    request = {
+        "jsonrpc": "2.0",
+        "id": "test-user-ctx",
+        "method": "tools/call",
+        "params": {"name": "echo", "arguments": {"message": "test"}},
+    }
+
+    await transport._process_mcp_request(request, user_context=user_context)
+
+    # Verify user context was added to arguments
+    call_args = mock_mcp._call_tool_mcp.call_args
+    assert call_args is not None
+    arguments = call_args[0][1]  # Second positional argument
+    assert "_user" in arguments
+    assert arguments["_user"] == user_context
+
+
+@pytest.mark.asyncio
+async def test_process_mcp_request_tool_exception_mapping() -> None:
+    """Test _process_mcp_request maps tool exceptions to MCP errors."""
+    settings = Settings(mcp_transport="http")
+    mock_mcp = MagicMock()
+
+    # Mock FastMCP tool execution to raise exception
+    mock_mcp._call_tool_mcp = AsyncMock(side_effect=RuntimeError("Tool execution failed"))
+
+    transport = HTTPSSETransport(settings, mock_mcp)
+
+    request = {
+        "jsonrpc": "2.0",
+        "id": "test-exception",
+        "method": "tools/call",
+        "params": {"name": "failing_tool", "arguments": {}},
+    }
+
+    # Should raise an MCPError after mapping
+    from routeros_mcp.mcp.errors import MCPError
+
+    with pytest.raises(MCPError):
+        await transport._process_mcp_request(request)
