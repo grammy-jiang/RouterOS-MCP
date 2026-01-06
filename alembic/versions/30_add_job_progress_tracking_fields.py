@@ -60,11 +60,24 @@ def upgrade() -> None:
         ["current_device_id"],
     )
     
-    # Change result_summary from Text to JSON
-    # SQLite doesn't support ALTER COLUMN, so we need to work around this
-    # For SQLite: JSON is just TEXT with CHECK constraint, so no real change needed
-    # For PostgreSQL: we would need to alter the type
-    # Since the field is nullable and can be NULL, we can handle this gracefully
+    # Handle result_summary type change (Text → JSON)
+    # 
+    # Important: This migration does NOT alter the result_summary column type in the database.
+    # Rationale:
+    # - In SQLite: JSON type is stored as TEXT internally, so no schema change is needed
+    # - In PostgreSQL: Would require ALTER COLUMN with USING clause to convert data
+    # - SQLAlchemy ORM will handle JSON encoding/decoding regardless of DB column type
+    # - Existing NULL values and any text content remain compatible
+    # - New writes will use JSON serialization automatically
+    #
+    # For fresh databases: result_summary will be created as JSON type directly
+    # For existing databases: Column remains TEXT but functions as JSON via ORM
+    # 
+    # If explicit PostgreSQL migration is needed later, use:
+    #   op.alter_column('jobs', 'result_summary',
+    #                   existing_type=sa.Text(),
+    #                   type_=sa.JSON(),
+    #                   postgresql_using='result_summary::json')
     
     # Add check constraint for progress_percent (0-100)
     op.create_check_constraint(
