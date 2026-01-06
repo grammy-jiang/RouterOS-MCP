@@ -492,6 +492,46 @@ class TestJobModel:
 
         assert found.cancellation_requested is True
 
+    @pytest.mark.asyncio
+    async def test_job_current_device_relationship(self, db_session) -> None:
+        """Test Job -> Device relationship for current_device."""
+        # Create a device
+        device = Device(
+            id="dev-1100",
+            name="test-router-1100",
+            management_ip="198.51.100.101",
+            management_port=443,
+            environment="lab",
+            status="healthy",
+            tags={},
+            allow_advanced_writes=False,
+            allow_professional_workflows=False,
+        )
+        db_session.add(device)
+        await db_session.commit()
+
+        # Create job with current_device_id
+        job = Job(
+            id="job-1100",
+            job_type="APPLY_PLAN",
+            status="running",
+            device_ids=["dev-1100", "dev-1101"],
+            attempts=1,
+            max_attempts=3,
+            current_device_id="dev-1100",
+            progress_percent=25,
+        )
+        db_session.add(job)
+        await db_session.commit()
+
+        # Query and verify relationship
+        result = await db_session.execute(select(Job).where(Job.id == "job-1100"))
+        found_job = result.scalar_one()
+
+        assert found_job.current_device is not None
+        assert found_job.current_device.id == "dev-1100"
+        assert found_job.current_device.name == "test-router-1100"
+
 
 class TestAuditEventModel:
     """Tests for AuditEvent model."""

@@ -553,8 +553,15 @@ class Job(Base):
         Text, nullable=True, comment="Error message if failed"
     )
 
-    # Relationship
+    # Relationships
     plan: Mapped[Optional["Plan"]] = relationship("Plan", back_populates="jobs")
+    
+    # Phase 4: Relationship to current device being processed
+    current_device: Mapped[Optional["Device"]] = relationship(
+        "Device",
+        foreign_keys=[current_device_id],
+        lazy="selectin",
+    )
 
     __table_args__ = (
         Index("idx_job_status_next_run", "status", "next_run_at"),
