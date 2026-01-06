@@ -519,6 +519,14 @@ class Job(Base):
         comment="Scheduled execution time",
     )
 
+    # Cancellation support (Phase 4)
+    cancellation_requested: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="Whether job cancellation has been requested",
+    )
+
     # Results
     result_summary: Mapped[str | None] = mapped_column(
         Text, nullable=True, comment="Job execution summary"

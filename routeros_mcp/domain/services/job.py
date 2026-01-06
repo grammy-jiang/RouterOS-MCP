@@ -44,6 +44,56 @@ class JobService:
         """
         self.session = session
 
+    async def _handle_cancellation(
+        self,
+        job: JobModel,
+        batch_idx: int,
+        batches: list[list[str]],
+        device_ids: list[str],
+        results: dict[str, Any],
+        batches_completed: int,
+    ) -> dict[str, Any] | None:
+        """Handle job cancellation if requested.
+        
+        Args:
+            job: Job model instance
+            batch_idx: Current batch index (0-based, indicates batch about to be processed)
+            batches: List of all batches
+            device_ids: All device IDs for the job
+            results: Current results dictionary
+            batches_completed: Number of batches actually completed so far
+            
+        Returns:
+            Results dictionary if cancelled, None otherwise
+        """
+        await self.session.refresh(job)
+        if job.cancellation_requested:
+            logger.info(
+                f"Job {job.id} cancellation requested after {batches_completed} batches",
+                extra={"job_id": job.id, "batch_index": batch_idx},
+            )
+            job.status = "cancelled"
+            devices_processed = sum(len(batches[i]) for i in range(batches_completed))
+            
+            # Distinguish between "cancelled before starting" vs "cancelled after partial completion"
+            if batches_completed == 0 and not results.get("device_results"):
+                job.result_summary = (
+                    f"Cancelled before starting: "
+                    f"0/{len(device_ids)} devices, 0/{len(batches)} batches processed"
+                )
+            else:
+                job.result_summary = (
+                    f"Cancelled after processing {devices_processed}/{len(device_ids)} devices "
+                    f"in {batches_completed}/{len(batches)} batches"
+                )
+            
+            await self.session.commit()
+            
+            results["status"] = "cancelled"
+            results["devices_processed"] = devices_processed
+            return results
+        return None
+
     async def create_job(
         self,
         job_type: str,
@@ -178,6 +228,14 @@ class JobService:
 
         try:
             for batch_idx, batch_device_ids in enumerate(batches):
+                # Check for cancellation request before processing batch
+                # Pass batch_idx as batches_completed since no batches have been completed yet
+                cancellation_result = await self._handle_cancellation(
+                    job, batch_idx, batches, device_ids, results, batches_completed=0
+                )
+                if cancellation_result:
+                    return cancellation_result
+
                 logger.info(
                     f"Processing batch {batch_idx + 1}/{len(batches)}",
                     extra={
@@ -204,7 +262,18 @@ class JobService:
                     await self.session.commit()
                     raise
 
+                # IMPORTANT: batches_completed must be incremented BEFORE checking for cancellation
+                # so that _handle_cancellation can accurately calculate devices_processed
                 results["batches_completed"] += 1
+
+                # Check for cancellation after batch completion
+                # Pass batch_idx + 1 and the updated batches_completed count
+                cancellation_result = await self._handle_cancellation(
+                    job, batch_idx + 1, batches, device_ids, results, 
+                    batches_completed=results["batches_completed"]
+                )
+                if cancellation_result:
+                    return cancellation_result
 
                 # Pause between batches for health checks (except after last batch)
                 if batch_idx < len(batches) - 1:
@@ -274,10 +343,57 @@ class JobService:
             "max_attempts": job.max_attempts,
             "result_summary": job.result_summary,
             "error_message": job.error_message,
+            "cancellation_requested": job.cancellation_requested,
             "next_run_at": job.next_run_at.isoformat() if job.next_run_at else None,
             "created_at": job.created_at.isoformat(),
             "updated_at": job.updated_at.isoformat(),
         }
+
+    async def request_cancellation(self, job_id: str) -> dict[str, Any]:
+        """Request cancellation of a running job.
+        
+        Sets the cancellation_requested flag to True. The job execution
+        loop will check this flag after each batch and gracefully stop,
+        finishing the current batch before transitioning to cancelled state.
+        
+        Args:
+            job_id: Job identifier
+            
+        Returns:
+            Updated job details
+            
+        Raises:
+            ValueError: If job not found or not in a cancellable state
+        """
+        stmt = select(JobModel).where(JobModel.id == job_id)
+        result = await self.session.execute(stmt)
+        job = result.scalar_one_or_none()
+        
+        if not job:
+            raise ValueError(f"Job not found: {job_id}")
+        
+        if job.status not in ["pending", "running"]:
+            raise ValueError(
+                f"Job {job_id} cannot be cancelled (status: {job.status}). "
+                "Only pending or running jobs can be cancelled."
+            )
+        
+        if job.cancellation_requested:
+            logger.info(
+                f"Cancellation already requested for job {job_id}",
+                extra={"job_id": job_id},
+            )
+            return await self.get_job(job_id)
+        
+        job.cancellation_requested = True
+        await self.session.commit()
+        
+        logger.info(
+            f"Cancellation requested for job {job_id}",
+            extra={"job_id": job_id, "status": job.status},
+        )
+        
+        return await self.get_job(job_id)
 
     async def schedule_retry(
         self, job_id: str, delay_seconds: int = 60

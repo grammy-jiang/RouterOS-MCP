@@ -7,6 +7,7 @@ See docs/09-operations-deployment-self-update-and-runbook.md for design.
 """
 
 import logging
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -56,6 +57,16 @@ async def get_plan_service():
     async for session in get_session():
         settings = Settings()
         yield PlanService(session, settings)
+
+
+async def get_job_service():
+    """Dependency to get JobService."""
+    # Import here to avoid namespace pollution
+    from routeros_mcp.domain.services.job import JobService
+    from routeros_mcp.infra.db.session import get_session
+    
+    async for session in get_session():
+        yield JobService(session)
 
 
 @router.get("", response_class=HTMLResponse)
@@ -372,6 +383,187 @@ async def reject_plan(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to reject plan. Correlation ID: {correlation_id}",
+        )
+
+
+@router.get("/api/admin/jobs/{job_id}")
+async def get_job_status(
+    job_id: str,
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    job_service: Any = Depends(get_job_service),
+) -> JSONResponse:
+    """Get job status and progress.
+
+    Args:
+        job_id: Job identifier
+        user: Current authenticated user (must have admin or operator role)
+        job_service: Job service dependency
+
+    Returns:
+        JSON with job status, progress, and results
+    """
+    # Check user role - job status may contain sensitive infrastructure details
+    if user.get("role") not in ["admin", "operator"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions to view job status",
+        )
+
+    try:
+        job = await job_service.get_job(job_id)
+
+        # Calculate progress percentage
+        total_devices = len(job["device_ids"])
+        progress_percent = 0
+        
+        if job["status"] == "success":
+            progress_percent = 100
+        elif job["status"] in ["running", "cancelled"]:
+            # Try to parse result_summary to get devices processed.
+            #
+            # IMPORTANT: This logic depends on the exact string format produced by the
+            # job execution code (execute_job in JobService). The expected formats are:
+            #   - "Cancelled after processing X/Y devices in A/B batches"
+            #   - "Cancelled before starting: 0/Y devices, 0/Z batches processed"
+            #   - "Completed X devices in Y batches"
+            # Any change to the result_summary wording or structure MUST be coordinated
+            # with this parsing logic; otherwise, progress_percent will remain 0 and a
+            # warning will be logged.
+            result_summary = job.get("result_summary", "")
+            if result_summary:
+                matched_progress = False
+                try:
+                    # Match "X/Y devices" first, e.g. "10/20 devices"
+                    match = re.search(r'(\d+)/(\d+)\s+devices', result_summary)
+                    if match:
+                        processed = int(match.group(1))
+                        matched_progress = True
+                        progress_percent = (
+                            int((processed / total_devices) * 100) if total_devices > 0 else 0
+                        )
+                    else:
+                        # Try alternative format "Completed X devices"
+                        match = re.search(r'Completed\s+(\d+)\s+devices', result_summary)
+                        if match:
+                            processed = int(match.group(1))
+                            matched_progress = True
+                            progress_percent = (
+                                int((processed / total_devices) * 100) if total_devices > 0 else 0
+                            )
+                except (ValueError, AttributeError):
+                    # If parsing fails due to an unexpected numeric/attribute issue,
+                    # keep progress_percent at 0 but emit a warning for observability.
+                    logger.warning(
+                        "Failed to parse progress from result_summary due to exception; "
+                        "progress defaulted to 0",
+                        extra={"job_id": job_id, "result_summary": result_summary},
+                    )
+                else:
+                    if not matched_progress:
+                        # The result_summary format did not match any known patterns.
+                        # This commonly indicates that result_summary was changed
+                        # without updating this parsing logic.
+                        logger.warning(
+                            "Unable to infer progress from result_summary; "
+                            "no known patterns matched and progress defaulted to 0",
+                            extra={"job_id": job_id, "result_summary": result_summary},
+                        )
+
+        job_data = {
+            "job_id": job["job_id"],
+            "plan_id": job["plan_id"],
+            "job_type": job["job_type"],
+            "status": job["status"],
+            "progress_percent": progress_percent,
+            "device_ids": job["device_ids"],
+            "total_devices": total_devices,
+            "attempts": job["attempts"],
+            "max_attempts": job["max_attempts"],
+            "result_summary": job["result_summary"],
+            "error_message": job["error_message"],
+            "cancellation_requested": job["cancellation_requested"],
+            "created_at": job["created_at"],
+            "updated_at": job["updated_at"],
+        }
+
+        return JSONResponse(content=job_data)
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error getting job {job_id}: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get job status. Correlation ID: {correlation_id}",
+        )
+
+
+@router.post("/api/admin/jobs/{job_id}/cancel")
+async def cancel_job(
+    job_id: str,
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    job_service: Any = Depends(get_job_service),
+) -> JSONResponse:
+    """Request cancellation of a running job.
+
+    Args:
+        job_id: Job identifier
+        user: Current authenticated user (must have admin or operator role)
+        job_service: Job service dependency
+
+    Returns:
+        JSON confirmation with updated job status
+    """
+    # Check user role
+    if user.get("role") not in ["admin", "operator"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions to cancel jobs",
+        )
+
+    try:
+        job = await job_service.request_cancellation(job_id)
+
+        return JSONResponse(
+            content={
+                "message": "Job cancellation requested",
+                "job_id": job_id,
+                "status": job["status"],
+                "cancellation_requested": job["cancellation_requested"],
+            }
+        )
+
+    except ValueError as e:
+        message = str(e)
+        if "not found" in message.lower():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=message,
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=message,
+        )
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error cancelling job {job_id}: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to cancel job. Correlation ID: {correlation_id}",
         )
 
 
