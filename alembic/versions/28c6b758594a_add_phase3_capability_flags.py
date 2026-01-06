@@ -1,7 +1,7 @@
 """Add Phase 3 capability flags to devices table.
 
 Revision ID: 28c6b758594a
-Revises: 001
+Revises: 
 Create Date: 2025-12-20 02:19:23.060910
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "28c6b758594a"
-down_revision: Union[str, None] = "001"
+down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
