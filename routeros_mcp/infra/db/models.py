@@ -546,7 +546,7 @@ class Job(Base):
 
     # Results
     result_summary: Mapped[dict | None] = mapped_column(
-        JSON, nullable=True, default=None, comment="Per-device job results (Phase 4)"
+        JSON, nullable=True, comment="Per-device job results (Phase 4)"
     )
 
     error_message: Mapped[str | None] = mapped_column(

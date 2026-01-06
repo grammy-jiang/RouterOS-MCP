@@ -27,7 +27,7 @@ def upgrade() -> None:
             "progress_percent",
             sa.Integer(),
             nullable=False,
-            server_default="0",
+            server_default=sa.text("0"),
             comment="Job progress percentage (0-100)",
         ),
     )
