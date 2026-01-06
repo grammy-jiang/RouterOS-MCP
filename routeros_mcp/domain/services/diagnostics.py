@@ -26,6 +26,8 @@ MAX_PING_COUNT = 100  # Updated to match Phase 4 requirement (1-100)
 MAX_TRACEROUTE_HOPS = 64  # Updated to match requirement (1-64)
 MAX_TRACEROUTE_COUNT = 3
 DEFAULT_TRACEROUTE_HOPS = 30  # Default max hops for traceroute
+MIN_BANDWIDTH_TEST_DURATION = 5  # Minimum bandwidth test duration (seconds)
+MAX_BANDWIDTH_TEST_DURATION = 60  # Maximum bandwidth test duration (seconds)
 
 
 class DiagnosticsService:
@@ -520,3 +522,341 @@ class DiagnosticsService:
                 )
 
         return hops
+
+    async def test_bandwidth(
+        self,
+        device_id: str,
+        target_device_id: str,
+        duration: int = 10,
+        direction: str = "both",
+    ) -> dict[str, Any]:
+        """Run bandwidth test between two RouterOS devices with REST→SSH fallback.
+
+        Args:
+            device_id: Source device identifier
+            target_device_id: Target device identifier (must have allow_bandwidth_test=true)
+            duration: Test duration in seconds (5-60, default: 10)
+            direction: Test direction - 'tx', 'rx', or 'both' (default: 'both')
+
+        Returns:
+            Dictionary with throughput statistics
+
+        Raises:
+            ValidationError: If parameters are invalid or target device doesn't allow bandwidth tests
+            NotFoundError: If target device not found
+        """
+        from routeros_mcp.mcp.errors import AuthenticationError, NotFoundError, ValidationError
+
+        # Get source device (validates it exists)
+        await self.device_service.get_device(device_id)
+
+        # Get target device and validate capability
+        target_device = await self.device_service.get_device(target_device_id)
+        
+        # Check if target device has allow_bandwidth_test capability
+        if not target_device.allow_bandwidth_test:
+            raise ValidationError(
+                f"Target device '{target_device_id}' does not allow bandwidth tests. "
+                f"Enable 'allow_bandwidth_test' capability on the target device.",
+                data={
+                    "target_device_id": target_device_id,
+                    "allow_bandwidth_test": False,
+                    "required_capability": "allow_bandwidth_test",
+                },
+            )
+
+        # Validate duration
+        if duration < MIN_BANDWIDTH_TEST_DURATION:
+            raise ValidationError(
+                f"Bandwidth test duration must be at least {MIN_BANDWIDTH_TEST_DURATION} seconds",
+                data={
+                    "requested_duration": duration,
+                    "min_duration": MIN_BANDWIDTH_TEST_DURATION,
+                },
+            )
+
+        if duration > MAX_BANDWIDTH_TEST_DURATION:
+            raise ValidationError(
+                f"Bandwidth test duration cannot exceed {MAX_BANDWIDTH_TEST_DURATION} seconds",
+                data={
+                    "requested_duration": duration,
+                    "max_duration": MAX_BANDWIDTH_TEST_DURATION,
+                },
+            )
+
+        # Validate direction
+        valid_directions = ["tx", "rx", "both"]
+        if direction not in valid_directions:
+            raise ValidationError(
+                f"Invalid direction '{direction}'. Must be one of: {', '.join(valid_directions)}",
+                data={"direction": direction, "valid_directions": valid_directions},
+            )
+
+        rest_error: Exception | None = None
+
+        # Attempt REST first
+        try:
+            result = await self._test_bandwidth_via_rest(
+                device_id, target_device.management_ip, duration, direction
+            )
+            result["transport"] = "rest"
+            result["fallback_used"] = False
+            result["rest_error"] = None
+            result["target_device_id"] = target_device_id
+            return result
+        except (
+            AuthenticationError,
+            RouterOSTimeoutError,
+            RouterOSNetworkError,
+            RouterOSServerError,
+            RouterOSClientError,
+            Exception,
+        ) as exc:  # noqa: BLE001
+            rest_error = exc
+            logger.warning(
+                "REST bandwidth test failed, attempting SSH fallback",
+                exc_info=exc,
+                extra={
+                    "device_id": device_id,
+                    "target_device_id": target_device_id,
+                    "target_ip": target_device.management_ip,
+                },
+            )
+
+        # SSH fallback
+        try:
+            result = await self._test_bandwidth_via_ssh(
+                device_id, target_device.management_ip, duration, direction
+            )
+            result["transport"] = "ssh"
+            result["fallback_used"] = True
+            result["rest_error"] = str(rest_error) if rest_error else None
+            result["target_device_id"] = target_device_id
+            return result
+        except (RouterOSSSHError, Exception) as ssh_exc:  # noqa: BLE001
+            logger.error(
+                "Bandwidth test failed via REST and SSH",
+                exc_info=ssh_exc,
+                extra={
+                    "device_id": device_id,
+                    "target_device_id": target_device_id,
+                    "target_ip": target_device.management_ip,
+                    "rest_error": str(rest_error),
+                },
+            )
+            raise
+
+    async def _test_bandwidth_via_rest(
+        self,
+        device_id: str,
+        target_address: str,
+        duration: int,
+        direction: str,
+    ) -> dict[str, Any]:
+        """Run bandwidth test via REST API."""
+        client = await self.device_service.get_rest_client(device_id)
+
+        try:
+            # Build test parameters
+            test_params = {
+                "address": target_address,
+                "duration": f"{duration}s",
+                "direction": direction,
+            }
+
+            # Run bandwidth test
+            test_data = await client.post("/rest/tool/bandwidth-test", test_params)
+            return self._parse_rest_bandwidth_result(target_address, test_data)
+        finally:
+            await client.close()
+
+    @staticmethod
+    def _parse_throughput_value(value: Any) -> int:
+        """Parse throughput value from RouterOS API, handling various formats.
+        
+        Supports:
+        - Numeric values (already in bps)
+        - Strings with units: "1000bps", "1Mbps", "1.5Gbps", "500Kbps"
+        
+        Args:
+            value: Throughput value from RouterOS API
+            
+        Returns:
+            Throughput in bits per second (bps)
+        """
+        if isinstance(value, (int, float)):
+            return int(value)
+            
+        if isinstance(value, str):
+            value = value.strip()
+            
+            # Handle unit prefixes (K/M/G)
+            multipliers = {
+                "Gbps": 1_000_000_000,
+                "Mbps": 1_000_000,
+                "Kbps": 1_000,
+                "bps": 1,
+            }
+            
+            for unit, multiplier in multipliers.items():
+                if value.endswith(unit):
+                    numeric_part = value[:-len(unit)].strip()
+                    try:
+                        return int(float(numeric_part) * multiplier)
+                    except (ValueError, TypeError):
+                        return 0
+            
+            # Fallback: try to parse as plain number
+            try:
+                return int(float(value))
+            except (ValueError, TypeError):
+                return 0
+                
+        return 0
+
+    @staticmethod
+    def _build_bandwidth_result(
+        target_address: str, tx_bps: Any, rx_bps: Any, lost: Any
+    ) -> dict[str, Any]:
+        """Normalize throughput values and build the bandwidth result structure.
+        
+        Args:
+            target_address: Target device IP address
+            tx_bps: TX throughput value (may be string with units or numeric)
+            rx_bps: RX throughput value (may be string with units or numeric)
+            lost: Packet loss value
+            
+        Returns:
+            Normalized bandwidth test result dictionary
+        """
+        tx_bps_int = DiagnosticsService._parse_throughput_value(tx_bps)
+        rx_bps_int = DiagnosticsService._parse_throughput_value(rx_bps)
+
+        return {
+            "target": target_address,
+            "avg_tx_bps": tx_bps_int,
+            "avg_rx_bps": rx_bps_int,
+            "avg_tx_mbps": round(tx_bps_int / 1_000_000, 2),
+            "avg_rx_mbps": round(rx_bps_int / 1_000_000, 2),
+            "packet_loss_percent": float(lost) if lost else 0.0,
+        }
+
+    @staticmethod
+    def _parse_rest_bandwidth_result(target_address: str, test_data: Any) -> dict[str, Any]:
+        """Parse REST API bandwidth test response."""
+        # RouterOS bandwidth-test returns aggregate results
+        # Expected format: list of result dictionaries or single dictionary
+        
+        if isinstance(test_data, dict):
+            # Single result dictionary
+            tx_bps = test_data.get("tx-bits-per-second", 0)
+            rx_bps = test_data.get("rx-bits-per-second", 0)
+            lost = test_data.get("lost", 0)
+            
+            return DiagnosticsService._build_bandwidth_result(
+                target_address, tx_bps, rx_bps, lost
+            )
+        
+        # List of results (aggregate the last/best result)
+        if isinstance(test_data, list) and test_data:
+            last_result = test_data[-1]
+            tx_bps = last_result.get("tx-bits-per-second", 0)
+            rx_bps = last_result.get("rx-bits-per-second", 0)
+            lost = last_result.get("lost", 0)
+            
+            return DiagnosticsService._build_bandwidth_result(
+                target_address, tx_bps, rx_bps, lost
+            )
+        
+        # No data or unexpected format
+        return DiagnosticsService._build_bandwidth_result(target_address, 0, 0, 0)
+
+    async def _test_bandwidth_via_ssh(
+        self,
+        device_id: str,
+        target_address: str,
+        duration: int,
+        direction: str,
+    ) -> dict[str, Any]:
+        """Run bandwidth test via SSH."""
+        ssh_client = await self.device_service.get_ssh_client(device_id)
+        try:
+            command = (
+                f"/tool/bandwidth-test address={target_address} "
+                f"duration={duration}s direction={direction}"
+            )
+            output = await ssh_client.execute(command)
+            logger.debug(
+                "SSH bandwidth test output",
+                extra={
+                    "device_id": device_id,
+                    "target_address": target_address,
+                    "command": command,
+                    "output_preview": output[:500],
+                    "output_len": len(output),
+                },
+            )
+            return self._parse_ssh_bandwidth_output(target_address, output)
+        finally:
+            await ssh_client.close()
+
+    @staticmethod
+    def _parse_ssh_bandwidth_output(target_address: str, output: str) -> dict[str, Any]:
+        """Parse SSH bandwidth test output.
+        
+        Example output:
+            tx-current: 950Mbps  rx-current: 940Mbps
+            tx-10-second-average: 950Mbps  rx-10-second-average: 940Mbps
+            lost: 0
+        """
+        tx_bps = 0
+        rx_bps = 0
+        packet_loss = 0.0
+
+        # Try to find aggregate/average values first
+        avg_match = re.search(
+            r"tx-\d+-second-average:\s*([0-9.]+)([KMG]?)bps.*?rx-\d+-second-average:\s*([0-9.]+)([KMG]?)bps",
+            output,
+            re.IGNORECASE,
+        )
+        
+        if avg_match:
+            tx_val = float(avg_match.group(1))
+            tx_unit = avg_match.group(2).upper()
+            rx_val = float(avg_match.group(3))
+            rx_unit = avg_match.group(4).upper()
+            
+            # Convert to bps
+            multipliers = {"K": 1_000, "M": 1_000_000, "G": 1_000_000_000, "": 1}
+            tx_bps = int(tx_val * multipliers.get(tx_unit, 1))
+            rx_bps = int(rx_val * multipliers.get(rx_unit, 1))
+        else:
+            # Fallback to current values
+            current_match = re.search(
+                r"tx-current:\s*([0-9.]+)([KMG]?)bps.*?rx-current:\s*([0-9.]+)([KMG]?)bps",
+                output,
+                re.IGNORECASE,
+            )
+            if current_match:
+                tx_val = float(current_match.group(1))
+                tx_unit = current_match.group(2).upper()
+                rx_val = float(current_match.group(3))
+                rx_unit = current_match.group(4).upper()
+                
+                multipliers = {"K": 1_000, "M": 1_000_000, "G": 1_000_000_000, "": 1}
+                tx_bps = int(tx_val * multipliers.get(tx_unit, 1))
+                rx_bps = int(rx_val * multipliers.get(rx_unit, 1))
+
+        # Parse packet loss
+        loss_match = re.search(r"lost:\s*([0-9.]+)", output, re.IGNORECASE)
+        if loss_match:
+            packet_loss = float(loss_match.group(1))
+
+        return {
+            "target": target_address,
+            "avg_tx_bps": tx_bps,
+            "avg_rx_bps": rx_bps,
+            "avg_tx_mbps": round(tx_bps / 1_000_000, 2),
+            "avg_rx_mbps": round(rx_bps / 1_000_000, 2),
+            "packet_loss_percent": packet_loss,
+        }

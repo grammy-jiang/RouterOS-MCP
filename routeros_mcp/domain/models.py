@@ -30,6 +30,9 @@ class DeviceCapability(str, Enum):
         - WIRELESS_WRITES: Enable wireless/RF configuration writes
         - DHCP_WRITES: Enable DHCP server configuration writes
         - BRIDGE_WRITES: Enable bridge and VLAN configuration writes
+    
+    Phase 4 capabilities (diagnostics):
+        - BANDWIDTH_TEST: Allow device to be target of bandwidth tests (high resource usage)
     """
 
     # Core professional tier access
@@ -41,6 +44,9 @@ class DeviceCapability(str, Enum):
     WIRELESS_WRITES = "allow_wireless_writes"
     DHCP_WRITES = "allow_dhcp_writes"
     BRIDGE_WRITES = "allow_bridge_writes"
+    
+    # Phase 4 diagnostics capabilities
+    BANDWIDTH_TEST = "allow_bandwidth_test"
 
 
 # Environment types for device deployment
@@ -107,6 +113,9 @@ class DeviceCreate(BaseModel):
     allow_wireless_writes: bool = Field(default=False, description="Allow wireless writes")
     allow_dhcp_writes: bool = Field(default=False, description="Allow DHCP writes")
     allow_bridge_writes: bool = Field(default=False, description="Allow bridge writes")
+    
+    # Phase 4 diagnostics capability flags
+    allow_bandwidth_test: bool = Field(default=False, description="Allow bandwidth test (target device)")
 
     @field_validator("management_ip")
     @classmethod
@@ -137,6 +146,9 @@ class DeviceUpdate(BaseModel):
     allow_wireless_writes: bool | None = None
     allow_dhcp_writes: bool | None = None
     allow_bridge_writes: bool | None = None
+    
+    # Phase 4 diagnostics capability flags
+    allow_bandwidth_test: bool | None = None
     
     status: Literal["healthy", "degraded", "unreachable", "pending", "decommissioned"] | None = None
 
@@ -174,6 +186,9 @@ class Device(BaseModel):
     allow_wireless_writes: bool = False
     allow_dhcp_writes: bool = False
     allow_bridge_writes: bool = False
+    
+    # Phase 4 diagnostics capability flags
+    allow_bandwidth_test: bool = False
 
     # RouterOS metadata
     routeros_version: str | None = None

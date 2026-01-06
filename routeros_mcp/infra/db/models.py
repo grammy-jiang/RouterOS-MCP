@@ -173,6 +173,14 @@ class Device(Base):
         default=False,
         comment="Allow bridge and VLAN configuration writes (Phase 3)",
     )
+    
+    # Phase 4 diagnostics capability flags
+    allow_bandwidth_test: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="Allow device to be target of bandwidth tests (Phase 4)",
+    )
 
     # RouterOS metadata
     routeros_version: Mapped[str | None] = mapped_column(
