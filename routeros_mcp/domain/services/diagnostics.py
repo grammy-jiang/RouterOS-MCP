@@ -671,6 +671,77 @@ class DiagnosticsService:
             await client.close()
 
     @staticmethod
+    def _parse_throughput_value(value: Any) -> int:
+        """Parse throughput value from RouterOS API, handling various formats.
+        
+        Supports:
+        - Numeric values (already in bps)
+        - Strings with units: "1000bps", "1Mbps", "1.5Gbps", "500Kbps"
+        
+        Args:
+            value: Throughput value from RouterOS API
+            
+        Returns:
+            Throughput in bits per second (bps)
+        """
+        if isinstance(value, (int, float)):
+            return int(value)
+            
+        if isinstance(value, str):
+            value = value.strip()
+            
+            # Handle unit prefixes (K/M/G)
+            multipliers = {
+                "Gbps": 1_000_000_000,
+                "Mbps": 1_000_000,
+                "Kbps": 1_000,
+                "bps": 1,
+            }
+            
+            for unit, multiplier in multipliers.items():
+                if value.endswith(unit):
+                    numeric_part = value[:-len(unit)].strip()
+                    try:
+                        return int(float(numeric_part) * multiplier)
+                    except (ValueError, TypeError):
+                        return 0
+            
+            # Fallback: try to parse as plain number
+            try:
+                return int(float(value))
+            except (ValueError, TypeError):
+                return 0
+                
+        return 0
+
+    @staticmethod
+    def _build_bandwidth_result(
+        target_address: str, tx_bps: Any, rx_bps: Any, lost: Any
+    ) -> dict[str, Any]:
+        """Normalize throughput values and build the bandwidth result structure.
+        
+        Args:
+            target_address: Target device IP address
+            tx_bps: TX throughput value (may be string with units or numeric)
+            rx_bps: RX throughput value (may be string with units or numeric)
+            lost: Packet loss value
+            
+        Returns:
+            Normalized bandwidth test result dictionary
+        """
+        tx_bps_int = DiagnosticsService._parse_throughput_value(tx_bps)
+        rx_bps_int = DiagnosticsService._parse_throughput_value(rx_bps)
+
+        return {
+            "target": target_address,
+            "avg_tx_bps": tx_bps_int,
+            "avg_rx_bps": rx_bps_int,
+            "avg_tx_mbps": round(tx_bps_int / 1_000_000, 2),
+            "avg_rx_mbps": round(rx_bps_int / 1_000_000, 2),
+            "packet_loss_percent": float(lost) if lost else 0.0,
+        }
+
+    @staticmethod
     def _parse_rest_bandwidth_result(target_address: str, test_data: Any) -> dict[str, Any]:
         """Parse REST API bandwidth test response."""
         # RouterOS bandwidth-test returns aggregate results
@@ -682,20 +753,9 @@ class DiagnosticsService:
             rx_bps = test_data.get("rx-bits-per-second", 0)
             lost = test_data.get("lost", 0)
             
-            # Convert to numeric if string
-            if isinstance(tx_bps, str):
-                tx_bps = int(tx_bps.replace("bps", "").strip())
-            if isinstance(rx_bps, str):
-                rx_bps = int(rx_bps.replace("bps", "").strip())
-                
-            return {
-                "target": target_address,
-                "avg_tx_bps": int(tx_bps),
-                "avg_rx_bps": int(rx_bps),
-                "avg_tx_mbps": round(int(tx_bps) / 1_000_000, 2),
-                "avg_rx_mbps": round(int(rx_bps) / 1_000_000, 2),
-                "packet_loss_percent": float(lost) if lost else 0.0,
-            }
+            return DiagnosticsService._build_bandwidth_result(
+                target_address, tx_bps, rx_bps, lost
+            )
         
         # List of results (aggregate the last/best result)
         if isinstance(test_data, list) and test_data:
@@ -704,30 +764,12 @@ class DiagnosticsService:
             rx_bps = last_result.get("rx-bits-per-second", 0)
             lost = last_result.get("lost", 0)
             
-            # Convert to numeric if string
-            if isinstance(tx_bps, str):
-                tx_bps = int(tx_bps.replace("bps", "").strip())
-            if isinstance(rx_bps, str):
-                rx_bps = int(rx_bps.replace("bps", "").strip())
-                
-            return {
-                "target": target_address,
-                "avg_tx_bps": int(tx_bps),
-                "avg_rx_bps": int(rx_bps),
-                "avg_tx_mbps": round(int(tx_bps) / 1_000_000, 2),
-                "avg_rx_mbps": round(int(rx_bps) / 1_000_000, 2),
-                "packet_loss_percent": float(lost) if lost else 0.0,
-            }
+            return DiagnosticsService._build_bandwidth_result(
+                target_address, tx_bps, rx_bps, lost
+            )
         
         # No data or unexpected format
-        return {
-            "target": target_address,
-            "avg_tx_bps": 0,
-            "avg_rx_bps": 0,
-            "avg_tx_mbps": 0.0,
-            "avg_rx_mbps": 0.0,
-            "packet_loss_percent": 0.0,
-        }
+        return DiagnosticsService._build_bandwidth_result(target_address, 0, 0, 0)
 
     async def _test_bandwidth_via_ssh(
         self,

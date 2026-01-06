@@ -897,12 +897,24 @@ async def test_bandwidth_test_success_formats_result(monkeypatch: pytest.MonkeyP
             pass
 
         async def get_device(self, device_id: str) -> object:
-            return SimpleNamespace(
-                environment="lab",
-                allow_advanced_writes=False,
-                allow_professional_workflows=True,
-                name=device_id,
-            )
+            # Return different devices based on ID
+            if device_id == "dev-source":
+                return SimpleNamespace(
+                    environment="lab",
+                    allow_advanced_writes=False,
+                    allow_professional_workflows=True,  # Source needs professional tier
+                    allow_bandwidth_test=False,  # Source doesn't need this capability
+                    name=device_id,
+                )
+            else:  # dev-target
+                return SimpleNamespace(
+                    environment="lab",
+                    allow_advanced_writes=False,
+                    allow_professional_workflows=False,  # Target doesn't need professional tier
+                    allow_bandwidth_test=True,  # Target needs bandwidth test capability
+                    name=device_id,
+                    management_ip="192.168.1.100",
+                )
 
     class StubDiagnosticsService:
         def __init__(self, *_args: object, **_kwargs: object) -> None:
@@ -959,13 +971,24 @@ async def test_bandwidth_test_rejects_target_without_capability(monkeypatch: pyt
             pass
 
         async def get_device(self, device_id: str) -> object:
-            return SimpleNamespace(
-                environment="lab",
-                allow_advanced_writes=False,
-                allow_professional_workflows=True,
-                allow_bandwidth_test=False,  # Target doesn't allow bandwidth tests
-                name=device_id,
-            )
+            # Return different devices based on ID
+            if device_id == "dev-source":
+                return SimpleNamespace(
+                    environment="lab",
+                    allow_advanced_writes=False,
+                    allow_professional_workflows=True,  # Source needs professional tier
+                    allow_bandwidth_test=False,  # Source doesn't need this capability
+                    name=device_id,
+                )
+            else:  # dev-target - this device lacks bandwidth test capability
+                return SimpleNamespace(
+                    environment="lab",
+                    allow_advanced_writes=False,
+                    allow_professional_workflows=False,  # Target doesn't need professional tier
+                    allow_bandwidth_test=False,  # Target DOESN'T allow bandwidth tests
+                    name=device_id,
+                    management_ip="192.168.1.100",
+                )
 
     class StubDiagnosticsService:
         def __init__(self, *_args: object, **_kwargs: object) -> None:
@@ -1320,3 +1343,33 @@ async def test_bandwidth_test_requires_professional_tier(monkeypatch: pytest.Mon
             device_id="dev-source",
             target_device_id="dev-target",
         )
+
+
+def test_diagnostics_service_parse_throughput_value() -> None:
+    """Test _parse_throughput_value helper handles various formats correctly."""
+    from routeros_mcp.domain.services.diagnostics import DiagnosticsService
+
+    # Test numeric values
+    assert DiagnosticsService._parse_throughput_value(950_000_000) == 950_000_000
+    assert DiagnosticsService._parse_throughput_value(1500) == 1500
+    assert DiagnosticsService._parse_throughput_value(0) == 0
+
+    # Test string values with units
+    assert DiagnosticsService._parse_throughput_value("950Mbps") == 950_000_000
+    assert DiagnosticsService._parse_throughput_value("1.5Gbps") == 1_500_000_000
+    assert DiagnosticsService._parse_throughput_value("500Kbps") == 500_000
+    assert DiagnosticsService._parse_throughput_value("1000bps") == 1000
+
+    # Test with spaces
+    assert DiagnosticsService._parse_throughput_value("950 Mbps") == 950_000_000
+    assert DiagnosticsService._parse_throughput_value(" 1.5Gbps ") == 1_500_000_000
+
+    # Test edge cases
+    assert DiagnosticsService._parse_throughput_value("0Mbps") == 0
+    assert DiagnosticsService._parse_throughput_value("") == 0
+    assert DiagnosticsService._parse_throughput_value("invalid") == 0
+    assert DiagnosticsService._parse_throughput_value(None) == 0
+
+    # Test plain numbers (fallback)
+    assert DiagnosticsService._parse_throughput_value("950000000") == 950_000_000
+    assert DiagnosticsService._parse_throughput_value("1500.5") == 1500
