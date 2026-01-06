@@ -4,6 +4,7 @@ Implements simple in-memory rate limiting for diagnostic operations
 (ping, traceroute, bandwidth-test) to prevent overwhelming devices.
 """
 
+import asyncio
 import logging
 import time
 from collections import defaultdict
@@ -17,19 +18,20 @@ class RateLimiter:
     """In-memory rate limiter for diagnostic tools.
 
     Implements sliding window rate limiting per device.
-    Thread-safe for async operations within single process.
+    Thread-safe for async operations within single process via asyncio.Lock.
 
     Example:
         limiter = RateLimiter()
-        limiter.check_and_record("dev-001", "ping", limit=10, window_seconds=60)
+        await limiter.check_and_record("dev-001", "ping", limit=10, window_seconds=60)
     """
 
     def __init__(self) -> None:
         """Initialize rate limiter with empty tracking."""
         # Structure: {(device_id, operation): [(timestamp, ...), ...]}
         self._records: dict[tuple[str, str], list[float]] = defaultdict(list)
+        self._lock = asyncio.Lock()
 
-    def check_and_record(
+    async def check_and_record(
         self,
         device_id: str,
         operation: str,
@@ -47,33 +49,34 @@ class RateLimiter:
         Raises:
             RateLimitExceededError: If rate limit exceeded
         """
-        key = (device_id, operation)
-        now = time.time()
-        cutoff = now - window_seconds
+        async with self._lock:
+            key = (device_id, operation)
+            now = time.time()
+            cutoff = now - window_seconds
 
-        # Remove old records outside window
-        self._records[key] = [ts for ts in self._records[key] if ts > cutoff]
+            # Remove old records outside window
+            self._records[key] = [ts for ts in self._records[key] if ts > cutoff]
 
-        # Check limit
-        if len(self._records[key]) >= limit:
-            raise RateLimitExceededError(
-                f"Rate limit exceeded for {operation} on device {device_id}: "
-                f"{limit} operations per {window_seconds} seconds",
-                data={
-                    "device_id": device_id,
-                    "operation": operation,
-                    "limit": limit,
-                    "window_seconds": window_seconds,
-                    "current_count": len(self._records[key]),
-                },
+            # Check limit
+            if len(self._records[key]) >= limit:
+                raise RateLimitExceededError(
+                    f"Rate limit exceeded for {operation} on device {device_id}: "
+                    f"{limit} operations per {window_seconds} seconds",
+                    data={
+                        "device_id": device_id,
+                        "operation": operation,
+                        "limit": limit,
+                        "window_seconds": window_seconds,
+                        "current_count": len(self._records[key]),
+                    },
+                )
+
+            # Record this operation
+            self._records[key].append(now)
+            logger.debug(
+                f"Rate limit check passed: {operation} on {device_id} "
+                f"({len(self._records[key])}/{limit} in {window_seconds}s window)"
             )
-
-        # Record this operation
-        self._records[key].append(now)
-        logger.debug(
-            f"Rate limit check passed: {operation} on {device_id} "
-            f"({len(self._records[key])}/{limit} in {window_seconds}s window)"
-        )
 
     def reset(self, device_id: str | None = None, operation: str | None = None) -> None:
         """Reset rate limit records.
@@ -101,7 +104,7 @@ class RateLimiter:
             for key in keys_to_delete:
                 del self._records[key]
 
-    def get_remaining(
+    async def get_remaining(
         self,
         device_id: str,
         operation: str,
@@ -119,14 +122,15 @@ class RateLimiter:
         Returns:
             Number of operations remaining in window
         """
-        key = (device_id, operation)
-        now = time.time()
-        cutoff = now - window_seconds
+        async with self._lock:
+            key = (device_id, operation)
+            now = time.time()
+            cutoff = now - window_seconds
 
-        # Remove old records
-        self._records[key] = [ts for ts in self._records[key] if ts > cutoff]
+            # Remove old records
+            self._records[key] = [ts for ts in self._records[key] if ts > cutoff]
 
-        return max(0, limit - len(self._records[key]))
+            return max(0, limit - len(self._records[key]))
 
 
 # Global rate limiter instance

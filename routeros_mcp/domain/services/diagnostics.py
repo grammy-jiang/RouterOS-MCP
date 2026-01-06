@@ -76,7 +76,7 @@ class DiagnosticsService:
         Args:
             device_id: Device identifier
             address: Target IP or hostname
-            count: Number of pings (1-10)
+            count: Number of pings (1-100)
             interval_ms: Interval between pings in milliseconds
             packet_size: ICMP packet size in bytes (28-65500)
         """

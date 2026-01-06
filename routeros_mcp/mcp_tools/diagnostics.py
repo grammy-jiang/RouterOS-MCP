@@ -47,7 +47,8 @@ def _validate_target(target: str) -> None:
     # Allow letters, digits, hyphens, dots
     # Must not start/end with hyphen
     # Labels must be 1-63 chars, total max 253 chars
-    hostname_pattern = r'^(?=.{1,253}$)(?!-)([a-zA-Z0-9-]{1,63}(?<!-)\.)*[a-zA-Z0-9-]{1,63}(?<!-)$'
+    # Allow single-label hostnames (e.g., "localhost", "router")
+    hostname_pattern = r'^(?=.{1,253}$)(?!-)[a-zA-Z0-9-]{1,63}(?<!-)(\.[a-zA-Z0-9-]{1,63}(?<!-))*$'
     if not re.match(hostname_pattern, target):
         raise ValidationError(
             f"Invalid target '{target}': must be valid IP address or hostname",
@@ -106,7 +107,7 @@ def register_diagnostics_tools(mcp: FastMCP, settings: Settings) -> None:
 
             # Check rate limit before doing any work
             rate_limiter = get_rate_limiter()
-            rate_limiter.check_and_record(
+            await rate_limiter.check_and_record(
                 device_id=device_id,
                 operation="ping",
                 limit=PING_RATE_LIMIT,
@@ -179,21 +180,23 @@ def register_diagnostics_tools(mcp: FastMCP, settings: Settings) -> None:
                     )
 
                     # Simulate per-packet progress (RouterOS REST API returns aggregated results)
-                    # In real streaming, we'd parse each ping response line
+                    # Note: This is an approximation - actual packet loss may be non-sequential,
+                    # but we only have aggregate statistics (packets_sent/received).
+                    # We assume the first N packets succeeded for simplicity.
                     packets_sent = result.get("packets_sent", 0)
                     packets_received = result.get("packets_received", 0)
 
                     for i in range(1, packets_sent + 1):
                         percent = int((i / packets_sent) * 100) if packets_sent > 0 else 0
 
-                        # Approximate per-packet latency (not available from aggregate)
-                        # This is a simplification; real streaming would capture each packet
+                        # Approximate per-packet status (not available from aggregate stats)
+                        # This assumes sequential success/failure, which may not match reality
                         if i <= packets_received:
                             avg_rtt = result.get("avg_rtt_ms", 0)
-                            message = f"Packet {i}/{packets_sent}: Reply from {target} (≈{avg_rtt:.1f}ms)"
+                            message = f"Packet {i}/{packets_sent}: Reply from {target} (~{avg_rtt:.1f}ms, approximated)"
                             status = "reply"
                         else:
-                            message = f"Packet {i}/{packets_sent}: Timeout"
+                            message = f"Packet {i}/{packets_sent}: Timeout (approximated)"
                             status = "timeout"
 
                         events.append(create_progress_message(
@@ -203,6 +206,7 @@ def register_diagnostics_tools(mcp: FastMCP, settings: Settings) -> None:
                                 "packet": i,
                                 "total": packets_sent,
                                 "status": status,
+                                "approximated": True,  # Flag to indicate this is synthetic
                             },
                         ))
 
