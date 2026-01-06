@@ -7,7 +7,6 @@ Implements simple in-memory rate limiting for diagnostic operations
 import logging
 import time
 from collections import defaultdict
-from typing import Any
 
 from routeros_mcp.mcp.errors import RateLimitExceededError
 
@@ -16,10 +15,10 @@ logger = logging.getLogger(__name__)
 
 class RateLimiter:
     """In-memory rate limiter for diagnostic tools.
-    
+
     Implements sliding window rate limiting per device.
     Thread-safe for async operations within single process.
-    
+
     Example:
         limiter = RateLimiter()
         limiter.check_and_record("dev-001", "ping", limit=10, window_seconds=60)
@@ -38,13 +37,13 @@ class RateLimiter:
         window_seconds: int = 60,
     ) -> None:
         """Check rate limit and record operation if allowed.
-        
+
         Args:
             device_id: Device identifier
             operation: Operation name (e.g., "ping", "traceroute")
             limit: Maximum operations allowed in window
             window_seconds: Time window in seconds (default: 60)
-            
+
         Raises:
             RateLimitExceededError: If rate limit exceeded
         """
@@ -78,7 +77,7 @@ class RateLimiter:
 
     def reset(self, device_id: str | None = None, operation: str | None = None) -> None:
         """Reset rate limit records.
-        
+
         Args:
             device_id: If provided, reset only this device
             operation: If provided, reset only this operation
@@ -110,13 +109,13 @@ class RateLimiter:
         window_seconds: int = 60,
     ) -> int:
         """Get remaining operations allowed in current window.
-        
+
         Args:
             device_id: Device identifier
             operation: Operation name
             limit: Maximum operations allowed
             window_seconds: Time window in seconds
-            
+
         Returns:
             Number of operations remaining in window
         """
@@ -136,7 +135,7 @@ _global_rate_limiter: RateLimiter | None = None
 
 def get_rate_limiter() -> RateLimiter:
     """Get global rate limiter instance.
-    
+
     Returns:
         Global RateLimiter instance (singleton)
     """

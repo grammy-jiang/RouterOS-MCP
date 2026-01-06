@@ -286,7 +286,7 @@ async def test_traceroute_streaming_yields_progress_messages(monkeypatch: pytest
 
     # Call traceroute with stream_progress=True
     result_generator = await mcp.tools["traceroute"](
-        device_id="dev-1", 
+        device_id="dev-1",
         target="8.8.8.8",
         stream_progress=True,
     )
@@ -699,7 +699,7 @@ async def test_ping_enforces_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None
     diagnostics_tools.register_diagnostics_tools(mcp, settings)
 
     # First 10 pings should succeed
-    for i in range(10):
+    for _i in range(10):
         result = await mcp.tools["ping"](device_id="dev-1", target="8.8.8.8")
         assert result["isError"] is False
 
@@ -750,7 +750,7 @@ async def test_ping_rate_limit_per_device(monkeypatch: pytest.MonkeyPatch) -> No
     diagnostics_tools.register_diagnostics_tools(mcp, settings)
 
     # Fill rate limit for dev-1
-    for i in range(10):
+    for _i in range(10):
         result = await mcp.tools["ping"](device_id="dev-1", target="8.8.8.8")
         assert result["isError"] is False
 

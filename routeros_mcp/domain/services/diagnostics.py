@@ -72,7 +72,7 @@ class DiagnosticsService:
         packet_size: int = 64,
     ) -> dict[str, Any]:
         """Run ICMP ping test from the router to a target address with REST→SSH fallback.
-        
+
         Args:
             device_id: Device identifier
             address: Target IP or hostname
@@ -322,13 +322,13 @@ class DiagnosticsService:
         max_hops: int = DEFAULT_TRACEROUTE_HOPS,
     ) -> dict[str, Any]:
         """Run traceroute to show network path with REST→SSH fallback.
-        
+
         Args:
             device_id: Device identifier
             address: Target IP or hostname
             count: Number of probes per hop (default: 1)
             max_hops: Maximum number of hops (1-64, default: 30)
-            
+
         Returns:
             Dictionary with target and hops list
         """
@@ -415,7 +415,7 @@ class DiagnosticsService:
                 "address": address,
                 "count": count,
             }
-            
+
             # Add max-hops parameter if not default
             if max_hops != DEFAULT_TRACEROUTE_HOPS:
                 trace_params["max-hops"] = max_hops
