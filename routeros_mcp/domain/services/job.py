@@ -44,6 +44,47 @@ class JobService:
         """
         self.session = session
 
+    async def _handle_cancellation(
+        self,
+        job: JobModel,
+        batch_idx: int,
+        batches: list[list[str]],
+        device_ids: list[str],
+        results: dict[str, Any],
+        batches_completed: int,
+    ) -> dict[str, Any] | None:
+        """Handle job cancellation if requested.
+        
+        Args:
+            job: Job model instance
+            batch_idx: Current batch index (0-based)
+            batches: List of all batches
+            device_ids: All device IDs for the job
+            results: Current results dictionary
+            batches_completed: Number of batches completed so far
+            
+        Returns:
+            Results dictionary if cancelled, None otherwise
+        """
+        await self.session.refresh(job)
+        if job.cancellation_requested:
+            logger.info(
+                f"Job {job.id} cancellation requested after {batches_completed} batches",
+                extra={"job_id": job.id, "batch_index": batch_idx},
+            )
+            job.status = "cancelled"
+            devices_processed = sum(len(batches[i]) for i in range(batches_completed))
+            job.result_summary = (
+                f"Cancelled after processing {devices_processed}/{len(device_ids)} devices "
+                f"in {batches_completed}/{len(batches)} batches"
+            )
+            await self.session.commit()
+            
+            results["status"] = "cancelled"
+            results["devices_processed"] = devices_processed
+            return results
+        return None
+
     async def create_job(
         self,
         job_type: str,
@@ -179,23 +220,11 @@ class JobService:
         try:
             for batch_idx, batch_device_ids in enumerate(batches):
                 # Check for cancellation request before processing batch
-                await self.session.refresh(job)
-                if job.cancellation_requested:
-                    logger.info(
-                        f"Job {job_id} cancellation requested, stopping after batch {batch_idx}",
-                        extra={"job_id": job_id, "batch_index": batch_idx},
-                    )
-                    job.status = "cancelled"
-                    devices_processed = sum(len(batches[i]) for i in range(batch_idx))
-                    job.result_summary = (
-                        f"Cancelled after processing {devices_processed}/{len(device_ids)} devices "
-                        f"in {batch_idx}/{len(batches)} batches"
-                    )
-                    await self.session.commit()
-                    
-                    results["status"] = "cancelled"
-                    results["devices_processed"] = devices_processed
-                    return results
+                cancellation_result = await self._handle_cancellation(
+                    job, batch_idx, batches, device_ids, results, batch_idx
+                )
+                if cancellation_result:
+                    return cancellation_result
 
                 logger.info(
                     f"Processing batch {batch_idx + 1}/{len(batches)}",
@@ -226,23 +255,11 @@ class JobService:
                 results["batches_completed"] += 1
 
                 # Check for cancellation after batch completion
-                await self.session.refresh(job)
-                if job.cancellation_requested:
-                    logger.info(
-                        f"Job {job_id} cancellation requested, finishing after batch {batch_idx + 1}",
-                        extra={"job_id": job_id, "batch_index": batch_idx + 1},
-                    )
-                    job.status = "cancelled"
-                    devices_processed = sum(len(batches[i]) for i in range(batch_idx + 1))
-                    job.result_summary = (
-                        f"Cancelled after processing {devices_processed}/{len(device_ids)} devices "
-                        f"in {batch_idx + 1}/{len(batches)} batches"
-                    )
-                    await self.session.commit()
-                    
-                    results["status"] = "cancelled"
-                    results["devices_processed"] = devices_processed
-                    return results
+                cancellation_result = await self._handle_cancellation(
+                    job, batch_idx + 1, batches, device_ids, results, batch_idx + 1
+                )
+                if cancellation_result:
+                    return cancellation_result
 
                 # Pause between batches for health checks (except after last batch)
                 if batch_idx < len(batches) - 1:

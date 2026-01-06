@@ -412,16 +412,29 @@ async def get_job_status(
             progress_percent = 100
         elif job["status"] in ["running", "cancelled"]:
             # Try to parse result_summary to get devices processed
+            # Format: "Cancelled after processing X/Y devices in A/B batches"
+            # or "Completed X devices in Y batches"
             result_summary = job.get("result_summary", "")
-            if result_summary and "/" in result_summary:
-                # Extract "X/Y devices" from summary
+            if result_summary:
                 try:
-                    parts = result_summary.split("devices")[0].strip().split("/")
-                    if len(parts) == 2:
-                        processed = int(parts[0].split()[-1])
+                    import re
+                    # Match "X/Y devices" or "X devices"
+                    match = re.search(r'(\d+)/(\d+)\s+devices', result_summary)
+                    if match:
+                        processed = int(match.group(1))
                         progress_percent = int((processed / total_devices) * 100) if total_devices > 0 else 0
-                except (ValueError, IndexError):
-                    pass
+                    else:
+                        # Try alternative format "Completed X devices"
+                        match = re.search(r'Completed\s+(\d+)\s+devices', result_summary)
+                        if match:
+                            processed = int(match.group(1))
+                            progress_percent = int((processed / total_devices) * 100) if total_devices > 0 else 0
+                except (ValueError, AttributeError):
+                    # If parsing fails, keep progress_percent at 0
+                    logger.warning(
+                        f"Failed to parse progress from result_summary: {result_summary}",
+                        extra={"job_id": job_id}
+                    )
 
         job_data = {
             "job_id": job["job_id"],

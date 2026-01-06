@@ -563,14 +563,14 @@ class TestJobService:
             device_ids=test_devices,
         )
 
-        batch_count = 0
+        # Track batches using a mutable container to avoid global variable
+        execution_state = {"batch_count": 0}
 
         async def executor(job_id: str, device_ids: list[str], context: dict[str, Any]):
-            nonlocal batch_count
-            batch_count += 1
+            execution_state["batch_count"] += 1
             
             # Request cancellation after first batch
-            if batch_count == 1:
+            if execution_state["batch_count"] == 1:
                 await service.request_cancellation(job_id)
             
             return {"devices": {did: {"status": "ok"} for did in device_ids}, "context": context}
