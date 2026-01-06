@@ -172,4 +172,4 @@ class TestSafetyLimits:
         )
 
         assert MAX_TRACEROUTE_COUNT == 3
-        assert MAX_TRACEROUTE_HOPS == 30
+        assert MAX_TRACEROUTE_HOPS == 64  # Updated to match Phase 4 requirement (1-64)

@@ -4,16 +4,17 @@ Provides MCP tools for running network diagnostic operations (ping, traceroute).
 """
 
 import logging
+from collections.abc import AsyncIterator
 from typing import Any
 
 from fastmcp import FastMCP
 
 from routeros_mcp.config import Settings
-from routeros_mcp.domain.services.diagnostics import DiagnosticsService
+from routeros_mcp.domain.services.diagnostics import DEFAULT_TRACEROUTE_HOPS, DiagnosticsService
 from routeros_mcp.domain.services.device import DeviceService
 from routeros_mcp.infra.db.session import get_session_factory
 from routeros_mcp.mcp.errors import MCPError, map_exception_to_error
-from routeros_mcp.mcp.protocol.jsonrpc import format_tool_result
+from routeros_mcp.mcp.protocol.jsonrpc import create_progress_message, format_tool_result
 from routeros_mcp.security.authz import ToolTier, check_tool_authorization
 
 logger = logging.getLogger(__name__)
@@ -99,19 +100,26 @@ def register_diagnostics_tools(mcp: FastMCP, settings: Settings) -> None:
     async def traceroute(
         device_id: str,
         target: str,
-        max_hops: int = 30,
-        timeout_seconds: int = 30,
-    ) -> dict[str, Any]:
-        """Execute traceroute command on a RouterOS device.
+        max_hops: int = DEFAULT_TRACEROUTE_HOPS,
+        timeout_seconds: int = 60,
+        stream_progress: bool = False,
+    ) -> dict[str, Any] | AsyncIterator[dict[str, Any]]:
+        """Execute traceroute command on a RouterOS device with optional streaming.
 
         Args:
             device_id: Device identifier
             target: Target IP or hostname
-            max_hops: Maximum hops to trace (max 30)
-            timeout_seconds: Command timeout in seconds
+            max_hops: Maximum hops to trace (1-64, default: 30)
+            timeout_seconds: Command timeout in seconds (default: 60)
+            stream_progress: Enable real-time per-hop progress updates (HTTP transport only)
 
         Returns:
-            Traceroute hop information
+            Traceroute hop information with final result
+
+        Streaming:
+            When stream_progress=True, yields progress updates for each hop discovered
+            with hop number, IP address, and latency. Final result includes all hops
+            and whether the target was reached.
         """
         try:
             async with session_factory.session() as session:
@@ -134,22 +142,150 @@ def register_diagnostics_tools(mcp: FastMCP, settings: Settings) -> None:
                 diagnostics_service = DiagnosticsService(
                     session,
                     settings,
-                    device_service,
                 )
 
-                result = await diagnostics_service.traceroute(
-                    device_id=device_id,
-                    address=target,
-                    count=1,
-                )
+                # Non-streaming path: return immediately
+                if not stream_progress:
+                    result = await diagnostics_service.traceroute(
+                        device_id=device_id,
+                        address=target,
+                        count=1,
+                        max_hops=max_hops,
+                    )
 
-                hop_count = len(result.get("hops", []))
-                content = f"Traceroute to {target} completed in {hop_count} hops"
+                    hops = result.get("hops", [])
+                    hop_count = len(hops)
+                    
+                    # Calculate reached_target for consistency with streaming path
+                    reached_target = False
+                    if hops:
+                        last_hop = hops[-1]
+                        last_address = last_hop.get("address", "*")
+                        last_rtt = last_hop.get("rtt_ms", 0.0)
+                        # Target reached if terminated early or last hop matches target
+                        if last_address != "*" and last_rtt > 0:
+                            if hop_count < max_hops or last_address == target:
+                                reached_target = True
+                    
+                    # Add consistent metadata fields
+                    result["reached_target"] = reached_target
+                    result["target"] = target
+                    
+                    content = f"Traceroute to {target} completed in {hop_count} hops"
 
-                return format_tool_result(
-                    content=content,
-                    meta=result,
-                )
+                    return format_tool_result(
+                        content=content,
+                        meta=result,
+                    )
+
+                # Streaming path: collect results within session, then stream
+                try:
+                    # Collect all events within the session context
+                    events: list[dict[str, Any]] = []
+                    
+                    events.append(create_progress_message(
+                        message=f"Starting traceroute to {target}...",
+                        percent=0,
+                    ))
+
+                    # Get traceroute results
+                    result = await diagnostics_service.traceroute(
+                        device_id=device_id,
+                        address=target,
+                        count=1,
+                        max_hops=max_hops,
+                    )
+
+                    hops = result.get("hops", [])
+                    total_hops = len(hops)
+                    
+                    # Yield progress for each hop
+                    for idx, hop in enumerate(hops):
+                        hop_num = hop.get("hop", idx + 1)
+                        hop_address = hop.get("address", "*")
+                        rtt_ms = hop.get("rtt_ms", 0.0)
+                        
+                        # Calculate progress percentage based on total discovered hops,
+                        # capping at 100% to avoid misleading values
+                        if total_hops > 0:
+                            percent = min(int(((idx + 1) / total_hops) * 100), 100)
+                        else:
+                            percent = 0
+                        
+                        # Create progress message
+                        if hop_address == "*":
+                            message = f"Hop {hop_num}: * (timeout)"
+                        else:
+                            message = f"Hop {hop_num}: {hop_address} ({rtt_ms:.1f}ms)"
+                        
+                        events.append(create_progress_message(
+                            message=message,
+                            percent=percent,
+                            data={
+                                "hop": hop_num,
+                                "ip": hop_address if hop_address != "*" else None,
+                                "latency_ms": rtt_ms if rtt_ms > 0 else None,
+                            },
+                        ))
+
+                    # Determine if target was reached
+                    reached_target = False
+                    if hops:
+                        last_hop = hops[-1]
+                        last_address = last_hop.get("address", "*")
+                        last_rtt = last_hop.get("rtt_ms", 0.0)
+                        
+                        # Target reached if:
+                        # 1. Last hop has valid address (not timeout)
+                        # 2. Last hop has positive RTT (got a response)
+                        # 3. Either:
+                        #    a) Traceroute terminated before max_hops (likely reached destination), or
+                        #    b) Last hop address textually matches the target (e.g. IP target)
+                        if last_address != "*" and last_rtt > 0:
+                            if total_hops < max_hops or last_address == target:
+                                reached_target = True
+
+                    # Final result
+                    final_meta = {
+                        "hops": hops,
+                        "total_hops": total_hops,
+                        "reached_target": reached_target,
+                        "target": target,
+                    }
+                    
+                    content = (
+                        f"Traceroute to {target} completed: "
+                        f"{total_hops} hops, "
+                        f"{'reached' if reached_target else 'not reached'}"
+                    )
+
+                    events.append(format_tool_result(
+                        content=content,
+                        meta=final_meta,
+                    ))
+
+                except MCPError as e:
+                    logger.warning(f"Traceroute streaming error: {e}")
+                    events = [format_tool_result(
+                        content=f"Traceroute failed: {str(e)}",
+                        is_error=True,
+                        meta={"error": str(e)},
+                    )]
+                except Exception as e:
+                    logger.error(f"Traceroute streaming unexpected error: {e}")
+                    error = map_exception_to_error(e)
+                    events = [format_tool_result(
+                        content=f"Traceroute failed: {str(error)}",
+                        is_error=True,
+                        meta={"error": str(error)},
+                    )]
+                
+                # Return generator that replays collected events
+                async def replay_events() -> AsyncIterator[dict[str, Any]]:
+                    for event in events:
+                        yield event
+                
+                return replay_events()
 
         except MCPError as e:
             logger.warning(f"Traceroute tool error: {e}")
