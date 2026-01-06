@@ -77,17 +77,17 @@ class PlanService:
         """
         # Create message to sign: plan_id:created_by:timestamp
         message = f"{plan_id}:{created_by}:{timestamp}"
-        
+
         # Use encryption key as HMAC secret (or fallback for lab/test environments)
         secret_key = self.settings.encryption_key or "INSECURE_LAB_KEY_DO_NOT_USE_IN_PRODUCTION"
-        
+
         # Generate HMAC signature
         signature = hmac.new(
             secret_key.encode(),
             message.encode(),
             hashlib.sha256
         ).hexdigest()[:16]  # Take first 16 chars for brevity
-        
+
         # Return token with random suffix for uniqueness
         random_suffix = secrets.token_urlsafe(8)
         return f"approve-{signature}-{random_suffix}"
@@ -110,7 +110,7 @@ class PlanService:
         # Check expiration first
         if datetime.now(UTC) > expires_at:
             raise ValueError("Approval token has expired")
-        
+
         # Regenerate expected signature using stored timestamp
         message = f"{plan_id}:{created_by}:{token_timestamp}"
         secret_key = self.settings.encryption_key or "INSECURE_LAB_KEY_DO_NOT_USE_IN_PRODUCTION"
@@ -119,18 +119,18 @@ class PlanService:
             message.encode(),
             hashlib.sha256
         ).hexdigest()[:16]
-        
+
         # Extract signature from token
         # Token format: approve-{signature}-{random}
         if not token.startswith("approve-"):
             raise ValueError("Invalid approval token format")
-        
+
         parts = token.split("-", 2)  # Split on first 2 hyphens only
         if len(parts) < 3 or not parts[1] or not parts[2]:
             raise ValueError("Invalid approval token format")
-        
+
         token_signature = parts[1]
-        
+
         # Verify signature using constant-time comparison
         if not secrets.compare_digest(token_signature, expected_signature):
             raise ValueError("Invalid approval token")
@@ -146,7 +146,7 @@ class PlanService:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         """Log audit event for plan operations.
-        
+
         Note: This method adds the audit event to the session but does NOT commit.
         The caller is responsible for committing the transaction to ensure
         atomicity between the business operation and its audit log.
@@ -161,7 +161,7 @@ class PlanService:
             metadata: Additional metadata
         """
         event_id = f"audit-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
-        
+
         audit_event = AuditEventModel(
             id=event_id,
             timestamp=datetime.now(UTC),
@@ -179,7 +179,7 @@ class PlanService:
             meta=metadata or {},
             error_message=error_message,
         )
-        
+
         self.session.add(audit_event)
 
     async def _run_pre_checks(
@@ -299,11 +299,11 @@ class PlanService:
 
             # Generate plan ID and approval token
             plan_id = f"plan-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
-            
+
             # Generate token timestamp (stored with token for validation)
             token_timestamp = datetime.now(UTC).isoformat()
             approval_token = self._generate_approval_token(plan_id, created_by, token_timestamp)
-            
+
             # Token expires in 15 minutes (not 1 hour)
             expires_at = datetime.now(UTC) + timedelta(minutes=self.TOKEN_EXPIRATION_MINUTES)
 
@@ -326,7 +326,7 @@ class PlanService:
             )
 
             self.session.add(plan)
-            
+
             # Log audit event (part of same transaction)
             self._log_audit_event(
                 action="PLAN_CREATED",
@@ -340,7 +340,7 @@ class PlanService:
                     "device_ids": device_ids,
                 },
             )
-            
+
             # Commit both plan creation and audit event atomically
             await self.session.commit()
             await self.session.refresh(plan)
@@ -458,16 +458,16 @@ class PlanService:
 
             # Generate plan ID and approval token
             plan_id = f"plan-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
-            
+
             # Generate token timestamp (stored with token for validation)
             token_timestamp = datetime.now(UTC).isoformat()
             approval_token = self._generate_approval_token(plan_id, created_by, token_timestamp)
-            
+
             # Token expires in 15 minutes
             expires_at = datetime.now(UTC) + timedelta(minutes=self.TOKEN_EXPIRATION_MINUTES)
 
             # Initialize device statuses
-            device_statuses = {device_id: "pending" for device_id in device_ids}
+            device_statuses = dict.fromkeys(device_ids, "pending")
 
             # Create plan record with Phase 4 fields
             plan = PlanModel(
@@ -495,7 +495,7 @@ class PlanService:
             )
 
             self.session.add(plan)
-            
+
             # Log audit event (part of same transaction)
             self._log_audit_event(
                 action="PLAN_CREATED",
@@ -513,7 +513,7 @@ class PlanService:
                     "multi_device": True,
                 },
             )
-            
+
             # Commit both plan creation and audit event atomically
             await self.session.commit()
             await self.session.refresh(plan)
@@ -687,7 +687,7 @@ class PlanService:
             token_timestamp = plan.changes.get("approval_token_timestamp")
             if not expires_at_str or not token_timestamp:
                 raise ValueError("Invalid approval token metadata")
-            
+
             expires_at = datetime.fromisoformat(expires_at_str)
             self._validate_approval_token(
                 plan_id, plan.created_by, approval_token, expires_at, token_timestamp
@@ -707,7 +707,7 @@ class PlanService:
                 result="SUCCESS",
                 metadata={"device_count": len(plan.device_ids)},
             )
-            
+
             # Commit both approval and audit event atomically
             await self.session.commit()
             await self.session.refresh(plan)
@@ -797,7 +797,7 @@ class PlanService:
                     "new_status": new_status.value,
                 },
             )
-            
+
             # Commit both status update and audit event atomically
             await self.session.commit()
 

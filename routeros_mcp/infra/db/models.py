@@ -175,7 +175,7 @@ class Device(Base):
         default=False,
         comment="Allow bridge and VLAN configuration writes (Phase 3)",
     )
-    
+
     # Phase 4 diagnostics capability flags
     allow_bandwidth_test: Mapped[bool] = mapped_column(
         Boolean,
@@ -598,7 +598,7 @@ class Job(Base):
 
     # Relationships
     plan: Mapped[Optional["Plan"]] = relationship("Plan", back_populates="jobs")
-    
+
     # Phase 4: Relationship to current device being processed
     current_device: Mapped[Optional["Device"]] = relationship(
         "Device",

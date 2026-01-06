@@ -574,11 +574,11 @@ class TestMultiDevicePlanService:
         service = PlanService(db_session)
 
         # Use 6 devices for multi-device plan
-        device_ids = [test_devices[0], test_devices[1], test_devices[2], 
+        device_ids = [test_devices[0], test_devices[1], test_devices[2],
                       "dev-staging-01", "dev-prod-01"][:5]
         # Only use lab devices
         device_ids = [test_devices[0], test_devices[1]]
-        
+
         plan = await service.create_multi_device_plan(
             tool_name="dns_ntp/plan-update",
             created_by="test-user",
@@ -610,8 +610,7 @@ class TestMultiDevicePlanService:
 
         # Create 4 lab devices for testing
         # Use only lab devices from test_devices
-        lab_devices = ["dev-lab-01", "dev-lab-02"]
-        
+
         # Add 2 more lab devices
         for i in range(3, 5):
             device = Device(
@@ -626,9 +625,9 @@ class TestMultiDevicePlanService:
                 allow_professional_workflows=True,
             )
             db_session.add(device)
-        
+
         await db_session.commit()
-        
+
         device_ids = ["dev-lab-01", "dev-lab-02", "dev-lab-03", "dev-lab-04"]
 
         # Test with batch_size=2 (should create 2 batches)
@@ -674,7 +673,7 @@ class TestMultiDevicePlanService:
 
         # Try with 51 devices - should fail
         device_ids = [f"dev-{i:03d}" for i in range(51)]
-        
+
         with pytest.raises(ValueError, match="maximum 50 devices"):
             await service.create_multi_device_plan(
                 tool_name="dns_ntp/plan-update",
@@ -694,7 +693,7 @@ class TestMultiDevicePlanService:
 
         # Try mixing lab and staging devices - should fail
         device_ids = ["dev-lab-01", "dev-staging-01"]
-        
+
         with pytest.raises(ValueError, match="same environment"):
             await service.create_multi_device_plan(
                 tool_name="dns_ntp/plan-update",
@@ -729,7 +728,7 @@ class TestMultiDevicePlanService:
 
         # Try with an unreachable device - should fail
         device_ids = ["dev-lab-01", "dev-unreachable"]
-        
+
         with pytest.raises(ValueError, match="Unreachable devices"):
             await service.create_multi_device_plan(
                 tool_name="dns_ntp/plan-update",
@@ -748,7 +747,7 @@ class TestMultiDevicePlanService:
         service = PlanService(db_session)
 
         device_ids = ["dev-lab-01", "dev-lab-02"]
-        
+
         plan = await service.create_multi_device_plan(
             tool_name="dns_ntp/plan-update",
             created_by="test-user",
@@ -778,7 +777,7 @@ class TestMultiDevicePlanService:
         service = PlanService(db_session)
 
         device_ids = ["dev-lab-01", "dev-lab-02"]
-        
+
         plan = await service.create_multi_device_plan(
             tool_name="dns_ntp/plan-update",
             created_by="test-user",
@@ -806,7 +805,7 @@ class TestMultiDevicePlanService:
         service = PlanService(db_session)
 
         device_ids = ["dev-lab-01", "dev-lab-02"]
-        
+
         plan = await service.create_multi_device_plan(
             tool_name="dns_ntp/plan-update",
             created_by="test-user",
