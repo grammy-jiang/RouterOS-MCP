@@ -383,6 +383,190 @@ class PlanService:
                 logger.warning(f"Failed to log audit event for plan creation failure: {audit_error}")
             raise
 
+    async def create_multi_device_plan(
+        self,
+        tool_name: str,
+        created_by: str,
+        device_ids: list[str],
+        summary: str,
+        changes: dict[str, Any],
+        change_type: str,
+        risk_level: str = "medium",
+        batch_size: int = 5,
+        pause_seconds_between_batches: int = 60,
+        rollback_on_failure: bool = True,
+    ) -> dict[str, Any]:
+        """Create a new multi-device plan with batched execution configuration.
+
+        Args:
+            tool_name: Name of the tool creating the plan
+            created_by: User sub who created the plan
+            device_ids: List of target device IDs (2-50 devices)
+            summary: Human-readable plan summary
+            changes: Detailed change specifications
+            change_type: Type of change (e.g., 'dns_ntp', 'firewall', 'routing')
+            risk_level: Risk level (low/medium/high)
+            batch_size: Number of devices to process per batch (default: 5)
+            pause_seconds_between_batches: Seconds to wait between batches (default: 60)
+            rollback_on_failure: Whether to rollback changes on failure (default: True)
+
+        Returns:
+            Plan details including plan_id, approval_token, batches, and pre-check results
+
+        Raises:
+            ValueError: If validation or pre-checks fail
+        """
+        try:
+            # Validate device count (2-50 devices)
+            if len(device_ids) < 2:
+                raise ValueError("Multi-device plans require at least 2 devices")
+            if len(device_ids) > 50:
+                raise ValueError("Multi-device plans support maximum 50 devices")
+
+            # Validate devices exist and get device models
+            devices = await self._validate_devices(device_ids)
+
+            # Validate all devices are in same environment
+            environments = {d.environment for d in devices}
+            if len(environments) > 1:
+                raise ValueError(
+                    f"All devices must be in the same environment. Found: {', '.join(sorted(environments))}"
+                )
+
+            # Validate all devices are reachable
+            unreachable_devices = [
+                d.id for d in devices
+                if d.status in ["unreachable", "decommissioned"]
+            ]
+            if unreachable_devices:
+                raise ValueError(
+                    f"All devices must be reachable. Unreachable devices: {', '.join(unreachable_devices)}"
+                )
+
+            # Run pre-checks on devices
+            pre_check_results = await self._run_pre_checks(devices, tool_name, risk_level)
+
+            # Calculate batches
+            batches = []
+            for i in range(0, len(device_ids), batch_size):
+                batch_devices = device_ids[i:i + batch_size]
+                batches.append({
+                    "batch_number": len(batches) + 1,
+                    "device_ids": batch_devices,
+                    "device_count": len(batch_devices),
+                })
+
+            # Generate plan ID and approval token
+            plan_id = f"plan-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
+            
+            # Generate token timestamp (stored with token for validation)
+            token_timestamp = datetime.now(UTC).isoformat()
+            approval_token = self._generate_approval_token(plan_id, created_by, token_timestamp)
+            
+            # Token expires in 15 minutes
+            expires_at = datetime.now(UTC) + timedelta(minutes=self.TOKEN_EXPIRATION_MINUTES)
+
+            # Initialize device statuses
+            device_statuses = {device_id: "pending" for device_id in device_ids}
+
+            # Create plan record with Phase 4 fields
+            plan = PlanModel(
+                id=plan_id,
+                created_by=created_by,
+                tool_name=tool_name,
+                status=PlanStatus.PENDING.value,
+                device_ids=device_ids,
+                summary=summary,
+                batch_size=batch_size,
+                pause_seconds_between_batches=pause_seconds_between_batches,
+                rollback_on_failure=rollback_on_failure,
+                device_statuses=device_statuses,
+                changes={
+                    **changes,
+                    "change_type": change_type,
+                    "risk_level": risk_level,
+                    "approval_token": approval_token,
+                    "approval_token_timestamp": token_timestamp,
+                    "approval_expires_at": expires_at.isoformat(),
+                    "pre_check_results": pre_check_results,
+                    "batches": batches,
+                    "batch_count": len(batches),
+                },
+            )
+
+            self.session.add(plan)
+            
+            # Log audit event (part of same transaction)
+            self._log_audit_event(
+                action="PLAN_CREATED",
+                user_sub=created_by,
+                plan_id=plan_id,
+                tool_name=tool_name,
+                result="SUCCESS",
+                metadata={
+                    "device_count": len(device_ids),
+                    "risk_level": risk_level,
+                    "device_ids": device_ids,
+                    "change_type": change_type,
+                    "batch_count": len(batches),
+                    "batch_size": batch_size,
+                    "multi_device": True,
+                },
+            )
+            
+            # Commit both plan creation and audit event atomically
+            await self.session.commit()
+            await self.session.refresh(plan)
+
+            logger.info(
+                f"Created multi-device plan {plan_id}",
+                extra={
+                    "plan_id": plan_id,
+                    "tool_name": tool_name,
+                    "device_count": len(device_ids),
+                    "batch_count": len(batches),
+                    "risk_level": risk_level,
+                },
+            )
+
+            return {
+                "plan_id": plan_id,
+                "approval_token": approval_token,
+                "approval_expires_at": expires_at.isoformat(),
+                "risk_level": risk_level,
+                "device_count": len(device_ids),
+                "devices": device_ids,
+                "summary": summary,
+                "status": PlanStatus.PENDING.value,
+                "batch_size": batch_size,
+                "batch_count": len(batches),
+                "batches": batches,
+                "pause_seconds_between_batches": pause_seconds_between_batches,
+                "rollback_on_failure": rollback_on_failure,
+                "pre_check_results": pre_check_results,
+            }
+
+        except Exception as e:
+            # Log failed plan creation (best effort - don't mask original error)
+            try:
+                self._log_audit_event(
+                    action="PLAN_CREATED",
+                    user_sub=created_by,
+                    tool_name=tool_name,
+                    result="FAILURE",
+                    error_message=str(e),
+                    metadata={
+                        "device_ids": device_ids,
+                        "risk_level": risk_level,
+                        "change_type": change_type,
+                        "multi_device": True,
+                    },
+                )
+                await self.session.commit()
+            except Exception as audit_error:
+                logger.warning(f"Failed to log audit event for plan creation failure: {audit_error}")
+            raise
+
     async def _validate_devices(self, device_ids: list[str]) -> list[DeviceModel]:
         """Validate that devices exist and are appropriate for operations.
 

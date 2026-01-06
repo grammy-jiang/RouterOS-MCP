@@ -462,6 +462,39 @@ class Plan(Base):
         DateTime(timezone=True), nullable=True, comment="Approval timestamp"
     )
 
+    # Phase 4: Multi-device execution configuration
+    batch_size: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=5,
+        server_default=text("5"),
+        comment="Number of devices to process per batch (Phase 4)",
+    )
+
+    pause_seconds_between_batches: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=60,
+        server_default=text("60"),
+        comment="Seconds to wait between batches (Phase 4)",
+    )
+
+    rollback_on_failure: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("1"),
+        comment="Whether to rollback changes on failure (Phase 4)",
+    )
+
+    device_statuses: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
+        comment="Per-device execution status tracking (Phase 4)",
+    )
+
     # Relationships
     jobs: Mapped[list["Job"]] = relationship(
         "Job", back_populates="plan", cascade="all, delete-orphan"
