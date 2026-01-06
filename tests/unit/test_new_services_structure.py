@@ -162,7 +162,8 @@ class TestSafetyLimits:
         """Test that ping count limit is defined."""
         from routeros_mcp.domain.services.diagnostics import MAX_PING_COUNT
 
-        assert MAX_PING_COUNT == 10
+        # Phase 4 requirement: count must be 1-100
+        assert MAX_PING_COUNT == 100
 
     def test_traceroute_limits(self):
         """Test that traceroute limits are defined."""
