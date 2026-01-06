@@ -68,9 +68,27 @@ def upgrade() -> None:
         ),
     )
 
+    # Add CHECK constraints for batch configuration fields
+    op.create_check_constraint(
+        "ck_plans_batch_size_range",
+        "plans",
+        "batch_size >= 1 AND batch_size <= 50",
+    )
+
+    op.create_check_constraint(
+        "ck_plans_pause_seconds_non_negative",
+        "plans",
+        "pause_seconds_between_batches >= 0",
+    )
+
 
 def downgrade() -> None:
     """Downgrade database schema."""
+    # Drop CHECK constraints
+    op.drop_constraint("ck_plans_pause_seconds_non_negative", "plans", type_="check")
+    op.drop_constraint("ck_plans_batch_size_range", "plans", type_="check")
+
+    # Drop columns
     op.drop_column("plans", "device_statuses")
     op.drop_column("plans", "rollback_on_failure")
     op.drop_column("plans", "pause_seconds_between_batches")

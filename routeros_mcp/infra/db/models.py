@@ -503,6 +503,14 @@ class Plan(Base):
     __table_args__ = (
         Index("idx_plan_created_by", "created_by"),
         Index("idx_plan_status", "status"),
+        CheckConstraint(
+            "batch_size >= 1 AND batch_size <= 50",
+            name="ck_plans_batch_size_range",
+        ),
+        CheckConstraint(
+            "pause_seconds_between_batches >= 0",
+            name="ck_plans_pause_seconds_non_negative",
+        ),
     )
 
 

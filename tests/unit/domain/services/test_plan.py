@@ -573,9 +573,6 @@ class TestMultiDevicePlanService:
         """Test creating a multi-device plan with multiple devices."""
         service = PlanService(db_session)
 
-        # Use 6 devices for multi-device plan
-        device_ids = [test_devices[0], test_devices[1], test_devices[2],
-                      "dev-staging-01", "dev-prod-01"][:5]
         # Only use lab devices
         device_ids = [test_devices[0], test_devices[1]]
 
@@ -702,6 +699,7 @@ class TestMultiDevicePlanService:
                 summary="Update DNS/NTP",
                 changes={"dns_servers": ["8.8.8.8"]},
                 change_type="dns_ntp",
+                batch_size=2,  # Set batch_size to avoid exceeding device count
             )
 
     @pytest.mark.asyncio
@@ -711,25 +709,10 @@ class TestMultiDevicePlanService:
         """Test that unreachable devices fail plan creation."""
         service = PlanService(db_session)
 
-        # Create another lab device that's reachable
-        device = Device(
-            id="dev-lab-03",
-            name="router-lab-03",
-            management_ip="192.168.1.3",
-            management_port=443,
-            environment="lab",
-            status="healthy",
-            tags={},
-            allow_advanced_writes=True,
-            allow_professional_workflows=True,
-        )
-        db_session.add(device)
-        await db_session.commit()
-
         # Try with an unreachable device - should fail
         device_ids = ["dev-lab-01", "dev-unreachable"]
 
-        with pytest.raises(ValueError, match="Unreachable devices"):
+        with pytest.raises(ValueError, match="Pre-checks failed"):
             await service.create_multi_device_plan(
                 tool_name="dns_ntp/plan-update",
                 created_by="test-user",
@@ -737,6 +720,7 @@ class TestMultiDevicePlanService:
                 summary="Update DNS/NTP",
                 changes={"dns_servers": ["8.8.8.8"]},
                 change_type="dns_ntp",
+                batch_size=2,  # Set batch_size to avoid exceeding device count
             )
 
     @pytest.mark.asyncio
@@ -755,6 +739,7 @@ class TestMultiDevicePlanService:
             summary="Update DNS/NTP",
             changes={"dns_servers": ["8.8.8.8"]},
             change_type="dns_ntp",
+            batch_size=2,  # Set batch_size to match device count
         )
 
         # Verify token format
@@ -813,6 +798,7 @@ class TestMultiDevicePlanService:
             summary="Update DNS/NTP",
             changes={"dns_servers": ["8.8.8.8"]},
             change_type="dns_ntp",
+            batch_size=2,  # Set batch_size to match device count
         )
 
         # Check audit event was created
@@ -829,4 +815,71 @@ class TestMultiDevicePlanService:
         assert audit_event.meta["multi_device"] is True
         assert audit_event.meta["batch_count"] == 1
         assert audit_event.meta["change_type"] == "dns_ntp"
+
+    @pytest.mark.asyncio
+    async def test_multi_device_plan_batch_size_validation(
+        self, db_session: AsyncSession, test_devices: list[str]
+    ) -> None:
+        """Test that invalid batch_size values are rejected."""
+        service = PlanService(db_session)
+
+        device_ids = ["dev-lab-01", "dev-lab-02"]
+
+        # Test batch_size = 0 (should fail)
+        with pytest.raises(ValueError, match="batch_size must be at least 1"):
+            await service.create_multi_device_plan(
+                tool_name="dns_ntp/plan-update",
+                created_by="test-user",
+                device_ids=device_ids,
+                summary="Update DNS/NTP",
+                changes={"dns_servers": ["8.8.8.8"]},
+                change_type="dns_ntp",
+                batch_size=0,
+            )
+
+        # Test negative batch_size (should fail)
+        with pytest.raises(ValueError, match="batch_size must be at least 1"):
+            await service.create_multi_device_plan(
+                tool_name="dns_ntp/plan-update",
+                created_by="test-user",
+                device_ids=device_ids,
+                summary="Update DNS/NTP",
+                changes={"dns_servers": ["8.8.8.8"]},
+                change_type="dns_ntp",
+                batch_size=-1,
+            )
+
+        # Test batch_size > device count (should fail)
+        with pytest.raises(ValueError, match="batch_size must not exceed"):
+            await service.create_multi_device_plan(
+                tool_name="dns_ntp/plan-update",
+                created_by="test-user",
+                device_ids=device_ids,
+                summary="Update DNS/NTP",
+                changes={"dns_servers": ["8.8.8.8"]},
+                change_type="dns_ntp",
+                batch_size=100,
+            )
+
+    @pytest.mark.asyncio
+    async def test_multi_device_plan_pause_seconds_validation(
+        self, db_session: AsyncSession, test_devices: list[str]
+    ) -> None:
+        """Test that negative pause_seconds_between_batches is rejected."""
+        service = PlanService(db_session)
+
+        device_ids = ["dev-lab-01", "dev-lab-02"]
+
+        # Test negative pause_seconds (should fail)
+        with pytest.raises(ValueError, match="pause_seconds_between_batches cannot be negative"):
+            await service.create_multi_device_plan(
+                tool_name="dns_ntp/plan-update",
+                created_by="test-user",
+                device_ids=device_ids,
+                summary="Update DNS/NTP",
+                changes={"dns_servers": ["8.8.8.8"]},
+                change_type="dns_ntp",
+                batch_size=2,  # Set batch_size to match device count
+                pause_seconds_between_batches=-10,
+            )
 

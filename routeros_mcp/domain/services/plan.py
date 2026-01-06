@@ -423,6 +423,22 @@ class PlanService:
             if len(device_ids) > 50:
                 raise ValueError("Multi-device plans support maximum 50 devices")
 
+            # Validate batch configuration
+            if not isinstance(batch_size, int):
+                raise ValueError("batch_size must be an integer")
+            if batch_size < 1:
+                raise ValueError("batch_size must be at least 1")
+            # Enforce a reasonable maximum batch size relative to the plan size
+            max_batch_size = min(50, len(device_ids))
+            if batch_size > max_batch_size:
+                raise ValueError(
+                    f"batch_size must not exceed {max_batch_size} for this plan"
+                )
+
+            # Validate pause between batches is non-negative
+            if pause_seconds_between_batches < 0:
+                raise ValueError("pause_seconds_between_batches cannot be negative")
+
             # Validate devices exist and get device models
             devices = await self._validate_devices(device_ids)
 
@@ -433,17 +449,7 @@ class PlanService:
                     f"All devices must be in the same environment. Found: {', '.join(sorted(environments))}"
                 )
 
-            # Validate all devices are reachable
-            unreachable_devices = [
-                d.id for d in devices
-                if d.status in ["unreachable", "decommissioned"]
-            ]
-            if unreachable_devices:
-                raise ValueError(
-                    f"All devices must be reachable. Unreachable devices: {', '.join(unreachable_devices)}"
-                )
-
-            # Run pre-checks on devices
+            # Run pre-checks on devices (includes reachability validation)
             pre_check_results = await self._run_pre_checks(devices, tool_name, risk_level)
 
             # Calculate batches
