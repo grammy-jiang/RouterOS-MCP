@@ -532,6 +532,60 @@ class TestJobModel:
         assert found_job.current_device.id == "dev-1100"
         assert found_job.current_device.name == "test-router-1100"
 
+    @pytest.mark.asyncio
+    async def test_job_progress_percent_check_constraint(self, db_session) -> None:
+        """Test that progress_percent CHECK constraint rejects invalid values."""
+        from sqlalchemy.exc import IntegrityError
+
+        # Test with progress_percent > 100 (should fail)
+        job_over = Job(
+            id="job-1200",
+            job_type="APPLY_PLAN",
+            status="running",
+            device_ids=["dev-1"],
+            attempts=0,
+            max_attempts=3,
+            progress_percent=101,
+        )
+        db_session.add(job_over)
+        with pytest.raises(IntegrityError) as exc_info:
+            await db_session.commit()
+        assert "chk_job_progress_percent" in str(exc_info.value) or "CHECK constraint" in str(exc_info.value)
+        await db_session.rollback()
+
+        # Test with progress_percent < 0 (should fail)
+        job_under = Job(
+            id="job-1201",
+            job_type="APPLY_PLAN",
+            status="running",
+            device_ids=["dev-1"],
+            attempts=0,
+            max_attempts=3,
+            progress_percent=-1,
+        )
+        db_session.add(job_under)
+        with pytest.raises(IntegrityError) as exc_info:
+            await db_session.commit()
+        assert "chk_job_progress_percent" in str(exc_info.value) or "CHECK constraint" in str(exc_info.value)
+        await db_session.rollback()
+
+        # Test with valid progress_percent (should succeed)
+        job_valid = Job(
+            id="job-1202",
+            job_type="APPLY_PLAN",
+            status="running",
+            device_ids=["dev-1"],
+            attempts=0,
+            max_attempts=3,
+            progress_percent=50,
+        )
+        db_session.add(job_valid)
+        await db_session.commit()
+
+        result = await db_session.execute(select(Job).where(Job.id == "job-1202"))
+        found = result.scalar_one()
+        assert found.progress_percent == 50
+
 
 class TestAuditEventModel:
     """Tests for AuditEvent model."""

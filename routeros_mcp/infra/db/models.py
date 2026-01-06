@@ -30,6 +30,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -235,6 +236,14 @@ class Device(Base):
         "AuditEvent",
         back_populates="device",
         cascade="all, delete-orphan",
+        lazy="noload",
+    )
+
+    # Phase 4: Jobs currently processing this device
+    jobs_as_current: Mapped[list["Job"]] = relationship(
+        "Job",
+        back_populates="current_device",
+        foreign_keys="Job.current_device_id",
         lazy="noload",
     )
 
@@ -525,6 +534,7 @@ class Job(Base):
         Integer,
         nullable=False,
         default=0,
+        server_default=text("0"),
         comment="Job progress percentage (0-100)",
     )
 
@@ -559,6 +569,7 @@ class Job(Base):
     # Phase 4: Relationship to current device being processed
     current_device: Mapped[Optional["Device"]] = relationship(
         "Device",
+        back_populates="jobs_as_current",
         foreign_keys=[current_device_id],
         lazy="selectin",
     )
