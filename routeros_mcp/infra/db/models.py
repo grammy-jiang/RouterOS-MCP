@@ -20,6 +20,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -519,6 +520,22 @@ class Job(Base):
         comment="Scheduled execution time",
     )
 
+    # Progress tracking (Phase 4)
+    progress_percent: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        comment="Job progress percentage (0-100)",
+    )
+
+    current_device_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("devices.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Current device being processed (Phase 4)",
+    )
+
     # Cancellation support (Phase 4)
     cancellation_requested: Mapped[bool] = mapped_column(
         Boolean,
@@ -528,8 +545,8 @@ class Job(Base):
     )
 
     # Results
-    result_summary: Mapped[str | None] = mapped_column(
-        Text, nullable=True, comment="Job execution summary"
+    result_summary: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True, default=None, comment="Per-device job results (Phase 4)"
     )
 
     error_message: Mapped[str | None] = mapped_column(
@@ -542,6 +559,7 @@ class Job(Base):
     __table_args__ = (
         Index("idx_job_status_next_run", "status", "next_run_at"),
         Index("idx_job_type", "job_type"),
+        CheckConstraint("progress_percent >= 0 AND progress_percent <= 100", name="chk_job_progress_percent"),
     )
 
 

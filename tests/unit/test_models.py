@@ -407,6 +407,91 @@ class TestJobModel:
         assert found_job.plan is not None
         assert found_job.plan.id == "plan-700"
 
+    @pytest.mark.asyncio
+    async def test_job_progress_tracking_fields(self, db_session) -> None:
+        """Test Phase 4 progress tracking fields."""
+        # Create a device for current_device_id FK
+        device = Device(
+            id="dev-800",
+            name="test-router-800",
+            management_ip="198.51.100.100",
+            management_port=443,
+            environment="lab",
+            status="healthy",
+            tags={},
+            allow_advanced_writes=False,
+            allow_professional_workflows=False,
+        )
+        db_session.add(device)
+        await db_session.commit()
+
+        # Create job with progress tracking fields
+        job = Job(
+            id="job-800",
+            job_type="APPLY_PLAN",
+            status="running",
+            device_ids=["dev-800", "dev-801"],
+            attempts=1,
+            max_attempts=3,
+            progress_percent=50,
+            current_device_id="dev-800",
+            result_summary={"dev-800": {"status": "success"}, "dev-801": {"status": "pending"}},
+            cancellation_requested=False,
+        )
+        db_session.add(job)
+        await db_session.commit()
+
+        # Query back and verify
+        result = await db_session.execute(select(Job).where(Job.id == "job-800"))
+        found = result.scalar_one()
+
+        assert found.progress_percent == 50
+        assert found.current_device_id == "dev-800"
+        assert found.result_summary == {"dev-800": {"status": "success"}, "dev-801": {"status": "pending"}}
+        assert found.cancellation_requested is False
+
+    @pytest.mark.asyncio
+    async def test_job_progress_percent_defaults_to_zero(self, db_session) -> None:
+        """Test that progress_percent defaults to 0."""
+        job = Job(
+            id="job-900",
+            job_type="HEALTH_CHECK",
+            status="pending",
+            device_ids=["dev-1"],
+            attempts=0,
+            max_attempts=3,
+        )
+        db_session.add(job)
+        await db_session.commit()
+
+        result = await db_session.execute(select(Job).where(Job.id == "job-900"))
+        found = result.scalar_one()
+
+        assert found.progress_percent == 0
+        assert found.cancellation_requested is False
+        assert found.result_summary is None
+        assert found.current_device_id is None
+
+    @pytest.mark.asyncio
+    async def test_job_cancellation_requested(self, db_session) -> None:
+        """Test job cancellation_requested field."""
+        job = Job(
+            id="job-1000",
+            job_type="APPLY_PLAN",
+            status="running",
+            device_ids=["dev-1"],
+            attempts=1,
+            max_attempts=3,
+            cancellation_requested=True,
+        )
+        db_session.add(job)
+        await db_session.commit()
+
+        result = await db_session.execute(select(Job).where(Job.id == "job-1000"))
+        found = result.scalar_one()
+
+        assert found.cancellation_requested is True
+
 
 class TestAuditEventModel:
     """Tests for AuditEvent model."""
