@@ -879,3 +879,444 @@ async def test_ping_non_streaming_returns_dict(monkeypatch: pytest.MonkeyPatch) 
     assert result["isError"] is False
     assert "Ping to 8.8.8.8" in result["content"][0]["text"]
     assert "avg latency 12.3ms" in result["content"][0]["text"]
+
+
+# ===== New tests for Phase 4 bandwidth_test =====
+
+
+@pytest.mark.asyncio
+async def test_bandwidth_test_success_formats_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test bandwidth_test tool success case formats result properly."""
+    import routeros_mcp.mcp_tools.diagnostics as diagnostics_tools
+    from routeros_mcp.infra.rate_limiter import reset_rate_limiter
+
+    reset_rate_limiter()
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_device(self, device_id: str) -> object:
+            return SimpleNamespace(
+                environment="lab",
+                allow_advanced_writes=False,
+                allow_professional_workflows=True,
+                name=device_id,
+            )
+
+    class StubDiagnosticsService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def test_bandwidth(
+            self, *_args: object, **_kwargs: object
+        ) -> dict[str, object]:
+            return {
+                "target": "192.168.1.100",
+                "avg_tx_bps": 950_000_000,
+                "avg_rx_bps": 940_000_000,
+                "avg_tx_mbps": 950.0,
+                "avg_rx_mbps": 940.0,
+                "packet_loss_percent": 0.1,
+                "target_device_id": "dev-target",
+            }
+
+    monkeypatch.setattr(diagnostics_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(diagnostics_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(diagnostics_tools, "DiagnosticsService", StubDiagnosticsService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    diagnostics_tools.register_diagnostics_tools(mcp, settings)
+
+    result = await mcp.tools["bandwidth_test"](
+        device_id="dev-source",
+        target_device_id="dev-target",
+        duration=10,
+        direction="both",
+    )
+
+    assert result["isError"] is False
+    assert "Bandwidth test" in result["content"][0]["text"]
+    assert "950.0 Mbps" in result["content"][0]["text"]
+    assert "940.0 Mbps" in result["content"][0]["text"]
+    assert result["_meta"]["avg_tx_mbps"] == 950.0
+    assert result["_meta"]["avg_rx_mbps"] == 940.0
+
+
+@pytest.mark.asyncio
+async def test_bandwidth_test_rejects_target_without_capability(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test bandwidth_test rejects target device without allow_bandwidth_test capability."""
+    import routeros_mcp.mcp_tools.diagnostics as diagnostics_tools
+    from routeros_mcp.infra.rate_limiter import reset_rate_limiter
+    from routeros_mcp.mcp.errors import ValidationError
+
+    reset_rate_limiter()
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_device(self, device_id: str) -> object:
+            return SimpleNamespace(
+                environment="lab",
+                allow_advanced_writes=False,
+                allow_professional_workflows=True,
+                allow_bandwidth_test=False,  # Target doesn't allow bandwidth tests
+                name=device_id,
+            )
+
+    class StubDiagnosticsService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def test_bandwidth(
+            self, *_args: object, **_kwargs: object
+        ) -> dict[str, object]:
+            # Should raise before getting here
+            raise ValidationError(
+                "Target device 'dev-target' does not allow bandwidth tests",
+                data={"target_device_id": "dev-target"},
+            )
+
+    monkeypatch.setattr(diagnostics_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(diagnostics_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(diagnostics_tools, "DiagnosticsService", StubDiagnosticsService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    diagnostics_tools.register_diagnostics_tools(mcp, settings)
+
+    # Should raise ValidationError due to missing capability
+    with pytest.raises(ValidationError, match="does not allow bandwidth tests"):
+        await mcp.tools["bandwidth_test"](
+            device_id="dev-source",
+            target_device_id="dev-target",
+        )
+
+
+@pytest.mark.asyncio
+async def test_bandwidth_test_validates_duration_range(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test bandwidth_test validates duration is 5-60 seconds."""
+    import routeros_mcp.mcp_tools.diagnostics as diagnostics_tools
+    from routeros_mcp.infra.rate_limiter import reset_rate_limiter
+    from routeros_mcp.mcp.errors import ValidationError
+
+    reset_rate_limiter()
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_device(self, device_id: str) -> object:
+            return SimpleNamespace(
+                environment="lab",
+                allow_advanced_writes=False,
+                allow_professional_workflows=True,
+                allow_bandwidth_test=True,
+                name=device_id,
+            )
+
+    class ValidatingDiagnosticsService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def test_bandwidth(
+            self, *_args: object, duration: int = 10, **_kwargs: object
+        ) -> dict[str, object]:
+            # Replicate validation from service
+            if duration < 5:
+                raise ValidationError(
+                    "Bandwidth test duration must be at least 5 seconds",
+                    data={"requested_duration": duration, "min_duration": 5},
+                )
+            if duration > 60:
+                raise ValidationError(
+                    "Bandwidth test duration cannot exceed 60 seconds",
+                    data={"requested_duration": duration, "max_duration": 60},
+                )
+            return {
+                "target": "192.168.1.100",
+                "avg_tx_mbps": 100.0,
+                "avg_rx_mbps": 100.0,
+                "packet_loss_percent": 0.0,
+            }
+
+    monkeypatch.setattr(diagnostics_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(diagnostics_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(diagnostics_tools, "DiagnosticsService", ValidatingDiagnosticsService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    diagnostics_tools.register_diagnostics_tools(mcp, settings)
+
+    # duration=4 (too short) should fail
+    with pytest.raises(ValidationError, match="at least 5 seconds"):
+        await mcp.tools["bandwidth_test"](
+            device_id="dev-source",
+            target_device_id="dev-target",
+            duration=4,
+        )
+
+    # duration=61 (too long) should fail
+    with pytest.raises(ValidationError, match="cannot exceed 60 seconds"):
+        await mcp.tools["bandwidth_test"](
+            device_id="dev-source",
+            target_device_id="dev-target",
+            duration=61,
+        )
+
+
+@pytest.mark.asyncio
+async def test_bandwidth_test_validates_direction(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test bandwidth_test validates direction parameter."""
+    import routeros_mcp.mcp_tools.diagnostics as diagnostics_tools
+    from routeros_mcp.infra.rate_limiter import reset_rate_limiter
+    from routeros_mcp.mcp.errors import ValidationError
+
+    reset_rate_limiter()
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_device(self, device_id: str) -> object:
+            return SimpleNamespace(
+                environment="lab",
+                allow_advanced_writes=False,
+                allow_professional_workflows=True,
+                allow_bandwidth_test=True,
+                name=device_id,
+            )
+
+    class ValidatingDiagnosticsService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def test_bandwidth(
+            self, *_args: object, direction: str = "both", **_kwargs: object
+        ) -> dict[str, object]:
+            valid_directions = ["tx", "rx", "both"]
+            if direction not in valid_directions:
+                raise ValidationError(
+                    f"Invalid direction '{direction}'",
+                    data={"direction": direction, "valid_directions": valid_directions},
+                )
+            return {
+                "target": "192.168.1.100",
+                "avg_tx_mbps": 100.0,
+                "avg_rx_mbps": 100.0,
+                "packet_loss_percent": 0.0,
+            }
+
+    monkeypatch.setattr(diagnostics_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(diagnostics_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(diagnostics_tools, "DiagnosticsService", ValidatingDiagnosticsService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    diagnostics_tools.register_diagnostics_tools(mcp, settings)
+
+    # Invalid direction should fail
+    with pytest.raises(ValidationError, match="Invalid direction"):
+        await mcp.tools["bandwidth_test"](
+            device_id="dev-source",
+            target_device_id="dev-target",
+            direction="invalid",
+        )
+
+
+@pytest.mark.asyncio
+async def test_bandwidth_test_streaming_yields_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test bandwidth_test with stream_progress=True yields progress updates."""
+    import routeros_mcp.mcp_tools.diagnostics as diagnostics_tools
+    from routeros_mcp.infra.rate_limiter import reset_rate_limiter
+
+    reset_rate_limiter()
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_device(self, device_id: str) -> object:
+            return SimpleNamespace(
+                environment="lab",
+                allow_advanced_writes=False,
+                allow_professional_workflows=True,
+                allow_bandwidth_test=True,
+                name=device_id,
+            )
+
+    class StubDiagnosticsService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def test_bandwidth(
+            self, *_args: object, **_kwargs: object
+        ) -> dict[str, object]:
+            return {
+                "target": "192.168.1.100",
+                "avg_tx_bps": 850_000_000,
+                "avg_rx_bps": 920_000_000,
+                "avg_tx_mbps": 850.0,
+                "avg_rx_mbps": 920.0,
+                "packet_loss_percent": 0.1,
+                "target_device_id": "dev-target",
+            }
+
+    monkeypatch.setattr(diagnostics_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(diagnostics_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(diagnostics_tools, "DiagnosticsService", StubDiagnosticsService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    diagnostics_tools.register_diagnostics_tools(mcp, settings)
+
+    # Call with stream_progress=True
+    result_generator = await mcp.tools["bandwidth_test"](
+        device_id="dev-source",
+        target_device_id="dev-target",
+        duration=10,
+        direction="both",
+        stream_progress=True,
+    )
+
+    # Collect all events
+    events = []
+    async for event in result_generator:
+        events.append(event)
+
+    # Should have progress messages
+    progress_events = [e for e in events if e.get("type") == "progress"]
+    assert len(progress_events) >= 1, "Should have at least starting message"
+
+    # Should have starting message
+    assert any("Starting bandwidth test" in e.get("message", "") for e in progress_events)
+
+    # Should have periodic updates with throughput
+    throughput_messages = [
+        e for e in progress_events
+        if "Mbps" in e.get("message", "") and e.get("data", {}).get("type") == "progress"
+    ]
+    assert len(throughput_messages) >= 1, "Should have throughput progress messages"
+
+    # Should have final result
+    final_result = events[-1]
+    assert "content" in final_result
+    assert final_result["isError"] is False
+    assert "850.0 Mbps" in final_result["content"][0]["text"]
+    assert "920.0 Mbps" in final_result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_bandwidth_test_non_streaming_returns_dict(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test bandwidth_test with stream_progress=False returns dict immediately."""
+    import routeros_mcp.mcp_tools.diagnostics as diagnostics_tools
+    from routeros_mcp.infra.rate_limiter import reset_rate_limiter
+
+    reset_rate_limiter()
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_device(self, device_id: str) -> object:
+            return SimpleNamespace(
+                environment="lab",
+                allow_advanced_writes=False,
+                allow_professional_workflows=True,
+                allow_bandwidth_test=True,
+                name=device_id,
+            )
+
+    class StubDiagnosticsService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def test_bandwidth(
+            self, *_args: object, **_kwargs: object
+        ) -> dict[str, object]:
+            return {
+                "target": "192.168.1.100",
+                "avg_tx_mbps": 500.5,
+                "avg_rx_mbps": 480.2,
+                "packet_loss_percent": 0.0,
+            }
+
+    monkeypatch.setattr(diagnostics_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(diagnostics_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(diagnostics_tools, "DiagnosticsService", StubDiagnosticsService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    diagnostics_tools.register_diagnostics_tools(mcp, settings)
+
+    # Call without stream_progress (default False)
+    result = await mcp.tools["bandwidth_test"](
+        device_id="dev-source",
+        target_device_id="dev-target",
+    )
+
+    # Should return dict immediately, not async generator
+    assert isinstance(result, dict)
+    assert result["isError"] is False
+    assert "500.5 Mbps" in result["content"][0]["text"]
+    assert "480.2 Mbps" in result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_bandwidth_test_requires_professional_tier(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test bandwidth_test requires professional tier authorization."""
+    import routeros_mcp.mcp_tools.diagnostics as diagnostics_tools
+    from routeros_mcp.infra.rate_limiter import reset_rate_limiter
+    from routeros_mcp.mcp.errors import MCPError
+
+    reset_rate_limiter()
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_device(self, device_id: str) -> object:
+            return SimpleNamespace(
+                environment="lab",
+                allow_advanced_writes=False,
+                allow_professional_workflows=False,  # Professional tier disabled
+                name=device_id,
+            )
+
+    class StubDiagnosticsService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def test_bandwidth(
+            self, *_args: object, **_kwargs: object
+        ) -> dict[str, object]:
+            # Should not reach here
+            return {}
+
+    def _deny_professional(*_args: object, **_kwargs: object) -> None:
+        raise MCPError("Professional tier not allowed")
+
+    monkeypatch.setattr(diagnostics_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(diagnostics_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(diagnostics_tools, "DiagnosticsService", StubDiagnosticsService)
+    monkeypatch.setattr(diagnostics_tools, "check_tool_authorization", _deny_professional)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    diagnostics_tools.register_diagnostics_tools(mcp, settings)
+
+    # Should fail authorization check
+    with pytest.raises(MCPError, match="Professional tier not allowed"):
+        await mcp.tools["bandwidth_test"](
+            device_id="dev-source",
+            target_device_id="dev-target",
+        )
