@@ -7,6 +7,7 @@ See docs/09-operations-deployment-self-update-and-runbook.md for design.
 """
 
 import logging
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -395,12 +396,19 @@ async def get_job_status(
 
     Args:
         job_id: Job identifier
-        user: Current authenticated user
+        user: Current authenticated user (must have admin or operator role)
         job_service: Job service dependency
 
     Returns:
         JSON with job status, progress, and results
     """
+    # Check user role - job status may contain sensitive infrastructure details
+    if user.get("role") not in ["admin", "operator"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions to view job status",
+        )
+
     try:
         job = await job_service.get_job(job_id)
 
@@ -411,30 +419,55 @@ async def get_job_status(
         if job["status"] == "success":
             progress_percent = 100
         elif job["status"] in ["running", "cancelled"]:
-            # Try to parse result_summary to get devices processed
-            # Format: "Cancelled after processing X/Y devices in A/B batches"
-            # or "Completed X devices in Y batches"
+            # Try to parse result_summary to get devices processed.
+            #
+            # IMPORTANT: This logic depends on the exact string format produced by the
+            # job execution code (execute_job in JobService). The expected formats are:
+            #   - "Cancelled after processing X/Y devices in A/B batches"
+            #   - "Cancelled before starting: 0/Y devices, 0/Z batches processed"
+            #   - "Completed X devices in Y batches"
+            # Any change to the result_summary wording or structure MUST be coordinated
+            # with this parsing logic; otherwise, progress_percent will remain 0 and a
+            # warning will be logged.
             result_summary = job.get("result_summary", "")
             if result_summary:
+                matched_progress = False
                 try:
-                    import re
-                    # Match "X/Y devices" or "X devices"
+                    # Match "X/Y devices" first, e.g. "10/20 devices"
                     match = re.search(r'(\d+)/(\d+)\s+devices', result_summary)
                     if match:
                         processed = int(match.group(1))
-                        progress_percent = int((processed / total_devices) * 100) if total_devices > 0 else 0
+                        matched_progress = True
+                        progress_percent = (
+                            int((processed / total_devices) * 100) if total_devices > 0 else 0
+                        )
                     else:
                         # Try alternative format "Completed X devices"
                         match = re.search(r'Completed\s+(\d+)\s+devices', result_summary)
                         if match:
                             processed = int(match.group(1))
-                            progress_percent = int((processed / total_devices) * 100) if total_devices > 0 else 0
+                            matched_progress = True
+                            progress_percent = (
+                                int((processed / total_devices) * 100) if total_devices > 0 else 0
+                            )
                 except (ValueError, AttributeError):
-                    # If parsing fails, keep progress_percent at 0
+                    # If parsing fails due to an unexpected numeric/attribute issue,
+                    # keep progress_percent at 0 but emit a warning for observability.
                     logger.warning(
-                        f"Failed to parse progress from result_summary: {result_summary}",
-                        extra={"job_id": job_id}
+                        "Failed to parse progress from result_summary due to exception; "
+                        "progress defaulted to 0",
+                        extra={"job_id": job_id, "result_summary": result_summary},
                     )
+                else:
+                    if not matched_progress:
+                        # The result_summary format did not match any known patterns.
+                        # This commonly indicates that result_summary was changed
+                        # without updating this parsing logic.
+                        logger.warning(
+                            "Unable to infer progress from result_summary; "
+                            "no known patterns matched and progress defaulted to 0",
+                            extra={"job_id": job_id, "result_summary": result_summary},
+                        )
 
         job_data = {
             "job_id": job["job_id"],
@@ -510,9 +543,15 @@ async def cancel_job(
         )
 
     except ValueError as e:
+        message = str(e)
+        if "not found" in message.lower():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=message,
+            )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
+            detail=message,
         )
     except Exception as e:
         from routeros_mcp.infra.observability.logging import get_correlation_id

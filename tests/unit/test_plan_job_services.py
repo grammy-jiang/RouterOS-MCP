@@ -555,7 +555,13 @@ class TestJobService:
         test_devices: list[str],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Test job cancellation during execution."""
+        """Test job cancellation during execution.
+        
+        Note: Cancellation takes effect after the current batch completes, not immediately
+        when requested. The executor requests cancellation during batch 1 execution, but
+        the job continues to finish batch 1 atomically before checking the cancellation
+        flag and transitioning to cancelled state.
+        """
         service = JobService(db_session)
 
         job = await service.create_job(
@@ -569,7 +575,7 @@ class TestJobService:
         async def executor(job_id: str, device_ids: list[str], context: dict[str, Any]):
             execution_state["batch_count"] += 1
             
-            # Request cancellation after first batch
+            # Request cancellation after first batch starts
             if execution_state["batch_count"] == 1:
                 await service.request_cancellation(job_id)
             
@@ -597,4 +603,55 @@ class TestJobService:
         assert fetched["status"] == "cancelled"
         assert "1/3 devices" in fetched["result_summary"]
         assert "1/3 batches" in fetched["result_summary"]
+
+    @pytest.mark.asyncio
+    async def test_job_cancellation_before_execution(
+        self,
+        db_session: AsyncSession,
+        test_devices: list[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test job cancellation requested before execution starts.
+        
+        When cancellation_requested=True before execute_job is called, the job
+        should immediately transition to cancelled without processing any batches.
+        """
+        service = JobService(db_session)
+
+        job = await service.create_job(
+            job_type="TEST_PRECANCEL",
+            device_ids=test_devices,
+        )
+
+        # Request cancellation before execution
+        await service.request_cancellation(job["job_id"])
+
+        async def executor(job_id: str, device_ids: list[str], context: dict[str, Any]):
+            # This should never be called
+            pytest.fail("Executor should not be called for pre-cancelled job")
+            return {"devices": {}}
+
+        async def _fast_sleep(*_args, **_kwargs):
+            return None
+
+        monkeypatch.setattr(job_module.asyncio, "sleep", _fast_sleep)
+
+        result = await service.execute_job(
+            job["job_id"],
+            executor,
+            executor_context={},
+            batch_size=1,
+            batch_pause_seconds=0,
+        )
+
+        # Job should be cancelled immediately without processing any batches
+        assert result["status"] == "cancelled"
+        assert result["batches_completed"] == 0
+        assert result["devices_processed"] == 0
+        
+        fetched = await service.get_job(job["job_id"])
+        assert fetched["status"] == "cancelled"
+        assert "Cancelled before starting" in fetched["result_summary"]
+        assert "0/3 devices" in fetched["result_summary"]
+        assert "0/3 batches" in fetched["result_summary"]
 

@@ -57,11 +57,11 @@ class JobService:
         
         Args:
             job: Job model instance
-            batch_idx: Current batch index (0-based)
+            batch_idx: Current batch index (0-based, indicates batch about to be processed)
             batches: List of all batches
             device_ids: All device IDs for the job
             results: Current results dictionary
-            batches_completed: Number of batches completed so far
+            batches_completed: Number of batches actually completed so far
             
         Returns:
             Results dictionary if cancelled, None otherwise
@@ -74,10 +74,19 @@ class JobService:
             )
             job.status = "cancelled"
             devices_processed = sum(len(batches[i]) for i in range(batches_completed))
-            job.result_summary = (
-                f"Cancelled after processing {devices_processed}/{len(device_ids)} devices "
-                f"in {batches_completed}/{len(batches)} batches"
-            )
+            
+            # Distinguish between "cancelled before starting" vs "cancelled after partial completion"
+            if batches_completed == 0 and not results.get("device_results"):
+                job.result_summary = (
+                    f"Cancelled before starting: "
+                    f"0/{len(device_ids)} devices, 0/{len(batches)} batches processed"
+                )
+            else:
+                job.result_summary = (
+                    f"Cancelled after processing {devices_processed}/{len(device_ids)} devices "
+                    f"in {batches_completed}/{len(batches)} batches"
+                )
+            
             await self.session.commit()
             
             results["status"] = "cancelled"
@@ -220,8 +229,9 @@ class JobService:
         try:
             for batch_idx, batch_device_ids in enumerate(batches):
                 # Check for cancellation request before processing batch
+                # Pass batch_idx as batches_completed since no batches have been completed yet
                 cancellation_result = await self._handle_cancellation(
-                    job, batch_idx, batches, device_ids, results, batch_idx
+                    job, batch_idx, batches, device_ids, results, batches_completed=0
                 )
                 if cancellation_result:
                     return cancellation_result
@@ -252,11 +262,15 @@ class JobService:
                     await self.session.commit()
                     raise
 
+                # IMPORTANT: batches_completed must be incremented BEFORE checking for cancellation
+                # so that _handle_cancellation can accurately calculate devices_processed
                 results["batches_completed"] += 1
 
                 # Check for cancellation after batch completion
+                # Pass batch_idx + 1 and the updated batches_completed count
                 cancellation_result = await self._handle_cancellation(
-                    job, batch_idx + 1, batches, device_ids, results, batch_idx + 1
+                    job, batch_idx + 1, batches, device_ids, results, 
+                    batches_completed=results["batches_completed"]
                 )
                 if cancellation_result:
                     return cancellation_result
@@ -369,14 +383,15 @@ class JobService:
                 f"Cancellation already requested for job {job_id}",
                 extra={"job_id": job_id},
             )
-        else:
-            job.cancellation_requested = True
-            await self.session.commit()
-            
-            logger.info(
-                f"Cancellation requested for job {job_id}",
-                extra={"job_id": job_id, "status": job.status},
-            )
+            return await self.get_job(job_id)
+        
+        job.cancellation_requested = True
+        await self.session.commit()
+        
+        logger.info(
+            f"Cancellation requested for job {job_id}",
+            extra={"job_id": job_id, "status": job.status},
+        )
         
         return await self.get_job(job_id)
 
