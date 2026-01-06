@@ -5,6 +5,7 @@ Provides MCP tools for running network diagnostic operations (ping, traceroute).
 
 import ipaddress
 import logging
+import random
 import re
 from collections.abc import AsyncIterator
 from typing import Any
@@ -567,7 +568,6 @@ def register_diagnostics_tools(mcp: FastMCP, settings: Settings) -> None:
                         percent = int((i / num_updates) * 100)
 
                         # Simulate variance around average (±5%)
-                        import random
                         tx_variance = 0.95 + random.random() * 0.1  # 0.95-1.05
                         rx_variance = 0.95 + random.random() * 0.1
 

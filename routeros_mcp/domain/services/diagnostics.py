@@ -818,5 +818,3 @@ class DiagnosticsService:
             "avg_rx_mbps": round(rx_bps / 1_000_000, 2),
             "packet_loss_percent": packet_loss,
         }
-
-        return hops
