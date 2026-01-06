@@ -480,3 +480,67 @@ async def test_traceroute_streaming_unreachable_target(monkeypatch: pytest.Monke
     final_result = events[-1]
     assert final_result["_meta"]["reached_target"] is False
     assert "not reached" in final_result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_traceroute_tool_validates_max_hops_range(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test traceroute tool validates max_hops parameter through service layer."""
+    import routeros_mcp.mcp_tools.diagnostics as diagnostics_tools
+    from routeros_mcp.domain.services.diagnostics import MAX_TRACEROUTE_HOPS
+    from routeros_mcp.mcp.errors import ValidationError
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+        async def get_device(self, _device_id: str) -> object:
+            return SimpleNamespace(
+                environment="lab",
+                allow_advanced_writes=False,
+                allow_professional_workflows=False,
+                name="dev-1",
+            )
+
+    class ValidatingDiagnosticsService:
+        """Mock service that validates max_hops like the real one."""
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+        async def traceroute(self, *_args: object, max_hops: int = 30, **_kwargs: object) -> dict[str, object]:
+            # Replicate real validation logic
+            if max_hops > MAX_TRACEROUTE_HOPS:
+                raise ValidationError(
+                    f"Traceroute max_hops cannot exceed {MAX_TRACEROUTE_HOPS}",
+                    data={"requested_max_hops": max_hops, "max_hops": MAX_TRACEROUTE_HOPS},
+                )
+            if max_hops < 1:
+                raise ValidationError(
+                    "Traceroute max_hops must be at least 1",
+                    data={"requested_max_hops": max_hops},
+                )
+            # Valid case - return dummy result
+            return {
+                "hops": [],
+                "target": "8.8.8.8",
+            }
+
+    monkeypatch.setattr(diagnostics_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(diagnostics_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(diagnostics_tools, "DiagnosticsService", ValidatingDiagnosticsService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    diagnostics_tools.register_diagnostics_tools(mcp, settings)
+
+    # Test with max_hops=0 (too low) - should raise ValidationError
+    with pytest.raises(ValidationError, match="max_hops must be at least 1"):
+        await mcp.tools["traceroute"](device_id="dev-1", target="8.8.8.8", max_hops=0)
+
+    # Test with max_hops=65 (too high) - should raise ValidationError
+    with pytest.raises(ValidationError, match="max_hops cannot exceed 64"):
+        await mcp.tools["traceroute"](device_id="dev-1", target="8.8.8.8", max_hops=65)
+
+    # Test with max_hops=-1 (negative) - should raise ValidationError
+    with pytest.raises(ValidationError, match="max_hops must be at least 1"):
+        await mcp.tools["traceroute"](device_id="dev-1", target="8.8.8.8", max_hops=-1)
