@@ -3,7 +3,9 @@
 Provides MCP tools for running network diagnostic operations (ping, traceroute).
 """
 
+import ipaddress
 import logging
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -13,11 +15,45 @@ from routeros_mcp.config import Settings
 from routeros_mcp.domain.services.diagnostics import DEFAULT_TRACEROUTE_HOPS, DiagnosticsService
 from routeros_mcp.domain.services.device import DeviceService
 from routeros_mcp.infra.db.session import get_session_factory
-from routeros_mcp.mcp.errors import MCPError, map_exception_to_error
+from routeros_mcp.infra.rate_limiter import get_rate_limiter
+from routeros_mcp.mcp.errors import MCPError, ValidationError, map_exception_to_error
 from routeros_mcp.mcp.protocol.jsonrpc import create_progress_message, format_tool_result
 from routeros_mcp.security.authz import ToolTier, check_tool_authorization
 
 logger = logging.getLogger(__name__)
+
+# Rate limiting constants for diagnostics
+PING_RATE_LIMIT = 10  # Max pings per device per minute
+PING_RATE_WINDOW = 60  # 60 seconds window
+
+
+def _validate_target(target: str) -> None:
+    """Validate ping/traceroute target is valid IP or hostname.
+
+    Args:
+        target: Target IP address or hostname
+
+    Raises:
+        ValidationError: If target is invalid
+    """
+    # Try parsing as IP address first
+    try:
+        ipaddress.ip_address(target)
+        return  # Valid IP
+    except ValueError:
+        pass  # Not an IP, check if valid hostname
+
+    # Validate hostname (RFC 1123)
+    # Allow letters, digits, hyphens, dots
+    # Must not start/end with hyphen
+    # Labels must be 1-63 chars, total max 253 chars
+    # Allow single-label hostnames (e.g., "localhost", "router")
+    hostname_pattern = r'^(?=.{1,253}$)(?!-)[a-zA-Z0-9-]{1,63}(?<!-)(\.[a-zA-Z0-9-]{1,63}(?<!-))*$'
+    if not re.match(hostname_pattern, target):
+        raise ValidationError(
+            f"Invalid target '{target}': must be valid IP address or hostname",
+            data={"target": target}
+        )
 
 
 def register_diagnostics_tools(mcp: FastMCP, settings: Settings) -> None:
@@ -34,20 +70,50 @@ def register_diagnostics_tools(mcp: FastMCP, settings: Settings) -> None:
         device_id: str,
         target: str,
         count: int = 4,
-        timeout_seconds: int = 10,
-    ) -> dict[str, Any]:
+        packet_size: int = 64,
+        stream_progress: bool = False,
+    ) -> dict[str, Any] | AsyncIterator[dict[str, Any]]:
         """Execute ping command on a RouterOS device.
 
         Args:
             device_id: Device identifier
             target: Target IP or hostname
-            count: Number of ping attempts (max 10)
-            timeout_seconds: Command timeout in seconds
+            count: Number of ping attempts (1-100, default: 4)
+            packet_size: ICMP packet size in bytes (28-65500, default: 64)
+            stream_progress: Enable real-time per-packet progress updates (HTTP transport only)
 
         Returns:
             Ping results with response times
+
+        Streaming:
+            When stream_progress=True, yields progress updates for each packet sent/received
+            with packet number, status, and latency. Final result includes summary statistics.
         """
         try:
+            # Validate parameters before rate limiting check
+            _validate_target(target)
+
+            if count < 1 or count > 100:
+                raise ValidationError(
+                    f"Invalid count {count}: must be between 1 and 100",
+                    data={"count": count, "min": 1, "max": 100}
+                )
+
+            if packet_size < 28 or packet_size > 65500:
+                raise ValidationError(
+                    f"Invalid packet_size {packet_size}: must be between 28 and 65500",
+                    data={"packet_size": packet_size, "min": 28, "max": 65500}
+                )
+
+            # Check rate limit before doing any work
+            rate_limiter = get_rate_limiter()
+            await rate_limiter.check_and_record(
+                device_id=device_id,
+                operation="ping",
+                limit=PING_RATE_LIMIT,
+                window_seconds=PING_RATE_WINDOW,
+            )
+
             async with session_factory.session() as session:
                 device_service = DeviceService(session, settings)
 
@@ -71,23 +137,116 @@ def register_diagnostics_tools(mcp: FastMCP, settings: Settings) -> None:
                     device_service,
                 )
 
-                result = await diagnostics_service.ping(
-                    device_id=device_id,
-                    address=target,
-                    count=count,
-                    interval_ms=1000,
-                )
+                # Non-streaming path: return immediately
+                if not stream_progress:
+                    result = await diagnostics_service.ping(
+                        device_id=device_id,
+                        address=target,
+                        count=count,
+                        interval_ms=1000,
+                        packet_size=packet_size,
+                    )
 
-                content = (
-                    f"Ping to {target}: {result['packets_sent']} packets sent, "
-                    f"{result['packets_received']} received, "
-                    f"{result['packet_loss_percent']:.1f}% loss"
-                )
+                    content = (
+                        f"Ping to {target}: {result['packets_sent']} packets sent, "
+                        f"{result['packets_received']} received, "
+                        f"{result['packet_loss_percent']:.1f}% loss"
+                    )
 
-                return format_tool_result(
-                    content=content,
-                    meta=result,
-                )
+                    if result.get('avg_rtt_ms', 0) > 0:
+                        content += f", avg latency {result['avg_rtt_ms']:.1f}ms"
+
+                    return format_tool_result(
+                        content=content,
+                        meta=result,
+                    )
+
+                # Streaming path: collect results within session, then stream
+                try:
+                    events: list[dict[str, Any]] = []
+
+                    events.append(create_progress_message(
+                        message=f"Starting ping to {target} ({count} packets, {packet_size} bytes)...",
+                        percent=0,
+                    ))
+
+                    # Get ping results
+                    result = await diagnostics_service.ping(
+                        device_id=device_id,
+                        address=target,
+                        count=count,
+                        interval_ms=1000,
+                        packet_size=packet_size,
+                    )
+
+                    # Simulate per-packet progress (RouterOS REST API returns aggregated results)
+                    # Note: This is an approximation - actual packet loss may be non-sequential,
+                    # but we only have aggregate statistics (packets_sent/received).
+                    # We assume the first N packets succeeded for simplicity.
+                    packets_sent = result.get("packets_sent", 0)
+                    packets_received = result.get("packets_received", 0)
+
+                    for i in range(1, packets_sent + 1):
+                        percent = int((i / packets_sent) * 100) if packets_sent > 0 else 0
+
+                        # Approximate per-packet status (not available from aggregate stats)
+                        # This assumes sequential success/failure, which may not match reality
+                        if i <= packets_received:
+                            avg_rtt = result.get("avg_rtt_ms", 0)
+                            message = f"Packet {i}/{packets_sent}: Reply from {target} (~{avg_rtt:.1f}ms, approximated)"
+                            status = "reply"
+                        else:
+                            message = f"Packet {i}/{packets_sent}: Timeout (approximated)"
+                            status = "timeout"
+
+                        events.append(create_progress_message(
+                            message=message,
+                            percent=percent,
+                            data={
+                                "packet": i,
+                                "total": packets_sent,
+                                "status": status,
+                                "approximated": True,  # Flag to indicate this is synthetic
+                            },
+                        ))
+
+                    # Final result
+                    content = (
+                        f"Ping to {target} completed: "
+                        f"{packets_sent} sent, {packets_received} received, "
+                        f"{result['packet_loss_percent']:.1f}% loss"
+                    )
+
+                    if result.get('avg_rtt_ms', 0) > 0:
+                        content += f", avg latency {result['avg_rtt_ms']:.1f}ms"
+
+                    events.append(format_tool_result(
+                        content=content,
+                        meta=result,
+                    ))
+
+                except MCPError as e:
+                    logger.warning(f"Ping streaming error: {e}")
+                    events = [format_tool_result(
+                        content=f"Ping failed: {str(e)}",
+                        is_error=True,
+                        meta={"error": str(e)},
+                    )]
+                except Exception as e:
+                    logger.error(f"Ping streaming unexpected error: {e}")
+                    error = map_exception_to_error(e)
+                    events = [format_tool_result(
+                        content=f"Ping failed: {str(error)}",
+                        is_error=True,
+                        meta={"error": str(error)},
+                    )]
+
+                # Return generator that replays collected events
+                async def replay_events() -> AsyncIterator[dict[str, Any]]:
+                    for event in events:
+                        yield event
+
+                return replay_events()
 
         except MCPError as e:
             logger.warning(f"Ping tool error: {e}")
@@ -155,7 +314,7 @@ def register_diagnostics_tools(mcp: FastMCP, settings: Settings) -> None:
 
                     hops = result.get("hops", [])
                     hop_count = len(hops)
-                    
+
                     # Calculate reached_target for consistency with streaming path
                     reached_target = False
                     if hops:
@@ -166,11 +325,11 @@ def register_diagnostics_tools(mcp: FastMCP, settings: Settings) -> None:
                         if last_address != "*" and last_rtt > 0:
                             if hop_count < max_hops or last_address == target:
                                 reached_target = True
-                    
+
                     # Add consistent metadata fields
                     result["reached_target"] = reached_target
                     result["target"] = target
-                    
+
                     content = f"Traceroute to {target} completed in {hop_count} hops"
 
                     return format_tool_result(
@@ -182,7 +341,7 @@ def register_diagnostics_tools(mcp: FastMCP, settings: Settings) -> None:
                 try:
                     # Collect all events within the session context
                     events: list[dict[str, Any]] = []
-                    
+
                     events.append(create_progress_message(
                         message=f"Starting traceroute to {target}...",
                         percent=0,
@@ -198,26 +357,26 @@ def register_diagnostics_tools(mcp: FastMCP, settings: Settings) -> None:
 
                     hops = result.get("hops", [])
                     total_hops = len(hops)
-                    
+
                     # Yield progress for each hop
                     for idx, hop in enumerate(hops):
                         hop_num = hop.get("hop", idx + 1)
                         hop_address = hop.get("address", "*")
                         rtt_ms = hop.get("rtt_ms", 0.0)
-                        
+
                         # Calculate progress percentage based on total discovered hops,
                         # capping at 100% to avoid misleading values
                         if total_hops > 0:
                             percent = min(int(((idx + 1) / total_hops) * 100), 100)
                         else:
                             percent = 0
-                        
+
                         # Create progress message
                         if hop_address == "*":
                             message = f"Hop {hop_num}: * (timeout)"
                         else:
                             message = f"Hop {hop_num}: {hop_address} ({rtt_ms:.1f}ms)"
-                        
+
                         events.append(create_progress_message(
                             message=message,
                             percent=percent,
@@ -234,7 +393,7 @@ def register_diagnostics_tools(mcp: FastMCP, settings: Settings) -> None:
                         last_hop = hops[-1]
                         last_address = last_hop.get("address", "*")
                         last_rtt = last_hop.get("rtt_ms", 0.0)
-                        
+
                         # Target reached if:
                         # 1. Last hop has valid address (not timeout)
                         # 2. Last hop has positive RTT (got a response)
@@ -252,7 +411,7 @@ def register_diagnostics_tools(mcp: FastMCP, settings: Settings) -> None:
                         "reached_target": reached_target,
                         "target": target,
                     }
-                    
+
                     content = (
                         f"Traceroute to {target} completed: "
                         f"{total_hops} hops, "
@@ -279,12 +438,12 @@ def register_diagnostics_tools(mcp: FastMCP, settings: Settings) -> None:
                         is_error=True,
                         meta={"error": str(error)},
                     )]
-                
+
                 # Return generator that replays collected events
                 async def replay_events() -> AsyncIterator[dict[str, Any]]:
                     for event in events:
                         yield event
-                
+
                 return replay_events()
 
         except MCPError as e:

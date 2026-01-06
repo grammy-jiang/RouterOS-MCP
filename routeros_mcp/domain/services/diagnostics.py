@@ -22,7 +22,7 @@ from routeros_mcp.infra.routeros.exceptions import (
 logger = logging.getLogger(__name__)
 
 # Safety limits
-MAX_PING_COUNT = 10
+MAX_PING_COUNT = 100  # Updated to match Phase 4 requirement (1-100)
 MAX_TRACEROUTE_HOPS = 64  # Updated to match requirement (1-64)
 MAX_TRACEROUTE_COUNT = 3
 DEFAULT_TRACEROUTE_HOPS = 30  # Default max hops for traceroute
@@ -69,8 +69,17 @@ class DiagnosticsService:
         address: str,
         count: int = 4,
         interval_ms: int = 1000,
+        packet_size: int = 64,
     ) -> dict[str, Any]:
-        """Run ICMP ping test from the router to a target address with REST→SSH fallback."""
+        """Run ICMP ping test from the router to a target address with REST→SSH fallback.
+
+        Args:
+            device_id: Device identifier
+            address: Target IP or hostname
+            count: Number of pings (1-100)
+            interval_ms: Interval between pings in milliseconds
+            packet_size: ICMP packet size in bytes (28-65500)
+        """
         from routeros_mcp.mcp.errors import AuthenticationError, ValidationError
 
         await self.device_service.get_device(device_id)
@@ -92,7 +101,7 @@ class DiagnosticsService:
 
         # Attempt REST first
         try:
-            result = await self._ping_via_rest(device_id, address, count, interval_ms)
+            result = await self._ping_via_rest(device_id, address, count, interval_ms, packet_size)
             result["transport"] = "rest"
             result["fallback_used"] = False
             result["rest_error"] = None
@@ -114,7 +123,7 @@ class DiagnosticsService:
 
         # SSH fallback
         try:
-            result = await self._ping_via_ssh(device_id, address, count, interval_ms)
+            result = await self._ping_via_ssh(device_id, address, count, interval_ms, packet_size)
             result["transport"] = "ssh"
             result["fallback_used"] = True
             result["rest_error"] = str(rest_error) if rest_error else None
@@ -133,6 +142,7 @@ class DiagnosticsService:
         address: str,
         count: int,
         interval_ms: int,
+        packet_size: int,
     ) -> dict[str, Any]:
         client = await self.device_service.get_rest_client(device_id)
 
@@ -141,6 +151,7 @@ class DiagnosticsService:
                 "address": address,
                 "count": count,
                 "interval": f"{interval_ms}ms",
+                "size": packet_size,
             }
 
             ping_data = await client.post("/rest/tool/ping", ping_params)
@@ -191,11 +202,12 @@ class DiagnosticsService:
         address: str,
         count: int,
         interval_ms: int,
+        packet_size: int,
     ) -> dict[str, Any]:
         ssh_client = await self.device_service.get_ssh_client(device_id)
         try:
             # Use /tool/ping for consistency with CLI output formatting; interval in ms
-            command = f"/tool/ping address={address} count={count} interval={interval_ms}ms"
+            command = f"/tool/ping address={address} count={count} interval={interval_ms}ms size={packet_size}"
             output = await ssh_client.execute(command)
             logger.debug(
                 "SSH ping output",
@@ -310,13 +322,13 @@ class DiagnosticsService:
         max_hops: int = DEFAULT_TRACEROUTE_HOPS,
     ) -> dict[str, Any]:
         """Run traceroute to show network path with REST→SSH fallback.
-        
+
         Args:
             device_id: Device identifier
             address: Target IP or hostname
             count: Number of probes per hop (default: 1)
             max_hops: Maximum number of hops (1-64, default: 30)
-            
+
         Returns:
             Dictionary with target and hops list
         """
@@ -403,7 +415,7 @@ class DiagnosticsService:
                 "address": address,
                 "count": count,
             }
-            
+
             # Add max-hops parameter if not default
             if max_hops != DEFAULT_TRACEROUTE_HOPS:
                 trace_params["max-hops"] = max_hops

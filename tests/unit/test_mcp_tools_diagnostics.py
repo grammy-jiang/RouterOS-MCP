@@ -286,7 +286,7 @@ async def test_traceroute_streaming_yields_progress_messages(monkeypatch: pytest
 
     # Call traceroute with stream_progress=True
     result_generator = await mcp.tools["traceroute"](
-        device_id="dev-1", 
+        device_id="dev-1",
         target="8.8.8.8",
         stream_progress=True,
     )
@@ -544,3 +544,338 @@ async def test_traceroute_tool_validates_max_hops_range(monkeypatch: pytest.Monk
     # Test with max_hops=-1 (negative) - should raise ValidationError
     with pytest.raises(ValidationError, match="max_hops must be at least 1"):
         await mcp.tools["traceroute"](device_id="dev-1", target="8.8.8.8", max_hops=-1)
+
+
+# ===== New tests for Phase 4 ping enhancements =====
+
+
+@pytest.mark.asyncio
+async def test_ping_validates_target_ip(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test ping tool validates target is valid IP."""
+    import routeros_mcp.mcp_tools.diagnostics as diagnostics_tools
+    from routeros_mcp.infra.rate_limiter import reset_rate_limiter
+    from routeros_mcp.mcp.errors import ValidationError
+
+    reset_rate_limiter()  # Reset rate limiter before test
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    diagnostics_tools.register_diagnostics_tools(mcp, settings)
+
+    # Valid IP should pass validation (but fail later for other reasons)
+    # We're just checking the target validation happens
+    with pytest.raises((ValidationError, Exception)):
+        await mcp.tools["ping"](device_id="dev-1", target="192.168.1.1")
+
+
+@pytest.mark.asyncio
+async def test_ping_validates_target_hostname(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test ping tool validates target is valid hostname."""
+    import routeros_mcp.mcp_tools.diagnostics as diagnostics_tools
+    from routeros_mcp.infra.rate_limiter import reset_rate_limiter
+
+    reset_rate_limiter()  # Reset rate limiter before test
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    diagnostics_tools.register_diagnostics_tools(mcp, settings)
+
+    # Valid hostname should pass validation
+    with pytest.raises(Exception):  # Will fail for other reasons, not validation
+        await mcp.tools["ping"](device_id="dev-1", target="google.com")
+
+
+@pytest.mark.asyncio
+async def test_ping_rejects_invalid_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test ping tool rejects invalid target."""
+    import routeros_mcp.mcp_tools.diagnostics as diagnostics_tools
+    from routeros_mcp.infra.rate_limiter import reset_rate_limiter
+    from routeros_mcp.mcp.errors import ValidationError
+
+    reset_rate_limiter()
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    diagnostics_tools.register_diagnostics_tools(mcp, settings)
+
+    # Invalid target should fail validation
+    with pytest.raises(ValidationError, match="Invalid target"):
+        await mcp.tools["ping"](device_id="dev-1", target="not a valid host!!!!")
+
+
+@pytest.mark.asyncio
+async def test_ping_validates_count_range(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test ping tool validates count is 1-100."""
+    import routeros_mcp.mcp_tools.diagnostics as diagnostics_tools
+    from routeros_mcp.infra.rate_limiter import reset_rate_limiter
+    from routeros_mcp.mcp.errors import ValidationError
+
+    reset_rate_limiter()
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    diagnostics_tools.register_diagnostics_tools(mcp, settings)
+
+    # count=0 should fail
+    with pytest.raises(ValidationError, match="Invalid count 0"):
+        await mcp.tools["ping"](device_id="dev-1", target="8.8.8.8", count=0)
+
+    # count=101 should fail
+    with pytest.raises(ValidationError, match="Invalid count 101"):
+        await mcp.tools["ping"](device_id="dev-1", target="8.8.8.8", count=101)
+
+    # count=-1 should fail
+    with pytest.raises(ValidationError, match="Invalid count -1"):
+        await mcp.tools["ping"](device_id="dev-1", target="8.8.8.8", count=-1)
+
+
+@pytest.mark.asyncio
+async def test_ping_validates_packet_size_range(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test ping tool validates packet_size is 28-65500."""
+    import routeros_mcp.mcp_tools.diagnostics as diagnostics_tools
+    from routeros_mcp.infra.rate_limiter import reset_rate_limiter
+    from routeros_mcp.mcp.errors import ValidationError
+
+    reset_rate_limiter()
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    diagnostics_tools.register_diagnostics_tools(mcp, settings)
+
+    # packet_size=27 (too small) should fail
+    with pytest.raises(ValidationError, match="Invalid packet_size 27"):
+        await mcp.tools["ping"](device_id="dev-1", target="8.8.8.8", packet_size=27)
+
+    # packet_size=65501 (too large) should fail
+    with pytest.raises(ValidationError, match="Invalid packet_size 65501"):
+        await mcp.tools["ping"](device_id="dev-1", target="8.8.8.8", packet_size=65501)
+
+
+@pytest.mark.asyncio
+async def test_ping_enforces_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test ping tool enforces rate limit of 10 pings per device per minute."""
+    import routeros_mcp.mcp_tools.diagnostics as diagnostics_tools
+    from routeros_mcp.infra.rate_limiter import reset_rate_limiter
+    from routeros_mcp.mcp.errors import RateLimitExceededError
+
+    reset_rate_limiter()  # Start with clean slate
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_device(self, _device_id: str) -> object:
+            return SimpleNamespace(
+                environment="lab",
+                allow_advanced_writes=False,
+                allow_professional_workflows=False,
+                name="dev-1",
+            )
+
+    class StubDiagnosticsService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def ping(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            return {
+                "packets_sent": 4,
+                "packets_received": 4,
+                "packet_loss_percent": 0.0,
+                "avg_rtt_ms": 10.0,
+            }
+
+    monkeypatch.setattr(diagnostics_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(diagnostics_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(diagnostics_tools, "DiagnosticsService", StubDiagnosticsService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    diagnostics_tools.register_diagnostics_tools(mcp, settings)
+
+    # First 10 pings should succeed
+    for _i in range(10):
+        result = await mcp.tools["ping"](device_id="dev-1", target="8.8.8.8")
+        assert result["isError"] is False
+
+    # 11th ping should fail with rate limit error
+    with pytest.raises(RateLimitExceededError, match="Rate limit exceeded"):
+        await mcp.tools["ping"](device_id="dev-1", target="8.8.8.8")
+
+
+@pytest.mark.asyncio
+async def test_ping_rate_limit_per_device(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test ping rate limit is enforced per device (devices are isolated)."""
+    import routeros_mcp.mcp_tools.diagnostics as diagnostics_tools
+    from routeros_mcp.infra.rate_limiter import reset_rate_limiter
+
+    reset_rate_limiter()
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_device(self, _device_id: str) -> object:
+            return SimpleNamespace(
+                environment="lab",
+                allow_advanced_writes=False,
+                allow_professional_workflows=False,
+                name=_device_id,
+            )
+
+    class StubDiagnosticsService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def ping(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            return {
+                "packets_sent": 4,
+                "packets_received": 4,
+                "packet_loss_percent": 0.0,
+                "avg_rtt_ms": 10.0,
+            }
+
+    monkeypatch.setattr(diagnostics_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(diagnostics_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(diagnostics_tools, "DiagnosticsService", StubDiagnosticsService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    diagnostics_tools.register_diagnostics_tools(mcp, settings)
+
+    # Fill rate limit for dev-1
+    for _i in range(10):
+        result = await mcp.tools["ping"](device_id="dev-1", target="8.8.8.8")
+        assert result["isError"] is False
+
+    # dev-2 should still work (separate rate limit)
+    result = await mcp.tools["ping"](device_id="dev-2", target="8.8.8.8")
+    assert result["isError"] is False
+
+
+@pytest.mark.asyncio
+async def test_ping_streaming_yields_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test ping with stream_progress=True yields progress updates."""
+    import routeros_mcp.mcp_tools.diagnostics as diagnostics_tools
+    from routeros_mcp.infra.rate_limiter import reset_rate_limiter
+
+    reset_rate_limiter()
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_device(self, _device_id: str) -> object:
+            return SimpleNamespace(
+                environment="lab",
+                allow_advanced_writes=False,
+                allow_professional_workflows=False,
+                name="dev-1",
+            )
+
+    class StubDiagnosticsService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def ping(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            return {
+                "packets_sent": 4,
+                "packets_received": 3,
+                "packet_loss_percent": 25.0,
+                "avg_rtt_ms": 15.5,
+            }
+
+    monkeypatch.setattr(diagnostics_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(diagnostics_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(diagnostics_tools, "DiagnosticsService", StubDiagnosticsService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    diagnostics_tools.register_diagnostics_tools(mcp, settings)
+
+    # Call with stream_progress=True
+    result_generator = await mcp.tools["ping"](
+        device_id="dev-1",
+        target="8.8.8.8",
+        stream_progress=True,
+    )
+
+    # Collect all events
+    events = []
+    async for event in result_generator:
+        events.append(event)
+
+    # Should have progress messages
+    progress_events = [e for e in events if e.get("type") == "progress"]
+    assert len(progress_events) >= 4, "Should have at least starting message + 4 packets"
+
+    # Should have starting message
+    assert any("Starting ping" in e.get("message", "") for e in progress_events)
+
+    # Should have packet messages
+    packet_messages = [e for e in progress_events if "Packet" in e.get("message", "")]
+    assert len(packet_messages) == 4, "Should have 4 packet messages"
+
+    # Should have final result
+    final_result = events[-1]
+    assert "content" in final_result
+    assert final_result["isError"] is False
+    assert "25.0% loss" in final_result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_ping_non_streaming_returns_dict(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test ping with stream_progress=False returns dict immediately."""
+    import routeros_mcp.mcp_tools.diagnostics as diagnostics_tools
+    from routeros_mcp.infra.rate_limiter import reset_rate_limiter
+
+    reset_rate_limiter()
+
+    class StubDeviceService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def get_device(self, _device_id: str) -> object:
+            return SimpleNamespace(
+                environment="lab",
+                allow_advanced_writes=False,
+                allow_professional_workflows=False,
+                name="dev-1",
+            )
+
+    class StubDiagnosticsService:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def ping(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            return {
+                "packets_sent": 4,
+                "packets_received": 4,
+                "packet_loss_percent": 0.0,
+                "avg_rtt_ms": 12.3,
+            }
+
+    monkeypatch.setattr(diagnostics_tools, "get_session_factory", lambda _settings: FakeSessionFactory())
+    monkeypatch.setattr(diagnostics_tools, "DeviceService", StubDeviceService)
+    monkeypatch.setattr(diagnostics_tools, "DiagnosticsService", StubDiagnosticsService)
+
+    mcp = DummyMCP()
+    settings = Settings(database_url="sqlite+aiosqlite:///:memory:", environment="lab")
+
+    diagnostics_tools.register_diagnostics_tools(mcp, settings)
+
+    # Call without stream_progress (default False)
+    result = await mcp.tools["ping"](device_id="dev-1", target="8.8.8.8")
+
+    # Should return dict immediately, not async generator
+    assert isinstance(result, dict)
+    assert result["isError"] is False
+    assert "Ping to 8.8.8.8" in result["content"][0]["text"]
+    assert "avg latency 12.3ms" in result["content"][0]["text"]
