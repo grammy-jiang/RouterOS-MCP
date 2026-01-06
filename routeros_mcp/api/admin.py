@@ -58,6 +58,16 @@ async def get_plan_service():
         yield PlanService(session, settings)
 
 
+async def get_job_service():
+    """Dependency to get JobService."""
+    # Import here to avoid namespace pollution
+    from routeros_mcp.domain.services.job import JobService
+    from routeros_mcp.infra.db.session import get_session
+    
+    async for session in get_session():
+        yield JobService(session)
+
+
 @router.get("", response_class=HTMLResponse)
 async def admin_dashboard(
     user: dict[str, Any] = Depends(get_current_user_dep()),
@@ -372,6 +382,136 @@ async def reject_plan(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to reject plan. Correlation ID: {correlation_id}",
+        )
+
+
+@router.get("/api/admin/jobs/{job_id}")
+async def get_job_status(
+    job_id: str,
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    job_service: Any = Depends(get_job_service),
+) -> JSONResponse:
+    """Get job status and progress.
+
+    Args:
+        job_id: Job identifier
+        user: Current authenticated user
+        job_service: Job service dependency
+
+    Returns:
+        JSON with job status, progress, and results
+    """
+    try:
+        job = await job_service.get_job(job_id)
+
+        # Calculate progress percentage
+        total_devices = len(job["device_ids"])
+        progress_percent = 0
+        
+        if job["status"] == "success":
+            progress_percent = 100
+        elif job["status"] in ["running", "cancelled"]:
+            # Try to parse result_summary to get devices processed
+            result_summary = job.get("result_summary", "")
+            if result_summary and "/" in result_summary:
+                # Extract "X/Y devices" from summary
+                try:
+                    parts = result_summary.split("devices")[0].strip().split("/")
+                    if len(parts) == 2:
+                        processed = int(parts[0].split()[-1])
+                        progress_percent = int((processed / total_devices) * 100) if total_devices > 0 else 0
+                except (ValueError, IndexError):
+                    pass
+
+        job_data = {
+            "job_id": job["job_id"],
+            "plan_id": job["plan_id"],
+            "job_type": job["job_type"],
+            "status": job["status"],
+            "progress_percent": progress_percent,
+            "device_ids": job["device_ids"],
+            "total_devices": total_devices,
+            "attempts": job["attempts"],
+            "max_attempts": job["max_attempts"],
+            "result_summary": job["result_summary"],
+            "error_message": job["error_message"],
+            "cancellation_requested": job["cancellation_requested"],
+            "created_at": job["created_at"],
+            "updated_at": job["updated_at"],
+        }
+
+        return JSONResponse(content=job_data)
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error getting job {job_id}: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get job status. Correlation ID: {correlation_id}",
+        )
+
+
+@router.post("/api/admin/jobs/{job_id}/cancel")
+async def cancel_job(
+    job_id: str,
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    job_service: Any = Depends(get_job_service),
+) -> JSONResponse:
+    """Request cancellation of a running job.
+
+    Args:
+        job_id: Job identifier
+        user: Current authenticated user (must have admin or operator role)
+        job_service: Job service dependency
+
+    Returns:
+        JSON confirmation with updated job status
+    """
+    # Check user role
+    if user.get("role") not in ["admin", "operator"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions to cancel jobs",
+        )
+
+    try:
+        job = await job_service.request_cancellation(job_id)
+
+        return JSONResponse(
+            content={
+                "message": "Job cancellation requested",
+                "job_id": job_id,
+                "status": job["status"],
+                "cancellation_requested": job["cancellation_requested"],
+            }
+        )
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error cancelling job {job_id}: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to cancel job. Correlation ID: {correlation_id}",
         )
 
 

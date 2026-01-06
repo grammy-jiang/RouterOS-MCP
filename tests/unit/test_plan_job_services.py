@@ -502,3 +502,99 @@ class TestJobService:
 
         with pytest.raises(ValueError):
             await service.schedule_retry(job["job_id"])
+
+    @pytest.mark.asyncio
+    async def test_request_cancellation(
+        self, db_session: AsyncSession, test_devices: list[str]
+    ) -> None:
+        """Request cancellation sets cancellation_requested flag."""
+        service = JobService(db_session)
+        job = await service.create_job(
+            job_type="TEST_CANCEL",
+            device_ids=test_devices,
+        )
+
+        # Set job to running state
+        stmt = select(JobModel).where(JobModel.id == job["job_id"])
+        result = await db_session.execute(stmt)
+        job_obj = result.scalar_one()
+        job_obj.status = "running"
+        await db_session.commit()
+
+        # Request cancellation
+        updated = await service.request_cancellation(job["job_id"])
+        assert updated["cancellation_requested"] is True
+        assert updated["status"] == "running"  # Status doesn't change until execution checks flag
+
+    @pytest.mark.asyncio
+    async def test_request_cancellation_invalid_state(
+        self, db_session: AsyncSession, test_devices: list[str]
+    ) -> None:
+        """Cannot cancel job in terminal state."""
+        service = JobService(db_session)
+        job = await service.create_job(
+            job_type="TEST_CANCEL_FAIL",
+            device_ids=test_devices,
+        )
+
+        # Set job to success state
+        stmt = select(JobModel).where(JobModel.id == job["job_id"])
+        result = await db_session.execute(stmt)
+        job_obj = result.scalar_one()
+        job_obj.status = "success"
+        await db_session.commit()
+
+        # Try to cancel completed job
+        with pytest.raises(ValueError, match="cannot be cancelled"):
+            await service.request_cancellation(job["job_id"])
+
+    @pytest.mark.asyncio
+    async def test_job_cancellation(
+        self,
+        db_session: AsyncSession,
+        test_devices: list[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test job cancellation during execution."""
+        service = JobService(db_session)
+
+        job = await service.create_job(
+            job_type="TEST_EXEC_CANCEL",
+            device_ids=test_devices,
+        )
+
+        batch_count = 0
+
+        async def executor(job_id: str, device_ids: list[str], context: dict[str, Any]):
+            nonlocal batch_count
+            batch_count += 1
+            
+            # Request cancellation after first batch
+            if batch_count == 1:
+                await service.request_cancellation(job_id)
+            
+            return {"devices": {did: {"status": "ok"} for did in device_ids}, "context": context}
+
+        async def _fast_sleep(*_args, **_kwargs):
+            return None
+
+        monkeypatch.setattr(job_module.asyncio, "sleep", _fast_sleep)
+
+        result = await service.execute_job(
+            job["job_id"],
+            executor,
+            executor_context={"foo": "bar"},
+            batch_size=1,  # Process one device per batch
+            batch_pause_seconds=0,
+        )
+
+        # Job should be cancelled after processing first batch
+        assert result["status"] == "cancelled"
+        assert result["batches_completed"] == 1
+        assert result["devices_processed"] == 1  # Only first device processed
+        
+        fetched = await service.get_job(job["job_id"])
+        assert fetched["status"] == "cancelled"
+        assert "1/3 devices" in fetched["result_summary"]
+        assert "1/3 batches" in fetched["result_summary"]
+
