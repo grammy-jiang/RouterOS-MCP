@@ -175,7 +175,7 @@ class Device(Base):
         default=False,
         comment="Allow bridge and VLAN configuration writes (Phase 3)",
     )
-    
+
     # Phase 4 diagnostics capability flags
     allow_bandwidth_test: Mapped[bool] = mapped_column(
         Boolean,
@@ -462,6 +462,39 @@ class Plan(Base):
         DateTime(timezone=True), nullable=True, comment="Approval timestamp"
     )
 
+    # Phase 4: Multi-device execution configuration
+    batch_size: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=5,
+        server_default=text("5"),
+        comment="Number of devices to process per batch (Phase 4)",
+    )
+
+    pause_seconds_between_batches: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=60,
+        server_default=text("60"),
+        comment="Seconds to wait between batches (Phase 4)",
+    )
+
+    rollback_on_failure: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("1"),
+        comment="Whether to rollback changes on failure (Phase 4)",
+    )
+
+    device_statuses: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
+        comment="Per-device execution status tracking (Phase 4)",
+    )
+
     # Relationships
     jobs: Mapped[list["Job"]] = relationship(
         "Job", back_populates="plan", cascade="all, delete-orphan"
@@ -470,6 +503,14 @@ class Plan(Base):
     __table_args__ = (
         Index("idx_plan_created_by", "created_by"),
         Index("idx_plan_status", "status"),
+        CheckConstraint(
+            "batch_size >= 1 AND batch_size <= 50",
+            name="ck_plans_batch_size_range",
+        ),
+        CheckConstraint(
+            "pause_seconds_between_batches >= 0",
+            name="ck_plans_pause_seconds_non_negative",
+        ),
     )
 
 
@@ -565,7 +606,7 @@ class Job(Base):
 
     # Relationships
     plan: Mapped[Optional["Plan"]] = relationship("Plan", back_populates="jobs")
-    
+
     # Phase 4: Relationship to current device being processed
     current_device: Mapped[Optional["Device"]] = relationship(
         "Device",
