@@ -491,7 +491,7 @@ async def test_traceroute_tool_validates_max_hops_range(monkeypatch: pytest.Monk
 
     class StubDeviceService:
         def __init__(self, *_args: object, **_kwargs: object) -> None:
-            return None
+            pass
 
         async def get_device(self, _device_id: str) -> object:
             return SimpleNamespace(
@@ -504,7 +504,7 @@ async def test_traceroute_tool_validates_max_hops_range(monkeypatch: pytest.Monk
     class ValidatingDiagnosticsService:
         """Mock service that validates max_hops like the real one."""
         def __init__(self, *_args: object, **_kwargs: object) -> None:
-            return None
+            pass
 
         async def traceroute(self, *_args: object, max_hops: int = 30, **_kwargs: object) -> dict[str, object]:
             # Replicate real validation logic
