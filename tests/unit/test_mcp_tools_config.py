@@ -87,6 +87,7 @@ class FakePlanService:
         self.created: list[dict] = []
         self.multi_device_created: list[dict] = []
         self.status_updates: list[tuple[str, str]] = []
+        self.rollback_calls: list[dict] = []
         self.plan = {
             "plan_id": "plan-123",
             "approval_token": "token-abc",
@@ -139,6 +140,55 @@ class FakePlanService:
     async def update_plan_status(self, plan_id: str, status: str):
         self.status_updates.append((plan_id, status))
         self.plan["status"] = status
+
+    async def rollback_plan(self, plan_id: str, reason: str, triggered_by: str = "system", **kwargs):
+        """Simulate rollback_plan method from PlanService."""
+        self.rollback_calls.append({
+            "plan_id": plan_id,
+            "reason": reason,
+            "triggered_by": triggered_by,
+        })
+
+        # Check if plan can be rolled back (must match PlanService behavior: only from 'executing')
+        if self.plan["status"] != "executing":
+            raise ValueError(f"Plan {plan_id} cannot be rolled back from status {self.plan['status']}")
+
+        # Extract device info from plan
+        devices_config = self.plan["changes"].get("devices", [])
+        device_count = len(devices_config) if devices_config else len(self.plan.get("device_ids", []))
+
+        # Simulate rollback results
+        devices_results = {}
+        for device_config in devices_config:
+            device_id = device_config["device_id"]
+            # Check if we should simulate failure
+            if hasattr(self, "fail_rollback") and self.fail_rollback:
+                devices_results[device_id] = {
+                    "status": "rollback_failed",
+                    "errors": ["rollback fail"],
+                }
+            else:
+                devices_results[device_id] = {
+                    "status": "rolled_back",
+                }
+
+        success_count = sum(1 for r in devices_results.values() if r["status"] == "rolled_back")
+        failed_count = len(devices_results) - success_count
+
+        # Update plan status
+        self.plan["status"] = "rolled_back"
+
+        return {
+            "plan_id": plan_id,
+            "rollback_enabled": True,
+            "reason": reason,
+            "devices": devices_results,
+            "summary": {
+                "total": device_count,
+                "success": success_count,
+                "failed": failed_count,
+            },
+        }
 
 
 class FakeJobService:
@@ -526,7 +576,7 @@ class TestMCPToolsConfig(unittest.TestCase):
             session_factory = FakeSessionFactory(fake_session)
 
             plan_service = FakePlanService(None)
-            plan_service.plan["status"] = "applied"
+            plan_service.plan["status"] = "executing"
             plan_service.plan["changes"]["devices"] = [
                 {
                     "device_id": "dev-1",
@@ -535,16 +585,13 @@ class TestMCPToolsConfig(unittest.TestCase):
                 }
             ]
 
-            dns_service = FakeDNSNTPService(None, Settings())
-
             with (
                 patch.object(
                     config_module,
                     "get_session_factory",
                     lambda *_args, **_kwargs: session_factory,
                 ),
-                patch.object(config_module, "PlanService", lambda s: plan_service),
-                patch.object(config_module, "DNSNTPService", lambda s, st: dns_service),
+                patch.object(config_module, "PlanService", lambda s, st=None: plan_service),
                 patch.object(
                     config_module,
                     "map_exception_to_error",
@@ -554,12 +601,25 @@ class TestMCPToolsConfig(unittest.TestCase):
                 settings, tools = self._register_tools(fake_mcp)
                 rollback_tool = tools["config_rollback_plan"]
 
-                result = await rollback_tool(plan_id="plan-xyz", approved_by="user")
+                result = await rollback_tool(
+                    plan_id="plan-xyz",
+                    reason="Manual rollback due to issues",
+                    triggered_by="user"
+                )
 
-                self.assertEqual(("plan-xyz", "cancelled"), plan_service.status_updates[-1])
-                self.assertTrue(result["content"][0]["text"].startswith("Rollback completed"))
-                self.assertEqual(("dev-1", ["8.8.8.8"]), dns_service.dns_updates[0])
-                self.assertEqual(("dev-1", ["time.old"]), dns_service.ntp_updates[0])
+                # Verify rollback_plan was called with correct parameters
+                self.assertEqual(1, len(plan_service.rollback_calls))
+                self.assertEqual("plan-xyz", plan_service.rollback_calls[0]["plan_id"])
+                self.assertEqual("Manual rollback due to issues", plan_service.rollback_calls[0]["reason"])
+                self.assertEqual("user", plan_service.rollback_calls[0]["triggered_by"])
+
+                # Verify response format
+                self.assertTrue(result["content"][0]["text"].startswith("Manual rollback completed"))
+                self.assertIn("reason", result["content"][0]["text"].lower())
+                self.assertEqual("plan-xyz", result["_meta"]["plan_id"])
+                self.assertEqual("rolled_back", result["_meta"]["status"])
+                self.assertEqual(1, result["_meta"]["devices_affected"])
+                self.assertEqual("Manual rollback due to issues", result["_meta"]["reason"])
 
         asyncio.run(_run())
 
@@ -578,7 +638,7 @@ class TestMCPToolsConfig(unittest.TestCase):
                     "get_session_factory",
                     lambda *_args, **_kwargs: session_factory,
                 ),
-                patch.object(config_module, "PlanService", lambda s: plan_service),
+                patch.object(config_module, "PlanService", lambda s, st=None: plan_service),
                 patch.object(
                     config_module,
                     "map_exception_to_error",
@@ -589,7 +649,11 @@ class TestMCPToolsConfig(unittest.TestCase):
                 rollback_tool = tools["config_rollback_plan"]
 
                 with self.assertRaises(MappedError):
-                    await rollback_tool(plan_id="plan-xyz", approved_by="user")
+                    await rollback_tool(
+                        plan_id="plan-xyz",
+                        reason="Manual rollback",
+                        triggered_by="user"
+                    )
 
         asyncio.run(_run())
 
@@ -600,7 +664,7 @@ class TestMCPToolsConfig(unittest.TestCase):
             session_factory = FakeSessionFactory(fake_session)
 
             plan_service = FakePlanService(None)
-            plan_service.plan["status"] = "applied"
+            plan_service.plan["status"] = "executing"
             plan_service.plan["changes"]["devices"] = [
                 {
                     "device_id": "dev-1",
@@ -608,12 +672,7 @@ class TestMCPToolsConfig(unittest.TestCase):
                     "current_ntp": {"ntp_servers": ["time.old"]},
                 }
             ]
-
-            class FailingDNS(FakeDNSNTPService):
-                async def update_dns_servers(self, *_args, **_kwargs):  # type: ignore[override]
-                    raise RuntimeError("rollback fail")
-
-            dns_service = FailingDNS(None, Settings())
+            plan_service.fail_rollback = True  # Simulate rollback failure
 
             with (
                 patch.object(
@@ -621,8 +680,7 @@ class TestMCPToolsConfig(unittest.TestCase):
                     "get_session_factory",
                     lambda *_args, **_kwargs: session_factory,
                 ),
-                patch.object(config_module, "PlanService", lambda s: plan_service),
-                patch.object(config_module, "DNSNTPService", lambda s, st: dns_service),
+                patch.object(config_module, "PlanService", lambda s, st=None: plan_service),
                 patch.object(
                     config_module,
                     "map_exception_to_error",
@@ -632,13 +690,71 @@ class TestMCPToolsConfig(unittest.TestCase):
                 settings, tools = self._register_tools(fake_mcp)
                 rollback_tool = tools["config_rollback_plan"]
 
-                result = await rollback_tool(plan_id="plan-err", approved_by="user")
+                result = await rollback_tool(
+                    plan_id="plan-err",
+                    reason="Manual rollback",
+                    triggered_by="user"
+                )
 
+                # Verify device failure is reported
                 self.assertEqual(
-                    "failed",
+                    "rollback_failed",
                     result["_meta"]["devices"]["dev-1"]["status"],
                 )
-                self.assertEqual(("plan-err", "cancelled"), plan_service.status_updates[-1])
+                self.assertEqual(0, result["_meta"]["summary"]["success"])
+                self.assertEqual(1, result["_meta"]["summary"]["failed"])
+
+        asyncio.run(_run())
+
+    def test_rollback_plan_reason_in_audit_trail(self) -> None:
+        """Test that reason parameter is properly passed to PlanService for audit trail."""
+        async def _run() -> None:
+            fake_mcp = FakeMCP()
+            fake_session = FakeSession()
+            session_factory = FakeSessionFactory(fake_session)
+
+            plan_service = FakePlanService(None)
+            plan_service.plan["status"] = "executing"
+            plan_service.plan["changes"]["devices"] = [
+                {
+                    "device_id": "dev-1",
+                    "current_dns": {"dns_servers": ["8.8.8.8"]},
+                }
+            ]
+
+            with (
+                patch.object(
+                    config_module,
+                    "get_session_factory",
+                    lambda *_args, **_kwargs: session_factory,
+                ),
+                patch.object(config_module, "PlanService", lambda s, st=None: plan_service),
+                patch.object(
+                    config_module,
+                    "map_exception_to_error",
+                    lambda e: MappedError(str(e)),
+                ),
+            ):
+                settings, tools = self._register_tools(fake_mcp)
+                rollback_tool = tools["config_rollback_plan"]
+
+                custom_reason = "Discovered DNS resolution issues after rollout"
+                result = await rollback_tool(
+                    plan_id="plan-123",
+                    reason=custom_reason,
+                    triggered_by="admin-user"
+                )
+
+                # Verify reason was passed to rollback_plan
+                self.assertEqual(1, len(plan_service.rollback_calls))
+                self.assertEqual(custom_reason, plan_service.rollback_calls[0]["reason"])
+                self.assertEqual("admin-user", plan_service.rollback_calls[0]["triggered_by"])
+
+                # Verify reason is included in response
+                self.assertIn(custom_reason, result["content"][0]["text"])
+                self.assertEqual(custom_reason, result["_meta"]["reason"])
+
+        asyncio.run(_run())
 
     def test_plan_dns_ntp_rollout_validates_device_count_minimum(self) -> None:
         """Test that plan creation fails with less than 2 devices."""
