@@ -69,6 +69,8 @@ class PlanStatus(str, Enum):
     - executing → completed
     - executing → failed
     - executing → cancelled
+    - executing → rolling_back (Phase 4)
+    - rolling_back → rolled_back (Phase 4)
     """
     PENDING = "pending"
     APPROVED = "approved"
@@ -76,6 +78,8 @@ class PlanStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    ROLLING_BACK = "rolling_back"  # Phase 4: Rollback in progress
+    ROLLED_BACK = "rolled_back"    # Phase 4: Rollback completed
 
 
 class ToolHint(BaseModel):

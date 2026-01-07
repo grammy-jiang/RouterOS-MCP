@@ -883,3 +883,568 @@ class TestMultiDevicePlanService:
                 pause_seconds_between_batches=-10,
             )
 
+
+class TestPlanRollback:
+    """Tests for Phase 4 automatic rollback on health check failure."""
+
+    @pytest.mark.asyncio
+    async def test_rollback_requires_rollback_on_failure_enabled(
+        self, db_session: AsyncSession, test_devices: list[str]
+    ) -> None:
+        """Test that rollback only triggers if rollback_on_failure=True."""
+        from routeros_mcp.infra.db.models import Plan as PlanModel
+
+        service = PlanService(db_session)
+
+        # Create plan with rollback disabled
+        plan = await service.create_multi_device_plan(
+            tool_name="dns_ntp/plan-update",
+            created_by="test-user",
+            device_ids=["dev-lab-01", "dev-lab-02"],
+            summary="Update DNS/NTP",
+            changes={"dns_servers": ["8.8.8.8"]},
+            change_type="dns_ntp",
+            batch_size=2,
+            rollback_on_failure=False,
+        )
+
+        # Simulate plan execution
+        stmt = select(PlanModel).where(PlanModel.id == plan["plan_id"])
+        result = await db_session.execute(stmt)
+        plan_model = result.scalar_one()
+        plan_model.status = PlanStatus.EXECUTING.value
+        await db_session.commit()
+
+        # Attempt rollback - should indicate rollback not enabled
+        rollback_result = await service.rollback_plan(
+            plan_id=plan["plan_id"],
+            reason="health_check_failed",
+            triggered_by="system",
+        )
+
+        assert rollback_result["rollback_enabled"] is False
+        assert "not enabled" in rollback_result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_rollback_only_applies_to_completed_batches(
+        self, db_session: AsyncSession, test_devices: list[str]
+    ) -> None:
+        """Test that rollback only applies to devices with status='applied'."""
+        from unittest.mock import AsyncMock, patch
+        from routeros_mcp.infra.db.models import Plan as PlanModel
+
+        service = PlanService(db_session)
+
+        # Create multi-device plan
+        plan = await service.create_multi_device_plan(
+            tool_name="dns_ntp/plan-update",
+            created_by="test-user",
+            device_ids=["dev-lab-01", "dev-lab-02"],
+            summary="Update DNS/NTP",
+            changes={
+                "dns_servers": ["8.8.8.8"],
+                "previous_state": {
+                    "dev-lab-01": {"dns_servers": ["1.1.1.1"]},
+                    "dev-lab-02": {"dns_servers": ["1.0.0.1"]},
+                },
+            },
+            change_type="dns_ntp",
+            batch_size=1,
+            rollback_on_failure=True,
+        )
+
+        # Simulate partial execution: dev-lab-01 applied, dev-lab-02 pending
+        stmt = select(PlanModel).where(PlanModel.id == plan["plan_id"])
+        result = await db_session.execute(stmt)
+        plan_model = result.scalar_one()
+        plan_model.status = PlanStatus.EXECUTING.value
+        plan_model.device_statuses = {
+            "dev-lab-01": "applied",
+            "dev-lab-02": "pending",
+        }
+        await db_session.commit()
+
+        # Mock DNS/NTP service to avoid actual device connections
+        with patch("routeros_mcp.domain.services.dns_ntp.DNSNTPService") as mock_dns_ntp_class:
+            mock_dns_ntp = AsyncMock()
+            mock_dns_ntp_class.return_value = mock_dns_ntp
+            mock_dns_ntp.update_dns_servers = AsyncMock()
+
+            # Trigger rollback
+            rollback_result = await service.rollback_plan(
+                plan_id=plan["plan_id"],
+                reason="health_check_failed",
+                triggered_by="system",
+            )
+
+        # Verify only dev-lab-01 was rolled back (not dev-lab-02)
+        assert rollback_result["summary"]["total"] == 1
+        assert "dev-lab-01" in rollback_result["devices"]
+        assert "dev-lab-02" not in rollback_result["devices"]
+        assert rollback_result["devices"]["dev-lab-01"]["status"] == "rolled_back"
+
+    @pytest.mark.asyncio
+    async def test_rollback_per_device_status_tracking(
+        self, db_session: AsyncSession, test_devices: list[str]
+    ) -> None:
+        """Test that per-device rollback status is tracked: applied → rolling_back → rolled_back."""
+        from unittest.mock import AsyncMock, patch
+        from routeros_mcp.infra.db.models import Plan as PlanModel
+
+        service = PlanService(db_session)
+
+        # Create plan with 2 devices
+        plan = await service.create_multi_device_plan(
+            tool_name="dns_ntp/plan-update",
+            created_by="test-user",
+            device_ids=["dev-lab-01", "dev-lab-02"],
+            summary="Update DNS/NTP",
+            changes={
+                "dns_servers": ["8.8.8.8"],
+                "previous_state": {
+                    "dev-lab-01": {"dns_servers": ["1.1.1.1"]},
+                    "dev-lab-02": {"dns_servers": ["1.0.0.1"]},
+                },
+            },
+            change_type="dns_ntp",
+            batch_size=2,
+            rollback_on_failure=True,
+        )
+
+        # Set device status to applied
+        stmt = select(PlanModel).where(PlanModel.id == plan["plan_id"])
+        result = await db_session.execute(stmt)
+        plan_model = result.scalar_one()
+        plan_model.status = PlanStatus.EXECUTING.value
+        plan_model.device_statuses = {"dev-lab-01": "applied", "dev-lab-02": "applied"}
+        await db_session.commit()
+
+        # Mock DNS/NTP service
+        with patch("routeros_mcp.domain.services.dns_ntp.DNSNTPService") as mock_dns_ntp_class:
+            mock_dns_ntp = AsyncMock()
+            mock_dns_ntp_class.return_value = mock_dns_ntp
+            mock_dns_ntp.update_dns_servers = AsyncMock()
+
+            # Trigger rollback
+            rollback_result = await service.rollback_plan(
+                plan_id=plan["plan_id"],
+                reason="health_check_failed",
+                triggered_by="system",
+            )
+
+        # Verify status progression for both devices
+        assert rollback_result["devices"]["dev-lab-01"]["status"] == "rolled_back"
+        assert rollback_result["devices"]["dev-lab-02"]["status"] == "rolled_back"
+
+        # Check final plan state
+        stmt = select(PlanModel).where(PlanModel.id == plan["plan_id"])
+        result = await db_session.execute(stmt)
+        final_plan = result.scalar_one()
+        assert final_plan.status == PlanStatus.ROLLED_BACK.value
+        assert final_plan.device_statuses["dev-lab-01"] == "rolled_back"
+        assert final_plan.device_statuses["dev-lab-02"] == "rolled_back"
+
+    @pytest.mark.asyncio
+    async def test_rollback_plan_state_transitions(
+        self, db_session: AsyncSession, test_devices: list[str]
+    ) -> None:
+        """Test plan state transitions: executing → rolling_back → rolled_back."""
+        from unittest.mock import AsyncMock, patch
+        from routeros_mcp.infra.db.models import Plan as PlanModel
+
+        service = PlanService(db_session)
+
+        # Create plan with 2 devices
+        plan = await service.create_multi_device_plan(
+            tool_name="dns_ntp/plan-update",
+            created_by="test-user",
+            device_ids=["dev-lab-01", "dev-lab-02"],
+            summary="Update DNS/NTP",
+            changes={
+                "dns_servers": ["8.8.8.8"],
+                "previous_state": {
+                    "dev-lab-01": {"dns_servers": ["1.1.1.1"]},
+                    "dev-lab-02": {"dns_servers": ["1.0.0.1"]},
+                },
+            },
+            change_type="dns_ntp",
+            batch_size=2,
+            rollback_on_failure=True,
+        )
+
+        # Set plan to executing with applied device
+        stmt = select(PlanModel).where(PlanModel.id == plan["plan_id"])
+        result = await db_session.execute(stmt)
+        plan_model = result.scalar_one()
+        plan_model.status = PlanStatus.EXECUTING.value
+        plan_model.device_statuses = {"dev-lab-01": "applied", "dev-lab-02": "applied"}
+        await db_session.commit()
+
+        # Mock DNS/NTP service
+        with patch("routeros_mcp.domain.services.dns_ntp.DNSNTPService") as mock_dns_ntp_class:
+            mock_dns_ntp = AsyncMock()
+            mock_dns_ntp_class.return_value = mock_dns_ntp
+            mock_dns_ntp.update_dns_servers = AsyncMock()
+
+            # Trigger rollback
+            await service.rollback_plan(
+                plan_id=plan["plan_id"],
+                reason="health_check_failed",
+                triggered_by="system",
+            )
+
+        # Verify plan transitioned to rolled_back
+        stmt = select(PlanModel).where(PlanModel.id == plan["plan_id"])
+        result = await db_session.execute(stmt)
+        final_plan = result.scalar_one()
+        assert final_plan.status == PlanStatus.ROLLED_BACK.value
+
+    @pytest.mark.asyncio
+    async def test_rollback_restores_dns_ntp_from_previous_state(
+        self, db_session: AsyncSession, test_devices: list[str]
+    ) -> None:
+        """Test that rollback restores previous DNS/NTP settings from plan metadata."""
+        from unittest.mock import AsyncMock, patch
+        from routeros_mcp.infra.db.models import Plan as PlanModel
+
+        service = PlanService(db_session)
+
+        # Create plan with previous state (2 devices required)
+        previous_dns = ["1.1.1.1", "1.0.0.1"]
+        previous_ntp = ["time.cloudflare.com"]
+        plan = await service.create_multi_device_plan(
+            tool_name="dns_ntp/plan-update",
+            created_by="test-user",
+            device_ids=["dev-lab-01", "dev-lab-02"],
+            summary="Update DNS/NTP",
+            changes={
+                "dns_servers": ["8.8.8.8", "8.8.4.4"],
+                "ntp_servers": ["pool.ntp.org"],
+                "previous_state": {
+                    "dev-lab-01": {
+                        "dns_servers": previous_dns,
+                        "ntp_servers": previous_ntp,
+                        "ntp_enabled": True,
+                    },
+                    "dev-lab-02": {
+                        "dns_servers": ["8.8.8.8"],
+                        "ntp_servers": ["pool.ntp.org"],
+                        "ntp_enabled": False,
+                    },
+                },
+            },
+            change_type="dns_ntp",
+            batch_size=2,
+            rollback_on_failure=True,
+        )
+
+        # Set device to applied
+        stmt = select(PlanModel).where(PlanModel.id == plan["plan_id"])
+        result = await db_session.execute(stmt)
+        plan_model = result.scalar_one()
+        plan_model.status = PlanStatus.EXECUTING.value
+        plan_model.device_statuses = {"dev-lab-01": "applied", "dev-lab-02": "pending"}
+        await db_session.commit()
+
+        # Mock DNS/NTP service and capture calls
+        with patch("routeros_mcp.domain.services.dns_ntp.DNSNTPService") as mock_dns_ntp_class:
+            mock_dns_ntp = AsyncMock()
+            mock_dns_ntp_class.return_value = mock_dns_ntp
+            mock_dns_ntp.update_dns_servers = AsyncMock()
+            mock_dns_ntp.update_ntp_servers = AsyncMock()
+
+            # Trigger rollback
+            await service.rollback_plan(
+                plan_id=plan["plan_id"],
+                reason="health_check_failed",
+                triggered_by="system",
+            )
+
+            # Verify DNS servers were restored for dev-lab-01 only
+            mock_dns_ntp.update_dns_servers.assert_called_once_with(
+                device_id="dev-lab-01",
+                dns_servers=previous_dns,
+                dry_run=False,
+            )
+
+            # Verify NTP servers were restored for dev-lab-01 only
+            mock_dns_ntp.update_ntp_servers.assert_called_once_with(
+                device_id="dev-lab-01",
+                ntp_servers=previous_ntp,
+                enabled=True,
+                dry_run=False,
+            )
+
+    @pytest.mark.asyncio
+    async def test_rollback_with_max_retries(
+        self, db_session: AsyncSession, test_devices: list[str]
+    ) -> None:
+        """Test that rollback retries up to max_retries times on failure."""
+        from unittest.mock import AsyncMock, patch
+        from routeros_mcp.infra.db.models import Plan as PlanModel
+
+        service = PlanService(db_session)
+
+        # Create plan with 2 devices
+        plan = await service.create_multi_device_plan(
+            tool_name="dns_ntp/plan-update",
+            created_by="test-user",
+            device_ids=["dev-lab-01", "dev-lab-02"],
+            summary="Update DNS/NTP",
+            changes={
+                "dns_servers": ["8.8.8.8"],
+                "previous_state": {
+                    "dev-lab-01": {"dns_servers": ["1.1.1.1"]},
+                    "dev-lab-02": {"dns_servers": ["1.0.0.1"]},
+                },
+            },
+            change_type="dns_ntp",
+            batch_size=2,
+            rollback_on_failure=True,
+        )
+
+        # Set device to applied
+        stmt = select(PlanModel).where(PlanModel.id == plan["plan_id"])
+        result = await db_session.execute(stmt)
+        plan_model = result.scalar_one()
+        plan_model.status = PlanStatus.EXECUTING.value
+        plan_model.device_statuses = {"dev-lab-01": "applied", "dev-lab-02": "pending"}
+        await db_session.commit()
+
+        # Mock DNS/NTP service to fail twice, succeed on third attempt
+        with patch("routeros_mcp.domain.services.dns_ntp.DNSNTPService") as mock_dns_ntp_class:
+            mock_dns_ntp = AsyncMock()
+            mock_dns_ntp_class.return_value = mock_dns_ntp
+            call_count = [0]
+
+            def update_dns_side_effect(*args, **kwargs):
+                call_count[0] += 1
+                if call_count[0] < 3:
+                    raise RuntimeError("Connection failed")
+                # Third attempt succeeds
+                return AsyncMock()
+
+            mock_dns_ntp.update_dns_servers = AsyncMock(side_effect=update_dns_side_effect)
+
+            # Trigger rollback with max_retries=3
+            rollback_result = await service.rollback_plan(
+                plan_id=plan["plan_id"],
+                reason="health_check_failed",
+                triggered_by="system",
+                max_retries=3,
+            )
+
+        # Verify device rolled back successfully after retries
+        assert rollback_result["devices"]["dev-lab-01"]["status"] == "rolled_back"
+        assert rollback_result["devices"]["dev-lab-01"]["attempts"] == 3
+        assert rollback_result["summary"]["success"] == 1
+        assert rollback_result["summary"]["failed"] == 0
+
+    @pytest.mark.asyncio
+    async def test_rollback_failure_after_max_retries(
+        self, db_session: AsyncSession, test_devices: list[str]
+    ) -> None:
+        """Test that rollback fails gracefully after exceeding max_retries."""
+        from unittest.mock import AsyncMock, patch
+        from routeros_mcp.infra.db.models import Plan as PlanModel
+
+        service = PlanService(db_session)
+
+        # Create plan with 2 devices
+        plan = await service.create_multi_device_plan(
+            tool_name="dns_ntp/plan-update",
+            created_by="test-user",
+            device_ids=["dev-lab-01", "dev-lab-02"],
+            summary="Update DNS/NTP",
+            changes={
+                "dns_servers": ["8.8.8.8"],
+                "previous_state": {
+                    "dev-lab-01": {"dns_servers": ["1.1.1.1"]},
+                    "dev-lab-02": {"dns_servers": ["1.0.0.1"]},
+                },
+            },
+            change_type="dns_ntp",
+            batch_size=2,
+            rollback_on_failure=True,
+        )
+
+        # Set device to applied
+        stmt = select(PlanModel).where(PlanModel.id == plan["plan_id"])
+        result = await db_session.execute(stmt)
+        plan_model = result.scalar_one()
+        plan_model.status = PlanStatus.EXECUTING.value
+        plan_model.device_statuses = {"dev-lab-01": "applied", "dev-lab-02": "pending"}
+        await db_session.commit()
+
+        # Mock DNS/NTP service to always fail
+        with patch("routeros_mcp.domain.services.dns_ntp.DNSNTPService") as mock_dns_ntp_class:
+            mock_dns_ntp = AsyncMock()
+            mock_dns_ntp_class.return_value = mock_dns_ntp
+            mock_dns_ntp.update_dns_servers = AsyncMock(side_effect=RuntimeError("Device unreachable"))
+
+            # Trigger rollback with max_retries=3
+            rollback_result = await service.rollback_plan(
+                plan_id=plan["plan_id"],
+                reason="health_check_failed",
+                triggered_by="system",
+                max_retries=3,
+            )
+
+        # Verify rollback failed after max attempts
+        assert rollback_result["devices"]["dev-lab-01"]["status"] == "rollback_failed"
+        assert rollback_result["devices"]["dev-lab-01"]["attempts"] == 3
+        assert len(rollback_result["devices"]["dev-lab-01"]["errors"]) == 3
+        assert rollback_result["summary"]["success"] == 0
+        assert rollback_result["summary"]["failed"] == 1
+
+        # Verify device status is rollback_failed
+        stmt = select(PlanModel).where(PlanModel.id == plan["plan_id"])
+        result = await db_session.execute(stmt)
+        final_plan = result.scalar_one()
+        assert final_plan.device_statuses["dev-lab-01"] == "rollback_failed"
+
+    @pytest.mark.asyncio
+    async def test_rollback_logs_audit_events(
+        self, db_session: AsyncSession, test_devices: list[str]
+    ) -> None:
+        """Test that rollback creates proper audit events."""
+        from unittest.mock import AsyncMock, patch
+        from routeros_mcp.infra.db.models import Plan as PlanModel
+
+        service = PlanService(db_session)
+
+        # Create plan with 2 devices
+        plan = await service.create_multi_device_plan(
+            tool_name="dns_ntp/plan-update",
+            created_by="test-user",
+            device_ids=["dev-lab-01", "dev-lab-02"],
+            summary="Update DNS/NTP",
+            changes={
+                "dns_servers": ["8.8.8.8"],
+                "previous_state": {
+                    "dev-lab-01": {"dns_servers": ["1.1.1.1"]},
+                    "dev-lab-02": {"dns_servers": ["1.0.0.1"]},
+                },
+            },
+            change_type="dns_ntp",
+            batch_size=2,
+            rollback_on_failure=True,
+        )
+
+        # Set device to applied
+        stmt = select(PlanModel).where(PlanModel.id == plan["plan_id"])
+        result = await db_session.execute(stmt)
+        plan_model = result.scalar_one()
+        plan_model.status = PlanStatus.EXECUTING.value
+        plan_model.device_statuses = {"dev-lab-01": "applied", "dev-lab-02": "pending"}
+        await db_session.commit()
+
+        # Mock DNS/NTP service
+        with patch("routeros_mcp.domain.services.dns_ntp.DNSNTPService") as mock_dns_ntp_class:
+            mock_dns_ntp = AsyncMock()
+            mock_dns_ntp_class.return_value = mock_dns_ntp
+            mock_dns_ntp.update_dns_servers = AsyncMock()
+
+            # Trigger rollback
+            await service.rollback_plan(
+                plan_id=plan["plan_id"],
+                reason="health_check_failed",
+                triggered_by="test-user",
+            )
+
+        # Check rollback initiation audit event
+        stmt = select(AuditEvent).where(
+            AuditEvent.action == "PLAN_ROLLBACK_INITIATED",
+            AuditEvent.plan_id == plan["plan_id"]
+        )
+        result = await db_session.execute(stmt)
+        init_event = result.scalar_one_or_none()
+
+        assert init_event is not None
+        assert init_event.user_sub == "test-user"
+        assert init_event.result == "SUCCESS"
+        assert init_event.meta["reason"] == "health_check_failed"
+
+        # Check rollback completion audit event
+        stmt = select(AuditEvent).where(
+            AuditEvent.action == "PLAN_ROLLBACK_COMPLETED",
+            AuditEvent.plan_id == plan["plan_id"]
+        )
+        result = await db_session.execute(stmt)
+        complete_event = result.scalar_one_or_none()
+
+        assert complete_event is not None
+        assert complete_event.result == "SUCCESS"
+        assert complete_event.meta["success"] == 1
+        assert complete_event.meta["failed"] == 0
+
+    @pytest.mark.asyncio
+    async def test_rollback_requires_previous_state(
+        self, db_session: AsyncSession, test_devices: list[str]
+    ) -> None:
+        """Test that rollback fails if no previous state is available."""
+        from routeros_mcp.infra.db.models import Plan as PlanModel
+
+        service = PlanService(db_session)
+
+        # Create plan without previous_state (2 devices required)
+        plan = await service.create_multi_device_plan(
+            tool_name="dns_ntp/plan-update",
+            created_by="test-user",
+            device_ids=["dev-lab-01", "dev-lab-02"],
+            summary="Update DNS/NTP",
+            changes={"dns_servers": ["8.8.8.8"]},  # No previous_state
+            change_type="dns_ntp",
+            batch_size=2,
+            rollback_on_failure=True,
+        )
+
+        # Set device to applied
+        stmt = select(PlanModel).where(PlanModel.id == plan["plan_id"])
+        result = await db_session.execute(stmt)
+        plan_model = result.scalar_one()
+        plan_model.status = PlanStatus.EXECUTING.value
+        plan_model.device_statuses = {"dev-lab-01": "applied", "dev-lab-02": "pending"}
+        await db_session.commit()
+
+        # Trigger rollback should fail
+        with pytest.raises(ValueError, match="No previous state available"):
+            await service.rollback_plan(
+                plan_id=plan["plan_id"],
+                reason="health_check_failed",
+                triggered_by="system",
+            )
+
+    @pytest.mark.asyncio
+    async def test_rollback_invalid_state_transition(
+        self, db_session: AsyncSession, test_devices: list[str]
+    ) -> None:
+        """Test that rollback fails if plan is not in EXECUTING state."""
+        service = PlanService(db_session)
+
+        # Create plan in PENDING state (2 devices required)
+        plan = await service.create_multi_device_plan(
+            tool_name="dns_ntp/plan-update",
+            created_by="test-user",
+            device_ids=["dev-lab-01", "dev-lab-02"],
+            summary="Update DNS/NTP",
+            changes={
+                "dns_servers": ["8.8.8.8"],
+                "previous_state": {
+                    "dev-lab-01": {"dns_servers": ["1.1.1.1"]},
+                    "dev-lab-02": {"dns_servers": ["1.0.0.1"]},
+                },
+            },
+            change_type="dns_ntp",
+            batch_size=2,
+            rollback_on_failure=True,
+        )
+
+        # Try to rollback from PENDING state (should fail)
+        with pytest.raises(ValueError, match="cannot be rolled back from status"):
+            await service.rollback_plan(
+                plan_id=plan["plan_id"],
+                reason="health_check_failed",
+                triggered_by="system",
+            )
+
