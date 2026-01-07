@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -37,7 +36,7 @@ from routeros_mcp.domain.services.plan import PlanService
 from routeros_mcp.infra.db.models import AuditEvent, Base, Device, Job, Plan
 
 from .e2e_test_utils import TEST_ENCRYPTION_KEY, make_test_settings
-from .phase3_test_utils import MockDeviceService, MockRouterOSRestClient, create_mock_device
+from .phase3_test_utils import MockRouterOSRestClient, create_mock_device
 
 
 # Helper function to simulate batch execution
@@ -51,23 +50,23 @@ async def simulate_batch_execution(
     cancel_after_batch: int | None = None,
 ) -> dict:
     """Simulate batched job execution with configurable failure modes.
-    
+
     Args:
-        session: Database session
-        job: Job model
-        plan: Plan model  
-        mock_rest_clients: Mock REST clients for devices
-        fail_on_device: Device ID to simulate apply failure on
-        fail_health_on_device: Device ID to simulate health check failure on
-        cancel_after_batch: Cancel job after this batch number (1-indexed)
-        
+        session: Database session.
+        job: Job model.
+        plan: Plan model.
+        mock_rest_clients: Mock REST clients for devices.
+        fail_on_device: Device ID to simulate apply failure on.
+        fail_health_on_device: Device ID to simulate health check failure on.
+        cancel_after_batch: Cancel job after this batch number (1-indexed).
+
     Returns:
-        Execution results dictionary
+        Execution results dictionary.
     """
     device_ids = plan.device_ids
     batch_size = plan.batch_size or 5
     batches = [device_ids[i:i + batch_size] for i in range(0, len(device_ids), batch_size)]
-    
+
     results = {
         "status": "completed",
         "devices_processed": 0,
@@ -75,21 +74,21 @@ async def simulate_batch_execution(
         "failed_devices": 0,
         "device_results": {},
     }
-    
+
     # Update job status
     job.status = "executing"
     await session.commit()
-    
+
     # Update plan status
     plan.status = PlanStatus.EXECUTING.value
     await session.commit()
-    
+
     for batch_idx, batch_device_ids in enumerate(batches):
         # Check for cancellation before batch
         if cancel_after_batch is not None and batch_idx > 0 and batch_idx == cancel_after_batch:
             job.cancellation_requested = True
             await session.commit()
-        
+
         if job.cancellation_requested:
             # Handle cancellation
             results["status"] = "cancelled"
@@ -99,7 +98,7 @@ async def simulate_batch_execution(
             plan.status = PlanStatus.CANCELLED.value
             await session.commit()
             return results
-        
+
         # Process batch
         for device_id in batch_device_ids:
             # Simulate apply changes
@@ -112,15 +111,15 @@ async def simulate_batch_execution(
                 results["device_results"][device_id] = {"status": "applied"}
                 if plan.device_statuses is not None:
                     plan.device_statuses[device_id] = "applied"
-                
+
             results["devices_processed"] += 1
-        
+
         # Mark device_statuses as modified for SQLAlchemy
         from sqlalchemy.orm import attributes
         attributes.flag_modified(plan, "device_statuses")
-        
+
         results["batches_completed"] += 1
-        
+
         # Health check after batch
         if fail_health_on_device and fail_health_on_device in batch_device_ids:
             # Health check failed - trigger rollback
@@ -128,17 +127,17 @@ async def simulate_batch_execution(
             job.status = "rolled_back"
             job.result_summary = f"Health check failed on {fail_health_on_device}, rolled back {results['devices_processed']} devices"
             plan.status = PlanStatus.ROLLED_BACK.value
-            
+
             # Mark all applied devices as rolled_back
             if plan.device_statuses is not None:
                 for dev_id in device_ids:
                     if plan.device_statuses.get(dev_id) == "applied":
                         plan.device_statuses[dev_id] = "rolled_back"
-            
+
             attributes.flag_modified(plan, "device_statuses")
             await session.commit()
             return results
-    
+
     # Completed successfully (or with partial failures)
     if results["failed_devices"] > 0:
         results["status"] = "completed_with_errors"
@@ -149,7 +148,7 @@ async def simulate_batch_execution(
         job.status = "completed"
         job.result_summary = f"Completed {results['devices_processed']}/{len(device_ids)} devices in {results['batches_completed']} batches"
         plan.status = PlanStatus.COMPLETED.value
-    
+
     await session.commit()
     return results
 
@@ -159,14 +158,14 @@ class TestMultiDeviceRollout(unittest.TestCase):
 
     def test_successful_rollout_3_batches(self) -> None:
         """Test successful multi-device rollout with 3 batches (5 devices, batch_size=2).
-        
+
         Scenario:
         - 5 devices: dev-lab-01 through dev-lab-05
         - Batch size: 2 (creates 3 batches: [2, 2, 1])
         - All batches complete successfully
         - All devices end in 'applied' state
         - Plan state transitions: pending → approved → executing → completed
-        
+
         Validates:
         - Multi-device plan creation with batch configuration
         - Batch calculation (3 batches for 5 devices with batch_size=2)
@@ -184,7 +183,7 @@ class TestMultiDeviceRollout(unittest.TestCase):
                 await conn.run_sync(Base.metadata.create_all)
 
             async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-            
+
             async with async_session_maker() as session:
                 # Create 5 test devices in database
                 devices = []
@@ -206,7 +205,7 @@ class TestMultiDeviceRollout(unittest.TestCase):
                 await session.commit()
 
             # Setup mock device service and REST clients (all healthy)
-            mock_devices = {
+            {
                 f"dev-lab-0{i}": create_mock_device(f"dev-lab-0{i}")
                 for i in range(1, 6)
             }
@@ -214,11 +213,10 @@ class TestMultiDeviceRollout(unittest.TestCase):
                 f"dev-lab-0{i}": MockRouterOSRestClient(f"dev-lab-0{i}")
                 for i in range(1, 6)
             }
-            mock_device_service = MockDeviceService(mock_devices, mock_rest_clients)
 
             # Create settings and services
             settings = make_test_settings(encryption_key=TEST_ENCRYPTION_KEY)
-            
+
             async with async_session_maker() as session:
                 plan_service = PlanService(session, settings)
                 job_service = JobService(session)
@@ -282,9 +280,9 @@ class TestMultiDeviceRollout(unittest.TestCase):
                 stmt = select(Job).where(Job.id == job_id)
                 result = await session.execute(stmt)
                 job = result.scalar_one()
-                
+
                 await session.refresh(plan)
-                
+
                 execution_result = await simulate_batch_execution(
                     session=session,
                     job=job,
@@ -310,7 +308,7 @@ class TestMultiDeviceRollout(unittest.TestCase):
                 # Step 6: Verify plan status updated to completed
                 await session.refresh(plan)
                 self.assertEqual(plan.status, PlanStatus.COMPLETED.value)
-                
+
                 # Verify device statuses tracked in plan
                 device_statuses = plan.device_statuses or {}
                 for device_id in device_ids:
@@ -329,7 +327,7 @@ class TestMultiDeviceRollout(unittest.TestCase):
 
                 # Should have multiple audit events
                 self.assertGreater(len(audit_events), 0)
-                
+
                 # Verify key audit actions
                 audit_actions = [event.action for event in audit_events]
                 self.assertIn("PLAN_CREATED", audit_actions)
@@ -339,7 +337,7 @@ class TestMultiDeviceRollout(unittest.TestCase):
 
     def test_rollout_halts_on_health_failure(self) -> None:
         """Test rollout halts when batch 2 health check fails and triggers rollback.
-        
+
         Scenario:
         - 6 devices: dev-lab-01 through dev-lab-06
         - Batch size: 2 (creates 3 batches)
@@ -348,7 +346,7 @@ class TestMultiDeviceRollout(unittest.TestCase):
         - Rollback triggered for all applied devices (batch 1 + batch 2)
         - Batch 3 (dev-lab-05, dev-lab-06): NEVER started
         - Plan state transitions: pending → approved → executing → rolled_back
-        
+
         Validates:
         - Health check failure detection after batch application
         - Automatic rollback trigger on health failure
@@ -364,7 +362,7 @@ class TestMultiDeviceRollout(unittest.TestCase):
                 await conn.run_sync(Base.metadata.create_all)
 
             async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-            
+
             async with async_session_maker() as session:
                 # Create 6 test devices in database
                 for i in range(1, 7):
@@ -384,7 +382,7 @@ class TestMultiDeviceRollout(unittest.TestCase):
                 await session.commit()
 
             # Setup mock device service and REST clients
-            mock_devices = {
+            {
                 f"dev-lab-0{i}": create_mock_device(f"dev-lab-0{i}")
                 for i in range(1, 7)
             }
@@ -392,11 +390,9 @@ class TestMultiDeviceRollout(unittest.TestCase):
                 f"dev-lab-0{i}": MockRouterOSRestClient(f"dev-lab-0{i}")
                 for i in range(1, 7)
             }
-            
-            mock_device_service = MockDeviceService(mock_devices, mock_rest_clients)
 
             settings = make_test_settings(encryption_key=TEST_ENCRYPTION_KEY)
-            
+
             async with async_session_maker() as session:
                 plan_service = PlanService(session, settings)
                 job_service = JobService(session)
@@ -440,7 +436,7 @@ class TestMultiDeviceRollout(unittest.TestCase):
                 stmt = select(Job).where(Job.id == job_id)
                 result = await session.execute(stmt)
                 job = result.scalar_one()
-                
+
                 stmt = select(Plan).where(Plan.id == plan_id)
                 result = await session.execute(stmt)
                 plan = result.scalar_one()
@@ -458,7 +454,7 @@ class TestMultiDeviceRollout(unittest.TestCase):
 
                 # Step 5: Validate rollback occurred
                 self.assertEqual(execution_result["status"], "rolled_back")
-                
+
                 # Only batches 1 and 2 should have been processed (4 devices)
                 self.assertEqual(execution_result["batches_completed"], 2)
                 self.assertEqual(execution_result["devices_processed"], 4)
@@ -473,7 +469,7 @@ class TestMultiDeviceRollout(unittest.TestCase):
                 self.assertEqual(device_statuses.get("dev-lab-02"), "rolled_back")
                 self.assertEqual(device_statuses.get("dev-lab-03"), "rolled_back")
                 self.assertEqual(device_statuses.get("dev-lab-04"), "rolled_back")
-                
+
                 # Devices in batch 3 should still be pending (never started)
                 self.assertEqual(device_statuses.get("dev-lab-05"), "pending")
                 self.assertEqual(device_statuses.get("dev-lab-06"), "pending")
@@ -487,14 +483,14 @@ class TestMultiDeviceRollout(unittest.TestCase):
                 stmt = select(AuditEvent).where(AuditEvent.plan_id == plan_id).order_by(AuditEvent.timestamp)
                 result = await session.execute(stmt)
                 audit_events = list(result.scalars().all())
-                
+
                 self.assertGreater(len(audit_events), 0)
 
         asyncio.run(_run())
 
     def test_manual_cancellation(self) -> None:
         """Test manual job cancellation after batch 1 completes.
-        
+
         Scenario:
         - 6 devices: dev-lab-01 through dev-lab-06
         - Batch size: 2 (creates 3 batches)
@@ -503,7 +499,7 @@ class TestMultiDeviceRollout(unittest.TestCase):
         - Batch 2 (dev-lab-03, dev-lab-04): NOT started
         - Batch 3 (dev-lab-05, dev-lab-06): NOT started
         - Plan state: pending → approved → executing → cancelled
-        
+
         Validates:
         - Cancellation detection between batches
         - Remaining batches are not executed
@@ -519,7 +515,7 @@ class TestMultiDeviceRollout(unittest.TestCase):
                 await conn.run_sync(Base.metadata.create_all)
 
             async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-            
+
             async with async_session_maker() as session:
                 # Create 6 test devices
                 for i in range(1, 7):
@@ -539,12 +535,11 @@ class TestMultiDeviceRollout(unittest.TestCase):
                 await session.commit()
 
             # Setup mocks
-            mock_devices = {f"dev-lab-0{i}": create_mock_device(f"dev-lab-0{i}") for i in range(1, 7)}
+            {f"dev-lab-0{i}": create_mock_device(f"dev-lab-0{i}") for i in range(1, 7)}
             mock_rest_clients = {f"dev-lab-0{i}": MockRouterOSRestClient(f"dev-lab-0{i}") for i in range(1, 7)}
-            mock_device_service = MockDeviceService(mock_devices, mock_rest_clients)
 
             settings = make_test_settings(encryption_key=TEST_ENCRYPTION_KEY)
-            
+
             async with async_session_maker() as session:
                 plan_service = PlanService(session, settings)
                 job_service = JobService(session)
@@ -584,7 +579,7 @@ class TestMultiDeviceRollout(unittest.TestCase):
                 stmt = select(Job).where(Job.id == job_id)
                 result = await session.execute(stmt)
                 job = result.scalar_one()
-                
+
                 stmt = select(Plan).where(Plan.id == plan_id)
                 result = await session.execute(stmt)
                 plan = result.scalar_one()
@@ -626,7 +621,7 @@ class TestMultiDeviceRollout(unittest.TestCase):
                 device_statuses = plan.device_statuses or {}
                 self.assertEqual(device_statuses.get("dev-lab-01"), "applied")
                 self.assertEqual(device_statuses.get("dev-lab-02"), "applied")
-                
+
                 # Batch 2 and 3 devices should remain 'pending' (never started)
                 self.assertEqual(device_statuses.get("dev-lab-03"), "pending")
                 self.assertEqual(device_statuses.get("dev-lab-04"), "pending")
@@ -637,14 +632,14 @@ class TestMultiDeviceRollout(unittest.TestCase):
                 stmt = select(AuditEvent).where(AuditEvent.plan_id == plan_id).order_by(AuditEvent.timestamp)
                 result = await session.execute(stmt)
                 audit_events = list(result.scalars().all())
-                
+
                 self.assertGreater(len(audit_events), 0)
 
         asyncio.run(_run())
 
     def test_partial_device_failure(self) -> None:
         """Test rollout continues when one device in a batch fails.
-        
+
         Scenario:
         - 4 devices: dev-lab-01 through dev-lab-04
         - Batch size: 2 (creates 2 batches)
@@ -653,7 +648,7 @@ class TestMultiDeviceRollout(unittest.TestCase):
           - dev-lab-02: FAILURE (device error during apply)
         - Batch 2 (dev-lab-03, dev-lab-04): continues execution, both succeed
         - Plan completes but marked as 'completed_with_errors'
-        
+
         Validates:
         - Partial failures within a batch don't halt entire rollout
         - Failed device is tracked with error status
@@ -669,7 +664,7 @@ class TestMultiDeviceRollout(unittest.TestCase):
                 await conn.run_sync(Base.metadata.create_all)
 
             async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-            
+
             async with async_session_maker() as session:
                 # Create 4 test devices
                 for i in range(1, 5):
@@ -689,16 +684,14 @@ class TestMultiDeviceRollout(unittest.TestCase):
                 await session.commit()
 
             # Setup mocks
-            mock_devices = {f"dev-lab-0{i}": create_mock_device(f"dev-lab-0{i}") for i in range(1, 5)}
+            {f"dev-lab-0{i}": create_mock_device(f"dev-lab-0{i}") for i in range(1, 5)}
             mock_rest_clients = {
                 f"dev-lab-0{i}": MockRouterOSRestClient(f"dev-lab-0{i}")
                 for i in range(1, 5)
             }
-            
-            mock_device_service = MockDeviceService(mock_devices, mock_rest_clients)
 
             settings = make_test_settings(encryption_key=TEST_ENCRYPTION_KEY)
-            
+
             async with async_session_maker() as session:
                 plan_service = PlanService(session, settings)
                 job_service = JobService(session)
@@ -738,7 +731,7 @@ class TestMultiDeviceRollout(unittest.TestCase):
                 stmt = select(Job).where(Job.id == job_id)
                 result = await session.execute(stmt)
                 job = result.scalar_one()
-                
+
                 stmt = select(Plan).where(Plan.id == plan_id)
                 result = await session.execute(stmt)
                 plan = result.scalar_one()
@@ -756,13 +749,13 @@ class TestMultiDeviceRollout(unittest.TestCase):
 
                 # Step 5: Validate partial failure results
                 self.assertEqual(execution_result["status"], "completed_with_errors")
-                
+
                 # All batches should be processed
                 self.assertEqual(execution_result["batches_completed"], 2)
-                
+
                 # Should have 1 failed device
                 self.assertEqual(execution_result["failed_devices"], 1)
-                
+
                 # Should have processed all 4 devices (attempted)
                 self.assertEqual(execution_result["devices_processed"], 4)
 
@@ -794,7 +787,7 @@ class TestMultiDeviceRollout(unittest.TestCase):
                 stmt = select(AuditEvent).where(AuditEvent.plan_id == plan_id).order_by(AuditEvent.timestamp)
                 result = await session.execute(stmt)
                 audit_events = list(result.scalars().all())
-                
+
                 self.assertGreater(len(audit_events), 0)
 
         asyncio.run(_run())
