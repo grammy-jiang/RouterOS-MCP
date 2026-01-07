@@ -1445,4 +1445,3 @@ class TestPlanRollback:
                 reason="health_check_failed",
                 triggered_by="system",
             )
-
