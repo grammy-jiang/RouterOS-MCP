@@ -391,7 +391,8 @@ class TestMCPToolsConfig(unittest.TestCase):
 
         asyncio.run(_run())
 
-    def test_apply_rollout_updates_plan_status(self) -> None:
+    def test_apply_rollout_creates_job_and_returns_pending(self) -> None:
+        """Test that apply rollout creates job without executing."""
         async def _run() -> None:
             fake_mcp = FakeMCP()
             fake_session = FakeSession()
@@ -399,9 +400,9 @@ class TestMCPToolsConfig(unittest.TestCase):
 
             plan_service = FakePlanService(None)
             plan_service.plan["status"] = "approved"
+            plan_service.plan["device_ids"] = ["d1", "d2"]
+            plan_service.plan["batch_size"] = 5
 
-            dns_service = FakeDNSNTPService(None, Settings())
-            health_service = FakeHealthService(None, Settings())
             job_service = FakeJobService(None)
 
             with (
@@ -410,9 +411,6 @@ class TestMCPToolsConfig(unittest.TestCase):
                     "get_session_factory",
                     lambda *_args, **_kwargs: session_factory,
                 ),
-                patch.object(config_module, "DeviceService", FakeDeviceService),
-                patch.object(config_module, "DNSNTPService", lambda s, st: dns_service),
-                patch.object(config_module, "HealthService", lambda s, st: health_service),
                 patch.object(config_module, "JobService", lambda s: job_service),
                 patch.object(config_module, "PlanService", lambda s: plan_service),
                 patch.object(
@@ -430,15 +428,18 @@ class TestMCPToolsConfig(unittest.TestCase):
                     approved_by="user",
                 )
 
-                self.assertEqual(("plan-123", "completed"), plan_service.status_updates[-1])
-                self.assertEqual("success", result["_meta"]["status"])
-                self.assertTrue(dns_service.dns_updates)
-                self.assertTrue(dns_service.ntp_updates)
-                self.assertTrue(health_service.calls)
+                # Verify job created but not executed
+                self.assertEqual(1, len(job_service.jobs_created))
+                self.assertEqual(0, len(job_service.executions))
+                
+                # Verify response has pending status
+                self.assertEqual("pending", result["_meta"]["status"])
+                self.assertIn("job_id", result["_meta"])
 
         asyncio.run(_run())
 
-    def test_apply_rollout_pending_approval_and_failure(self) -> None:
+    def test_apply_rollout_with_pending_approval(self) -> None:
+        """Test that apply rollout approves pending plan and creates job."""
         async def _run() -> None:
             fake_mcp = FakeMCP()
             fake_session = FakeSession()
@@ -447,24 +448,9 @@ class TestMCPToolsConfig(unittest.TestCase):
             plan_service = FakePlanService(None)
             plan_service.plan["status"] = "pending"
             plan_service.plan["device_ids"] = ["dev-1"]
-            plan_service.plan["changes"] = {
-                "dns_servers": ["9.9.9.9"],
-                "ntp_servers": ["ntp"],
-                "device_ids": ["dev-1"],
-            }
+            plan_service.plan["batch_size"] = 5
 
-            class FailingJobService(FakeJobService):
-                async def execute_job(self, *args, **kwargs):  # type: ignore[override]
-                    return {
-                        "device_results": {"dev-1": {"status": "failed", "error": "boom"}},
-                        "status": "failed",
-                        "total_devices": 1,
-                        "batches_completed": 0,
-                        "batches_total": 1,
-                    }
-
-            dns_service = FakeDNSNTPService(None, Settings())
-            health_service = FakeHealthService(None, Settings())
+            job_service = FakeJobService(None)
 
             with (
                 patch.object(
@@ -473,9 +459,7 @@ class TestMCPToolsConfig(unittest.TestCase):
                     lambda *_args, **_kwargs: session_factory,
                 ),
                 patch.object(config_module, "PlanService", lambda s: plan_service),
-                patch.object(config_module, "JobService", lambda s: FailingJobService(s)),
-                patch.object(config_module, "DNSNTPService", lambda s, st: dns_service),
-                patch.object(config_module, "HealthService", lambda s, st: health_service),
+                patch.object(config_module, "JobService", lambda s: job_service),
                 patch.object(
                     config_module,
                     "map_exception_to_error",
@@ -491,11 +475,12 @@ class TestMCPToolsConfig(unittest.TestCase):
                     approved_by="user",
                 )
 
-                self.assertEqual(("plan-123", "failed"), plan_service.status_updates[-1])
-                self.assertEqual(
-                    "failed",
-                    result["_meta"]["results"]["device_results"]["dev-1"]["status"],
-                )
+                # Verify plan was approved (approve_plan modifies plan status)
+                self.assertEqual("approved", plan_service.plan["status"])
+                
+                # Verify job created and status is pending
+                self.assertEqual(1, len(job_service.jobs_created))
+                self.assertEqual("pending", result["_meta"]["status"])
 
         asyncio.run(_run())
 
@@ -850,5 +835,64 @@ class TestMCPToolsConfig(unittest.TestCase):
                 # Verify default batch_size=5 was used -> [5, 5, 2]
                 self.assertEqual(3, result["_meta"]["batch_count"])
                 self.assertEqual([5, 5, 2], result["_meta"]["devices_per_batch"])
+
+        asyncio.run(_run())
+
+    def test_apply_dns_ntp_rollout(self) -> None:
+        """Test that apply_dns_ntp_rollout creates job and returns immediately."""
+        async def _run() -> None:
+            fake_mcp = FakeMCP()
+            fake_session = FakeSession()
+            session_factory = FakeSessionFactory(fake_session)
+
+            plan_service = FakePlanService(None)
+            plan_service.plan["status"] = "approved"
+            plan_service.plan["device_ids"] = ["dev-1", "dev-2", "dev-3"]
+            plan_service.plan["batch_size"] = 5
+
+            job_service = FakeJobService(None)
+
+            with (
+                patch.object(
+                    config_module,
+                    "get_session_factory",
+                    lambda *_args, **_kwargs: session_factory,
+                ),
+                patch.object(config_module, "PlanService", lambda s: plan_service),
+                patch.object(config_module, "JobService", lambda s: job_service),
+                patch.object(
+                    config_module,
+                    "map_exception_to_error",
+                    lambda e: MappedError(str(e)),
+                ),
+            ):
+                settings, tools = self._register_tools(fake_mcp)
+                apply_tool = tools["config_apply_dns_ntp_rollout"]
+
+                result = await apply_tool(
+                    plan_id="plan-123",
+                    approval_token="tok",
+                    approved_by="user",
+                )
+
+                # Verify job was created
+                self.assertEqual(1, len(job_service.jobs_created))
+                job_created = job_service.jobs_created[0]
+                self.assertEqual("APPLY_DNS_NTP_ROLLOUT", job_created["job_type"])
+                self.assertEqual("plan-123", job_created["plan_id"])
+                self.assertEqual(["dev-1", "dev-2", "dev-3"], job_created["device_ids"])
+
+                # Verify response format
+                self.assertIn("job_id", result["_meta"])
+                self.assertEqual("job-1", result["_meta"]["job_id"])
+                self.assertEqual("pending", result["_meta"]["status"])
+                self.assertIn("estimated_duration_minutes", result["_meta"])
+                self.assertGreater(result["_meta"]["estimated_duration_minutes"], 0)
+
+                # Verify job was NOT executed (no executions)
+                self.assertEqual(0, len(job_service.executions))
+
+                # Verify content mentions background execution
+                self.assertIn("background", result["content"][0]["text"].lower())
 
         asyncio.run(_run())

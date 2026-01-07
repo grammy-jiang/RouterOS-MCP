@@ -205,43 +205,42 @@ Per-device changes:
         plan_id: str,
         approval_token: str,
         approved_by: str = "system",
-        batch_size: int = 5,
-        batch_pause_seconds: int = 30,
     ) -> dict[str, Any]:
-        """Apply approved DNS/NTP rollout plan.
+        """Apply approved DNS/NTP rollout plan with background job tracking.
 
-        Professional-tier tool that executes an approved DNS/NTP rollout plan
-        across devices in batches with health checks between batches.
+        Professional-tier tool that creates a background job to execute an 
+        approved DNS/NTP rollout plan across devices in batches with health 
+        checks between batches.
 
         Use when:
         - Ready to execute an approved plan
         - Have obtained approval token from plan creation
         - Want safe, monitored rollout with automatic health checks
+        - Need to track long-running multi-device operations
 
         Args:
             plan_id: Plan identifier from plan creation
             approval_token: Approval token from plan creation
             approved_by: User identifier approving the plan
-            batch_size: Number of devices per batch (default: 5)
-            batch_pause_seconds: Pause between batches (default: 30)
 
         Returns:
-            Execution results with per-device status
+            Job details with job_id for status tracking
         """
         try:
             async with session_factory.session() as session:
                 # Create services
                 plan_service = PlanService(session)
                 job_service = JobService(session)
-                dns_ntp_service = DNSNTPService(session, settings)
-                health_service = HealthService(session, settings)
 
                 # Get and approve plan
                 plan = await plan_service.get_plan(plan_id)
                 if plan["status"] != "approved":
                     await plan_service.approve_plan(plan_id, approval_token, approved_by)
 
-                # Create job for execution
+                # Refresh plan to get approved status
+                plan = await plan_service.get_plan(plan_id)
+
+                # Create job for background execution
                 job = await job_service.create_job(
                     job_type="APPLY_DNS_NTP_ROLLOUT",
                     device_ids=plan["device_ids"],
@@ -249,90 +248,34 @@ Per-device changes:
                     max_attempts=3,
                 )
 
-                # Define executor function
-                async def execute_dns_ntp_batch(
-                    job_id: str, device_ids: list[str], context: dict[str, Any]
-                ) -> dict[str, Any]:
-                    """Execute DNS/NTP changes for a batch of devices."""
-                    changes = context["changes"]
-                    dns_servers = changes.get("dns_servers")
-                    ntp_servers = changes.get("ntp_servers")
-
-                    results: dict[str, Any] = {"devices": {}}
-
-                    for device_id in device_ids:
-                        try:
-                            # Apply DNS changes
-                            if dns_servers:
-                                await dns_ntp_service.update_dns_servers(
-                                    device_id, dns_servers, dry_run=False
-                                )
-
-                            # Apply NTP changes
-                            if ntp_servers:
-                                await dns_ntp_service.update_ntp_servers(
-                                    device_id, ntp_servers, dry_run=False
-                                )
-
-                            # Verify health
-                            health = await health_service.check_device_health(device_id)
-
-                            results["devices"][device_id] = {
-                                "status": "success",
-                                "health_status": health.get("status"),
-                            }
-
-                        except Exception as e:
-                            logger.error(
-                                f"Failed to apply changes to {device_id}: {e}",
-                                extra={"device_id": device_id},
-                            )
-                            results["devices"][device_id] = {
-                                "status": "failed",
-                                "error": str(e),
-                            }
-
-                    return results
-
-                # Execute job with batch processing
-                results = await job_service.execute_job(
-                    job_id=job["job_id"],
-                    executor=execute_dns_ntp_batch,
-                    executor_context={"changes": plan["changes"]},
-                    batch_size=batch_size,
-                    batch_pause_seconds=batch_pause_seconds,
-                )
-
-                # Update plan status
-                if results.get("status") == "failed":
-                    await plan_service.update_plan_status(plan_id, "failed")
-                else:
-                    await plan_service.update_plan_status(plan_id, "completed")
-
-                success_count = sum(
-                    1
-                    for r in results.get("device_results", {}).values()
-                    if r.get("status") == "success"
-                )
+                # Calculate estimated duration: ~1 minute per device in batches
+                # With batch_size=5 and 30s pause between batches
+                device_count = len(plan["device_ids"])
+                batch_size = plan.get("batch_size", 5)
+                batch_count = (device_count + batch_size - 1) // batch_size
+                # Estimate: 60s per batch + 30s pause between batches
+                estimated_minutes = max(1, int((batch_count * 90) / 60))
 
                 return format_tool_result(
-                    content=f"""DNS/NTP rollout completed.
+                    content=f"""DNS/NTP rollout job created successfully.
 
 Plan ID: {plan_id}
 Job ID: {job['job_id']}
-Total Devices: {results['total_devices']}
-Successful: {success_count}
-Failed: {results['total_devices'] - success_count}
-Batches: {results['batches_completed']}/{results['batches_total']}
+Status: pending
+Devices: {device_count}
+Estimated Duration: ~{estimated_minutes} minutes
 
-Check device health with device/get-health for each device.
-View full execution log with plan://{plan_id}/execution-log resource.
+The job will execute in the background with staged rollout.
+Use job/get-status or query the Job model to track progress.
+View plan details with plan://{plan_id} resource.
 """,
                     meta={
-                        "plan_id": plan_id,
                         "job_id": job["job_id"],
-                        "status": results.get("status"),
-                        "results": results,
+                        "status": "pending",
+                        "estimated_duration_minutes": estimated_minutes,
+                        "plan_id": plan_id,
+                        "device_count": device_count,
+                        "batch_count": batch_count,
                     },
                 )
 
