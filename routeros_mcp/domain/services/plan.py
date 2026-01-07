@@ -1448,11 +1448,7 @@ class PlanService:
                     )
                     execution_results["batches_completed"] = batch_number
 
-                    # Update plan status to failed
-                    plan.status = PlanStatus.FAILED.value
-                    await self.session.commit()
-
-                    # Trigger rollback if enabled
+                    # Trigger rollback if enabled (before setting plan to FAILED)
                     if plan.rollback_on_failure:
                         logger.info(
                             f"Triggering rollback for plan {plan_id}",
@@ -1479,6 +1475,10 @@ class PlanService:
                                 extra={"plan_id": plan_id},
                             )
                             execution_results["rollback_error"] = str(rollback_error)
+                    else:
+                        # Update plan status to failed (only if not rolling back)
+                        plan.status = PlanStatus.FAILED.value
+                        await self.session.commit()
 
                     # Log audit event for halted execution
                     self._log_audit_event(

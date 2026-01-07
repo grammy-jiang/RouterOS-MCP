@@ -122,7 +122,7 @@ async def test_staged_rollout_healthy(
     mock_dns_ntp_service.update_ntp_servers = AsyncMock()
 
     # Mock health service to return healthy results
-    with patch("routeros_mcp.domain.services.plan.HealthService") as MockHealthService:
+    with patch("routeros_mcp.domain.services.health.HealthService") as MockHealthService:
         mock_health_service = MagicMock()
 
         async def mock_run_batch_health_checks(device_ids, cpu_threshold, memory_threshold):
@@ -210,7 +210,7 @@ async def test_staged_rollout_degraded_halt(
     mock_dns_ntp_service.update_dns_servers = AsyncMock()
 
     # Mock health service to return degraded result for second device in first batch
-    with patch("routeros_mcp.domain.services.plan.HealthService") as MockHealthService:
+    with patch("routeros_mcp.domain.services.health.HealthService") as MockHealthService:
         mock_health_service = MagicMock()
 
         async def mock_run_batch_health_checks(device_ids, cpu_threshold, memory_threshold):
@@ -306,7 +306,7 @@ async def test_staged_rollout_with_rollback(
     mock_dns_ntp_service.update_dns_servers = AsyncMock()
 
     # Mock health service to return degraded result
-    with patch("routeros_mcp.domain.services.plan.HealthService") as MockHealthService:
+    with patch("routeros_mcp.domain.services.health.HealthService") as MockHealthService:
         mock_health_service = MagicMock()
 
         async def mock_run_batch_health_checks(device_ids, cpu_threshold, memory_threshold):
