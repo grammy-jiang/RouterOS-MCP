@@ -208,8 +208,8 @@ Per-device changes:
     ) -> dict[str, Any]:
         """Apply approved DNS/NTP rollout plan with background job tracking.
 
-        Professional-tier tool that creates a background job to execute an 
-        approved DNS/NTP rollout plan across devices in batches with health 
+        Professional-tier tool that creates a background job to execute an
+        approved DNS/NTP rollout plan across devices in batches with health
         checks between batches.
 
         Use when:
@@ -236,9 +236,8 @@ Per-device changes:
                 plan = await plan_service.get_plan(plan_id)
                 if plan["status"] != "approved":
                     await plan_service.approve_plan(plan_id, approval_token, approved_by)
-
-                # Refresh plan to get approved status
-                plan = await plan_service.get_plan(plan_id)
+                    # Refresh plan to get approved status
+                    plan = await plan_service.get_plan(plan_id)
 
                 # Create job for background execution
                 job = await job_service.create_job(
@@ -248,8 +247,8 @@ Per-device changes:
                     max_attempts=3,
                 )
 
-                # Calculate estimated duration: ~1 minute per device in batches
-                # With batch_size=5 and 30s pause between batches
+                # Calculate estimated duration: ~90 seconds per batch
+                # (60s execution + 30s pause between batches; default batch_size=5)
                 device_count = len(plan["device_ids"])
                 batch_size = plan.get("batch_size", 5)
                 batch_count = (device_count + batch_size - 1) // batch_size

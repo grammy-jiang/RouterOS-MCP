@@ -431,7 +431,7 @@ class TestMCPToolsConfig(unittest.TestCase):
                 # Verify job created but not executed
                 self.assertEqual(1, len(job_service.jobs_created))
                 self.assertEqual(0, len(job_service.executions))
-                
+
                 # Verify response has pending status
                 self.assertEqual("pending", result["_meta"]["status"])
                 self.assertIn("job_id", result["_meta"])
@@ -477,7 +477,7 @@ class TestMCPToolsConfig(unittest.TestCase):
 
                 # Verify plan was approved (approve_plan modifies plan status)
                 self.assertEqual("approved", plan_service.plan["status"])
-                
+
                 # Verify job created and status is pending
                 self.assertEqual(1, len(job_service.jobs_created))
                 self.assertEqual("pending", result["_meta"]["status"])
