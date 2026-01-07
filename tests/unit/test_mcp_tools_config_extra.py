@@ -73,6 +73,31 @@ class FakePlanService:
             **kwargs,
         }
 
+    async def create_multi_device_plan(self, **kwargs):
+        device_ids = kwargs.get("device_ids", ["d1", "d2"])
+        batch_size = kwargs.get("batch_size", 5)
+        
+        # Calculate batches
+        batches = []
+        for i in range(0, len(device_ids), batch_size):
+            batch_devices = device_ids[i:i + batch_size]
+            batches.append({
+                "batch_number": len(batches) + 1,
+                "device_ids": batch_devices,
+                "device_count": len(batch_devices),
+            })
+        
+        return {
+            "plan_id": "p1",
+            "approval_token": "tok",
+            "approval_expires_at": "never",
+            "batch_size": batch_size,
+            "batch_count": len(batches),
+            "batches": batches,
+            "device_ids": device_ids,
+            **kwargs,
+        }
+
     async def get_plan(self, plan_id):
         return {
             "plan_id": plan_id,
@@ -187,7 +212,7 @@ async def test_config_plan_apply_flow(tools, monkeypatch):
     apply_fn = tools_map["config_apply_dns_ntp_rollout"]
 
     plan = await plan_fn(
-        device_ids=["d1"], dns_servers=["8.8.8.8"], ntp_servers=["ntp"], created_by="tester"
+        device_ids=["d1", "d2"], dns_servers=["8.8.8.8"], ntp_servers=["ntp"], created_by="tester"
     )
     assert plan["_meta"]["plan_id"] == "p1"
 
