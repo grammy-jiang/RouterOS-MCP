@@ -148,15 +148,15 @@ class FakePlanService:
             "reason": reason,
             "triggered_by": triggered_by,
         })
-        
+
         # Check if plan can be rolled back
         if self.plan["status"] not in ["executing", "completed", "applied", "failed"]:
             raise ValueError(f"Plan {plan_id} cannot be rolled back (status: {self.plan['status']})")
-        
+
         # Extract device info from plan
         devices_config = self.plan["changes"].get("devices", [])
         device_count = len(devices_config) if devices_config else len(self.plan.get("device_ids", []))
-        
+
         # Simulate rollback results
         devices_results = {}
         for device_config in devices_config:
@@ -171,13 +171,13 @@ class FakePlanService:
                 devices_results[device_id] = {
                     "status": "rolled_back",
                 }
-        
+
         success_count = sum(1 for r in devices_results.values() if r["status"] == "rolled_back")
         failed_count = len(devices_results) - success_count
-        
+
         # Update plan status
         self.plan["status"] = "rolled_back"
-        
+
         return {
             "plan_id": plan_id,
             "rollback_enabled": True,
@@ -749,7 +749,7 @@ class TestMCPToolsConfig(unittest.TestCase):
                 self.assertEqual(1, len(plan_service.rollback_calls))
                 self.assertEqual(custom_reason, plan_service.rollback_calls[0]["reason"])
                 self.assertEqual("admin-user", plan_service.rollback_calls[0]["triggered_by"])
-                
+
                 # Verify reason is included in response
                 self.assertIn(custom_reason, result["content"][0]["text"])
                 self.assertEqual(custom_reason, result["_meta"]["reason"])

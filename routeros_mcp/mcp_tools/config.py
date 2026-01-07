@@ -127,9 +127,7 @@ def register_config_tools(mcp: FastMCP, settings: Settings) -> None:
                 # Assess risk level
                 risk_level = "medium"
                 prod_devices = [d for d in devices_config if d["environment"] == "prod"]
-                if prod_devices:
-                    risk_level = "high"
-                elif len(device_ids) > 10:
+                if prod_devices or len(device_ids) > 10:
                     risk_level = "high"
 
                 # Create plan using Phase 4 multi-device method
