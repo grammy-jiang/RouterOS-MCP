@@ -108,7 +108,7 @@ class FakePlanService:
         self.multi_device_created.append(kwargs)
         device_ids = kwargs.get("device_ids", ["d1", "d2"])
         batch_size = kwargs.get("batch_size", 5)
-        
+
         # Calculate batches
         batches = []
         for i in range(0, len(device_ids), batch_size):
@@ -118,7 +118,7 @@ class FakePlanService:
                 "device_ids": batch_devices,
                 "device_count": len(batch_devices),
             })
-        
+
         return {
             **self.plan,
             "batch_size": batch_size,
@@ -659,8 +659,8 @@ class TestMCPToolsConfig(unittest.TestCase):
         """Test that plan creation fails with less than 2 devices."""
         async def _run() -> None:
             fake_mcp = FakeMCP()
-            session_factory, *patchers = self._common_patches()
-            
+            _, *patchers = self._common_patches()
+
             with (
                 patchers[0],
                 patchers[1],
@@ -688,8 +688,8 @@ class TestMCPToolsConfig(unittest.TestCase):
         """Test that plan creation fails with more than 50 devices."""
         async def _run() -> None:
             fake_mcp = FakeMCP()
-            session_factory, *patchers = self._common_patches()
-            
+            _, *patchers = self._common_patches()
+
             with (
                 patchers[0],
                 patchers[1],
@@ -720,7 +720,7 @@ class TestMCPToolsConfig(unittest.TestCase):
             fake_mcp = FakeMCP()
             fake_session = FakeSession()
             session_factory = FakeSessionFactory(fake_session)
-            
+
             plan_service = FakePlanService(None)
 
             with (
@@ -743,7 +743,7 @@ class TestMCPToolsConfig(unittest.TestCase):
                 settings, tools = self._register_tools(fake_mcp)
                 plan_tool = tools["config_plan_dns_ntp_rollout"]
 
-                result = await plan_tool(
+                await plan_tool(
                     device_ids=["dev-1", "dev-2", "dev-3"],
                     dns_servers=["1.1.1.1"],
                     ntp_servers=["pool.ntp.org"],
@@ -766,7 +766,7 @@ class TestMCPToolsConfig(unittest.TestCase):
             fake_mcp = FakeMCP()
             fake_session = FakeSession()
             session_factory = FakeSessionFactory(fake_session)
-            
+
             plan_service = FakePlanService(None)
 
             with (
@@ -816,7 +816,7 @@ class TestMCPToolsConfig(unittest.TestCase):
             fake_mcp = FakeMCP()
             fake_session = FakeSession()
             session_factory = FakeSessionFactory(fake_session)
-            
+
             plan_service = FakePlanService(None)
 
             with (
@@ -850,7 +850,5 @@ class TestMCPToolsConfig(unittest.TestCase):
                 # Verify default batch_size=5 was used -> [5, 5, 2]
                 self.assertEqual(3, result["_meta"]["batch_count"])
                 self.assertEqual([5, 5, 2], result["_meta"]["devices_per_batch"])
-
-        asyncio.run(_run())
 
         asyncio.run(_run())

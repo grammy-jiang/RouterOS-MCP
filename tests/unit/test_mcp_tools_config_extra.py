@@ -76,7 +76,7 @@ class FakePlanService:
     async def create_multi_device_plan(self, **kwargs):
         device_ids = kwargs.get("device_ids", ["d1", "d2"])
         batch_size = kwargs.get("batch_size", 5)
-        
+
         # Calculate batches
         batches = []
         for i in range(0, len(device_ids), batch_size):
@@ -86,7 +86,7 @@ class FakePlanService:
                 "device_ids": batch_devices,
                 "device_count": len(batch_devices),
             })
-        
+
         return {
             "plan_id": "p1",
             "approval_token": "tok",
