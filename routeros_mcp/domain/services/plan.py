@@ -942,6 +942,7 @@ class PlanService:
             dns_ntp_service = DNSNTPService(self.session, self.settings)
 
             # Rollback each device
+            # Note: We batch status updates to reduce database commits
             for device_id in devices_to_rollback:
                 device_result = {
                     "device_id": device_id,
@@ -950,10 +951,8 @@ class PlanService:
                     "errors": [],
                 }
 
-                # Update device status in plan
+                # Update device status to rolling_back (will be committed in batch)
                 device_statuses[device_id] = "rolling_back"
-                plan.device_statuses = device_statuses
-                await self.session.commit()
 
                 # Get previous state for this device
                 device_previous_state = previous_state.get(device_id, {})
@@ -964,6 +963,7 @@ class PlanService:
                     )
                     device_result["status"] = "failed"
                     device_result["errors"].append("No previous state found")
+                    device_statuses[device_id] = "rollback_failed"
                     rollback_results["devices"][device_id] = device_result
                     rollback_results["summary"]["failed"] += 1
                     continue
@@ -1007,11 +1007,9 @@ class PlanService:
                                 dry_run=False,
                             )
 
-                        # Rollback succeeded
+                        # Rollback succeeded - update status (will be committed in batch)
                         device_result["status"] = "rolled_back"
                         device_statuses[device_id] = "rolled_back"
-                        plan.device_statuses = device_statuses
-                        await self.session.commit()
                         rollback_results["summary"]["success"] += 1
                         success = True
 
@@ -1037,8 +1035,6 @@ class PlanService:
                         if attempt >= max_retries:
                             device_result["status"] = "rollback_failed"
                             device_statuses[device_id] = "rollback_failed"
-                            plan.device_statuses = device_statuses
-                            await self.session.commit()
                             rollback_results["summary"]["failed"] += 1
 
                             logger.error(
@@ -1047,6 +1043,10 @@ class PlanService:
                             )
 
                 rollback_results["devices"][device_id] = device_result
+
+            # Commit all device status updates in a single transaction
+            plan.device_statuses = device_statuses
+            await self.session.commit()
 
             # Update plan status based on rollback results
             if rollback_results["summary"]["failed"] == 0:
@@ -1086,8 +1086,22 @@ class PlanService:
 
             return rollback_results
 
+        except ValueError as ve:
+            # Validation errors (e.g., plan not found, wrong state) - log but don't commit
+            logger.warning(
+                f"Rollback validation error for plan {plan_id}: {ve}",
+                extra={"plan_id": plan_id, "reason": reason},
+            )
+            # Don't log audit event for validation errors - they're expected failures
+            raise
         except Exception as e:
-            # Log failed rollback (best effort - don't mask original error)
+            # Unexpected system errors - log audit event for tracking
+            logger.error(
+                f"Unexpected error during rollback for plan {plan_id}: {e}",
+                exc_info=True,
+                extra={"plan_id": plan_id, "reason": reason},
+            )
+            # Log failed rollback audit event (best effort - don't mask original error)
             try:
                 self._log_audit_event(
                     action="PLAN_ROLLBACK_COMPLETED",
