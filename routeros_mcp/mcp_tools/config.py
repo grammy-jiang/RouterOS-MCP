@@ -298,7 +298,8 @@ View plan details with plan://{plan_id} resource.
         - Need to restore previous configuration with audit trail
 
         Args:
-            plan_id: Plan identifier to rollback (must be in 'executing', 'completed', or 'failed' state)
+            plan_id: Plan identifier to rollback (must currently be in 'executing' state;
+                plans in 'completed', 'failed', 'cancelled', or 'rolled_back' state cannot be rolled back)
             reason: Reason for manual rollback (required for audit trail)
             triggered_by: User identifier triggering the rollback (default: "system")
 
@@ -331,10 +332,10 @@ View plan details with plan://{plan_id} resource.
                 device_list = "\n".join(device_summaries) if device_summaries else "  (none)"
 
                 return format_tool_result(
-                    content=f"""Manual rollback initiated for plan {plan_id}.
+                    content=f"""Manual rollback completed for plan {plan_id}.
 
 Reason: {reason}
-Status: rolling_back
+Status: rolled_back
 Devices Affected: {total_devices}
 Successful: {success_count}
 Failed: {failed_count}
@@ -347,7 +348,7 @@ Verify connectivity and health for affected devices.
 """,
                     meta={
                         "plan_id": plan_id,
-                        "status": "rolling_back",
+                        "status": "rolled_back",
                         "devices_affected": total_devices,
                         "reason": reason,
                         "summary": summary,

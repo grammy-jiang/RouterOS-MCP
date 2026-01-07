@@ -149,9 +149,9 @@ class FakePlanService:
             "triggered_by": triggered_by,
         })
 
-        # Check if plan can be rolled back
-        if self.plan["status"] not in ["executing", "completed", "applied", "failed"]:
-            raise ValueError(f"Plan {plan_id} cannot be rolled back (status: {self.plan['status']})")
+        # Check if plan can be rolled back (must match PlanService behavior: only from 'executing')
+        if self.plan["status"] != "executing":
+            raise ValueError(f"Plan {plan_id} cannot be rolled back from status {self.plan['status']}")
 
         # Extract device info from plan
         devices_config = self.plan["changes"].get("devices", [])
@@ -614,10 +614,10 @@ class TestMCPToolsConfig(unittest.TestCase):
                 self.assertEqual("user", plan_service.rollback_calls[0]["triggered_by"])
 
                 # Verify response format
-                self.assertTrue(result["content"][0]["text"].startswith("Manual rollback initiated"))
+                self.assertTrue(result["content"][0]["text"].startswith("Manual rollback completed"))
                 self.assertIn("reason", result["content"][0]["text"].lower())
                 self.assertEqual("plan-xyz", result["_meta"]["plan_id"])
-                self.assertEqual("rolling_back", result["_meta"]["status"])
+                self.assertEqual("rolled_back", result["_meta"]["status"])
                 self.assertEqual(1, result["_meta"]["devices_affected"])
                 self.assertEqual("Manual rollback due to issues", result["_meta"]["reason"])
 
