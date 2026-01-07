@@ -1229,6 +1229,9 @@ class PlanService:
             # Update plan status to executing
             plan.status = PlanStatus.EXECUTING.value
 
+            # Get batches from plan metadata
+            batches = plan.changes.get("batches", [])
+
             # Log audit event for plan execution start
             self._log_audit_event(
                 action="PLAN_EXECUTION_STARTED",
@@ -1239,7 +1242,7 @@ class PlanService:
                 metadata={
                     "device_count": len(plan.device_ids),
                     "batch_size": plan.batch_size,
-                    "batch_count": len(plan.device_ids) // plan.batch_size + (1 if len(plan.device_ids) % plan.batch_size else 0),
+                    "batch_count": len(batches),
                 },
             )
             await self.session.commit()
@@ -1265,8 +1268,6 @@ class PlanService:
                 "halt_reason": None,
             }
 
-            # Get batches from plan metadata
-            batches = plan.changes.get("batches", [])
             execution_results["total_batches"] = len(batches)
 
             # Get change type and configuration
@@ -1276,7 +1277,8 @@ class PlanService:
             # Initialize device statuses
             device_statuses = plan.device_statuses or {}
             for device_id in plan.device_ids:
-                device_statuses[device_id] = "pending"
+                if device_id not in device_statuses:
+                    device_statuses[device_id] = "pending"
 
             # Save previous state for rollback
             previous_state = {}
@@ -1290,6 +1292,70 @@ class PlanService:
                     "change_type": change_type,
                 },
             )
+
+            # Define device application function outside the batch loop
+            async def apply_to_device(device_id: str) -> dict[str, Any]:
+                """Apply changes to a single device."""
+                device_result = {
+                    "device_id": device_id,
+                    "status": "applying",
+                    "errors": [],
+                }
+
+                try:
+                    # Capture previous state before applying changes
+                    if change_type == "dns_ntp":
+                        # Get current DNS/NTP configuration
+                        try:
+                            current_dns = await dns_ntp_service.get_dns_servers(device_id)
+                            current_ntp = await dns_ntp_service.get_ntp_status(device_id)
+                            previous_state[device_id] = {
+                                "dns_servers": current_dns.get("servers", []),
+                                "ntp_servers": current_ntp.get("servers", []),
+                                "ntp_enabled": current_ntp.get("enabled", True),
+                            }
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to capture previous state for device {device_id}: {e}",
+                                extra={"plan_id": plan_id, "device_id": device_id},
+                            )
+
+                        # Apply DNS/NTP changes
+                        if "dns_servers" in changes_config:
+                            await dns_ntp_service.update_dns_servers(
+                                device_id=device_id,
+                                dns_servers=changes_config["dns_servers"],
+                                dry_run=False,
+                            )
+                        if "ntp_servers" in changes_config:
+                            await dns_ntp_service.update_ntp_servers(
+                                device_id=device_id,
+                                ntp_servers=changes_config["ntp_servers"],
+                                enabled=changes_config.get("ntp_enabled", True),
+                                dry_run=False,
+                            )
+
+                    # Mark device as applied
+                    device_result["status"] = "applied"
+                    device_statuses[device_id] = "applied"
+
+                    logger.info(
+                        f"Successfully applied changes to device {device_id}",
+                        extra={"plan_id": plan_id, "device_id": device_id},
+                    )
+
+                except Exception as e:
+                    error_msg = f"Failed to apply changes: {str(e)}"
+                    device_result["errors"].append(error_msg)
+                    device_result["status"] = "failed"
+                    device_statuses[device_id] = "failed"
+
+                    logger.error(
+                        f"Failed to apply changes to device {device_id}: {e}",
+                        extra={"plan_id": plan_id, "device_id": device_id},
+                    )
+
+                return device_result
 
             # Process batches sequentially
             for batch_idx, batch in enumerate(batches):
@@ -1310,70 +1376,6 @@ class PlanService:
                     device_statuses[device_id] = "applying"
                 plan.device_statuses = device_statuses
                 await self.session.commit()
-
-                # Apply changes to batch devices in parallel
-                async def apply_to_device(device_id: str) -> dict[str, Any]:
-                    """Apply changes to a single device."""
-                    device_result = {
-                        "device_id": device_id,
-                        "status": "applying",
-                        "errors": [],
-                    }
-
-                    try:
-                        # Capture previous state before applying changes
-                        if change_type == "dns_ntp":
-                            # Get current DNS/NTP configuration
-                            try:
-                                current_dns = await dns_ntp_service.get_dns_servers(device_id)
-                                current_ntp = await dns_ntp_service.get_ntp_status(device_id)
-                                previous_state[device_id] = {
-                                    "dns_servers": current_dns.get("servers", []),
-                                    "ntp_servers": current_ntp.get("servers", []),
-                                    "ntp_enabled": current_ntp.get("enabled", True),
-                                }
-                            except Exception as e:
-                                logger.warning(
-                                    f"Failed to capture previous state for device {device_id}: {e}",
-                                    extra={"plan_id": plan_id, "device_id": device_id},
-                                )
-
-                            # Apply DNS/NTP changes
-                            if "dns_servers" in changes_config:
-                                await dns_ntp_service.update_dns_servers(
-                                    device_id=device_id,
-                                    dns_servers=changes_config["dns_servers"],
-                                    dry_run=False,
-                                )
-                            if "ntp_servers" in changes_config:
-                                await dns_ntp_service.update_ntp_servers(
-                                    device_id=device_id,
-                                    ntp_servers=changes_config["ntp_servers"],
-                                    enabled=changes_config.get("ntp_enabled", True),
-                                    dry_run=False,
-                                )
-
-                        # Mark device as applied
-                        device_result["status"] = "applied"
-                        device_statuses[device_id] = "applied"
-
-                        logger.info(
-                            f"Successfully applied changes to device {device_id}",
-                            extra={"plan_id": plan_id, "device_id": device_id},
-                        )
-
-                    except Exception as e:
-                        error_msg = f"Failed to apply changes: {str(e)}"
-                        device_result["errors"].append(error_msg)
-                        device_result["status"] = "failed"
-                        device_statuses[device_id] = "failed"
-
-                        logger.error(
-                            f"Failed to apply changes to device {device_id}: {e}",
-                            extra={"plan_id": plan_id, "device_id": device_id},
-                        )
-
-                    return device_result
 
                 # Apply to all devices in batch in parallel
                 apply_tasks = [apply_to_device(device_id) for device_id in batch_device_ids]
@@ -1475,6 +1477,9 @@ class PlanService:
                                 extra={"plan_id": plan_id},
                             )
                             execution_results["rollback_error"] = str(rollback_error)
+                            # Ensure plan does not remain in EXECUTING state if rollback fails
+                            plan.status = PlanStatus.FAILED.value
+                            await self.session.commit()
                     else:
                         # Update plan status to failed (only if not rolling back)
                         plan.status = PlanStatus.FAILED.value
@@ -1569,7 +1574,7 @@ class PlanService:
                 if plan:
                     plan.status = PlanStatus.FAILED.value
                     self._log_audit_event(
-                        action="PLAN_EXECUTION_COMPLETED",
+                        action="PLAN_EXECUTION_FAILED",
                         user_sub=applied_by,
                         plan_id=plan_id,
                         tool_name=plan.tool_name,

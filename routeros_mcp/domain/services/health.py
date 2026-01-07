@@ -261,6 +261,12 @@ class HealthService:
             Dict mapping device_id to HealthCheckResult
 
         Note:
+            The health checks are run using run_health_check() which persists
+            results with default thresholds to the database. The custom thresholds
+            are then applied in-memory for rollout decision making. This approach
+            ensures the database contains the raw health data while allowing
+            flexible threshold evaluation for staged rollout purposes.
+            
             Timeouts and connection failures are treated as "unreachable" status,
             which is considered degraded for rollout purposes (fail-safe).
         """
@@ -289,8 +295,9 @@ class HealthService:
                 # Apply custom thresholds for staged rollout
                 # Re-evaluate status based on provided thresholds
                 status = result.status
-                issues = list(result.issues) if result.issues else []
-                warnings = list(result.warnings) if result.warnings else []
+                # Start with empty lists to avoid duplicating existing threshold messages
+                issues = []
+                warnings = []
 
                 # Check CPU threshold
                 if result.cpu_usage_percent is not None:
@@ -307,6 +314,11 @@ class HealthService:
                         issues.append(
                             f"Memory usage above threshold: {result.memory_usage_percent:.1f}% >= {memory_threshold}%"
                         )
+
+                # If no custom threshold violations, use original issues/warnings
+                if not issues:
+                    issues = list(result.issues) if result.issues else []
+                    warnings = list(result.warnings) if result.warnings else []
 
                 # Create updated result with custom thresholds applied
                 health_results[device_id] = HealthCheckResult(

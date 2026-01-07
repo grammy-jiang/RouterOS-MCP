@@ -3,12 +3,11 @@
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from routeros_mcp.domain.models import PlanStatus
 from routeros_mcp.domain.services.plan import PlanService
-from routeros_mcp.infra.db.models import Base, Device, Plan as PlanModel
+from routeros_mcp.infra.db.models import Base, Device
 
 
 @pytest.fixture
