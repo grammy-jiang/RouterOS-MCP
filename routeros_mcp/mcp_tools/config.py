@@ -39,30 +39,39 @@ def register_config_tools(mcp: FastMCP, settings: Settings) -> None:
         device_ids: list[str],
         dns_servers: list[str] | None = None,
         ntp_servers: list[str] | None = None,
+        batch_size: int = 5,
         created_by: str = "system",
     ) -> dict[str, Any]:
         """Plan DNS/NTP configuration changes across multiple devices.
 
         Professional-tier tool that creates an immutable plan for DNS/NTP
         changes across multiple devices with validation and risk assessment.
+        Uses Phase 4 multi-device batched execution pattern.
 
         Use when:
-        - Rolling out DNS/NTP configuration to multiple devices
+        - Rolling out DNS/NTP configuration to multiple devices (2-50)
         - Testing configuration changes before applying
         - Need approval workflow for production changes
-        - Want detailed preview of changes per device
+        - Want detailed preview of changes per device with batching
 
         Args:
-            device_ids: List of device identifiers to target
-            dns_servers: List of DNS server IPs (optional)
-            ntp_servers: List of NTP server addresses (optional)
+            device_ids: List of device identifiers to target (2-50 devices)
+            dns_servers: List of DNS server IPs (optional, max 3)
+            ntp_servers: List of NTP server addresses (optional, max 4)
+            batch_size: Number of devices per batch (default: 5)
             created_by: User identifier (for audit trail)
 
         Returns:
-            Plan details including plan_id and approval_token
+            Plan details including plan_id, approval_token, and batch summary
         """
         try:
             async with session_factory.session() as session:
+                # Validate device count for multi-device plan (2-50)
+                if len(device_ids) < 2:
+                    raise ValueError("Multi-device plans require at least 2 devices")
+                if len(device_ids) > 50:
+                    raise ValueError("Multi-device plans support maximum 50 devices")
+
                 # Validate inputs
                 if not dns_servers and not ntp_servers:
                     raise ValueError("At least one of dns_servers or ntp_servers must be specified")
@@ -123,7 +132,7 @@ def register_config_tools(mcp: FastMCP, settings: Settings) -> None:
                 elif len(device_ids) > 10:
                     risk_level = "high"
 
-                # Create plan
+                # Create plan using Phase 4 multi-device method
                 changes = {
                     "dns_servers": dns_servers,
                     "ntp_servers": ntp_servers,
@@ -136,14 +145,20 @@ def register_config_tools(mcp: FastMCP, settings: Settings) -> None:
                 if ntp_servers:
                     summary += f" (NTP: {', '.join(ntp_servers)})"
 
-                plan = await plan_service.create_plan(
+                plan = await plan_service.create_multi_device_plan(
                     tool_name="config/plan-dns-ntp-rollout",
                     created_by=created_by,
                     device_ids=device_ids,
                     summary=summary,
                     changes=changes,
+                    change_type="dns_ntp",
                     risk_level=risk_level,
+                    batch_size=batch_size,
                 )
+
+                # Extract batch information
+                batches = plan.get("batches", [])
+                devices_per_batch = [batch["device_count"] for batch in batches]
 
                 # Build device list
                 device_list = "\n".join(
@@ -156,6 +171,8 @@ def register_config_tools(mcp: FastMCP, settings: Settings) -> None:
 Plan ID: {plan['plan_id']}
 Risk Level: {risk_level.upper()}
 Devices: {len(device_ids)}
+Batch Count: {plan['batch_count']}
+Devices per Batch: {devices_per_batch}
 Status: Ready for approval
 
 To apply this plan, use config/apply-dns-ntp-rollout with:
@@ -173,6 +190,8 @@ Per-device changes:
                         "approval_expires_at": plan["approval_expires_at"],
                         "risk_level": risk_level,
                         "device_count": len(device_ids),
+                        "batch_count": plan["batch_count"],
+                        "devices_per_batch": devices_per_batch,
                         "devices": devices_config,
                     },
                 )

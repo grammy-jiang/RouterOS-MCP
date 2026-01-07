@@ -85,6 +85,7 @@ class FakePlanService:
     def __init__(self, session):  # noqa: D401, ANN001
         self.session = session
         self.created: list[dict] = []
+        self.multi_device_created: list[dict] = []
         self.status_updates: list[tuple[str, str]] = []
         self.plan = {
             "plan_id": "plan-123",
@@ -102,6 +103,29 @@ class FakePlanService:
     async def create_plan(self, **kwargs):
         self.created.append(kwargs)
         return self.plan
+
+    async def create_multi_device_plan(self, **kwargs):
+        self.multi_device_created.append(kwargs)
+        device_ids = kwargs.get("device_ids", ["d1", "d2"])
+        batch_size = kwargs.get("batch_size", 5)
+        
+        # Calculate batches
+        batches = []
+        for i in range(0, len(device_ids), batch_size):
+            batch_devices = device_ids[i:i + batch_size]
+            batches.append({
+                "batch_number": len(batches) + 1,
+                "device_ids": batch_devices,
+                "device_count": len(batch_devices),
+            })
+        
+        return {
+            **self.plan,
+            "batch_size": batch_size,
+            "batch_count": len(batches),
+            "batches": batches,
+            "device_ids": device_ids,
+        }
 
     async def get_plan(self, plan_id: str):  # noqa: ANN001
         self.plan["plan_id"] = plan_id
@@ -219,16 +243,16 @@ class TestMCPToolsConfig(unittest.TestCase):
                 plan_tool = tools["config_plan_dns_ntp_rollout"]
 
                 with self.assertRaises(MappedError):
-                    await plan_tool(device_ids=["d1"], dns_servers=None, ntp_servers=None)
+                    await plan_tool(device_ids=["d1", "d2"], dns_servers=None, ntp_servers=None)
 
                 with self.assertRaises(MappedError):
                     await plan_tool(
-                        device_ids=["d1"], dns_servers=["1", "2", "3", "4"], ntp_servers=None
+                        device_ids=["d1", "d2"], dns_servers=["1", "2", "3", "4"], ntp_servers=None
                     )
 
                 with self.assertRaises(MappedError):
                     await plan_tool(
-                        device_ids=["d1"],
+                        device_ids=["d1", "d2"],
                         dns_servers=None,
                         ntp_servers=["1", "2", "3", "4", "5"],
                     )
@@ -257,7 +281,7 @@ class TestMCPToolsConfig(unittest.TestCase):
                 plan_tool = tools["config_plan_dns_ntp_rollout"]
 
                 with self.assertRaises(MappedError):
-                    await plan_tool(device_ids=["d1"], dns_servers=["1.1.1.1"], ntp_servers=None)
+                    await plan_tool(device_ids=["d1", "d2"], dns_servers=["1.1.1.1"], ntp_servers=None)
 
         asyncio.run(_run())
 
@@ -359,7 +383,7 @@ class TestMCPToolsConfig(unittest.TestCase):
                 plan_tool = tools["config_plan_dns_ntp_rollout"]
 
                 result = await plan_tool(
-                    device_ids=["d1"],
+                    device_ids=["d1", "d2"],
                     dns_servers=["1.1.1.1"],
                     ntp_servers=None,
                 )
@@ -630,5 +654,203 @@ class TestMCPToolsConfig(unittest.TestCase):
                     result["_meta"]["devices"]["dev-1"]["status"],
                 )
                 self.assertEqual(("plan-err", "cancelled"), plan_service.status_updates[-1])
+
+    def test_plan_dns_ntp_rollout_validates_device_count_minimum(self) -> None:
+        """Test that plan creation fails with less than 2 devices."""
+        async def _run() -> None:
+            fake_mcp = FakeMCP()
+            session_factory, *patchers = self._common_patches()
+            
+            with (
+                patchers[0],
+                patchers[1],
+                patchers[2],
+                patchers[3],
+                patchers[4],
+                patchers[5],
+                patchers[6],
+            ):
+                settings, tools = self._register_tools(fake_mcp)
+                plan_tool = tools["config_plan_dns_ntp_rollout"]
+
+                # Should fail with only 1 device
+                with self.assertRaises(MappedError) as ctx:
+                    await plan_tool(
+                        device_ids=["d1"],
+                        dns_servers=["1.1.1.1"],
+                        ntp_servers=None,
+                    )
+                self.assertIn("at least 2 devices", str(ctx.exception).lower())
+
+        asyncio.run(_run())
+
+    def test_plan_dns_ntp_rollout_validates_device_count_maximum(self) -> None:
+        """Test that plan creation fails with more than 50 devices."""
+        async def _run() -> None:
+            fake_mcp = FakeMCP()
+            session_factory, *patchers = self._common_patches()
+            
+            with (
+                patchers[0],
+                patchers[1],
+                patchers[2],
+                patchers[3],
+                patchers[4],
+                patchers[5],
+                patchers[6],
+            ):
+                settings, tools = self._register_tools(fake_mcp)
+                plan_tool = tools["config_plan_dns_ntp_rollout"]
+
+                # Should fail with 51 devices
+                device_ids = [f"dev-{i}" for i in range(51)]
+                with self.assertRaises(MappedError) as ctx:
+                    await plan_tool(
+                        device_ids=device_ids,
+                        dns_servers=["1.1.1.1"],
+                        ntp_servers=None,
+                    )
+                self.assertIn("maximum 50 devices", str(ctx.exception).lower())
+
+        asyncio.run(_run())
+
+    def test_plan_dns_ntp_rollout_uses_multi_device_plan(self) -> None:
+        """Test that plan creation uses create_multi_device_plan with batch_size."""
+        async def _run() -> None:
+            fake_mcp = FakeMCP()
+            fake_session = FakeSession()
+            session_factory = FakeSessionFactory(fake_session)
+            
+            plan_service = FakePlanService(None)
+
+            with (
+                patch.object(
+                    config_module,
+                    "get_session_factory",
+                    lambda *_args, **_kwargs: session_factory,
+                ),
+                patch.object(config_module, "DeviceService", FakeDeviceService),
+                patch.object(config_module, "DNSNTPService", FakeDNSNTPService),
+                patch.object(config_module, "PlanService", lambda s: plan_service),
+                patch.object(config_module, "JobService", FakeJobService),
+                patch.object(config_module, "HealthService", FakeHealthService),
+                patch.object(
+                    config_module,
+                    "map_exception_to_error",
+                    lambda e: MappedError(str(e)),
+                ),
+            ):
+                settings, tools = self._register_tools(fake_mcp)
+                plan_tool = tools["config_plan_dns_ntp_rollout"]
+
+                result = await plan_tool(
+                    device_ids=["dev-1", "dev-2", "dev-3"],
+                    dns_servers=["1.1.1.1"],
+                    ntp_servers=["pool.ntp.org"],
+                    batch_size=2,
+                )
+
+                # Verify create_multi_device_plan was called
+                self.assertEqual(1, len(plan_service.multi_device_created))
+                plan_call = plan_service.multi_device_created[0]
+                self.assertEqual("config/plan-dns-ntp-rollout", plan_call["tool_name"])
+                self.assertEqual(["dev-1", "dev-2", "dev-3"], plan_call["device_ids"])
+                self.assertEqual("dns_ntp", plan_call["change_type"])
+                self.assertEqual(2, plan_call["batch_size"])
+
+        asyncio.run(_run())
+
+    def test_plan_dns_ntp_rollout_returns_batch_information(self) -> None:
+        """Test that plan result includes batch_count and devices_per_batch."""
+        async def _run() -> None:
+            fake_mcp = FakeMCP()
+            fake_session = FakeSession()
+            session_factory = FakeSessionFactory(fake_session)
+            
+            plan_service = FakePlanService(None)
+
+            with (
+                patch.object(
+                    config_module,
+                    "get_session_factory",
+                    lambda *_args, **_kwargs: session_factory,
+                ),
+                patch.object(config_module, "DeviceService", FakeDeviceService),
+                patch.object(config_module, "DNSNTPService", FakeDNSNTPService),
+                patch.object(config_module, "PlanService", lambda s: plan_service),
+                patch.object(config_module, "JobService", FakeJobService),
+                patch.object(config_module, "HealthService", FakeHealthService),
+                patch.object(
+                    config_module,
+                    "map_exception_to_error",
+                    lambda e: MappedError(str(e)),
+                ),
+            ):
+                settings, tools = self._register_tools(fake_mcp)
+                plan_tool = tools["config_plan_dns_ntp_rollout"]
+
+                # Test with 7 devices, batch_size=3 -> [3, 3, 1]
+                device_ids = [f"dev-{i}" for i in range(7)]
+                result = await plan_tool(
+                    device_ids=device_ids,
+                    dns_servers=["1.1.1.1"],
+                    ntp_servers=None,
+                    batch_size=3,
+                )
+
+                # Verify batch information in metadata
+                self.assertIn("batch_count", result["_meta"])
+                self.assertIn("devices_per_batch", result["_meta"])
+                self.assertEqual(3, result["_meta"]["batch_count"])
+                self.assertEqual([3, 3, 1], result["_meta"]["devices_per_batch"])
+
+                # Verify it's in the content too
+                self.assertIn("Batch Count: 3", result["content"][0]["text"])
+                self.assertIn("[3, 3, 1]", result["content"][0]["text"])
+
+        asyncio.run(_run())
+
+    def test_plan_dns_ntp_rollout_default_batch_size(self) -> None:
+        """Test that plan creation uses default batch_size of 5."""
+        async def _run() -> None:
+            fake_mcp = FakeMCP()
+            fake_session = FakeSession()
+            session_factory = FakeSessionFactory(fake_session)
+            
+            plan_service = FakePlanService(None)
+
+            with (
+                patch.object(
+                    config_module,
+                    "get_session_factory",
+                    lambda *_args, **_kwargs: session_factory,
+                ),
+                patch.object(config_module, "DeviceService", FakeDeviceService),
+                patch.object(config_module, "DNSNTPService", FakeDNSNTPService),
+                patch.object(config_module, "PlanService", lambda s: plan_service),
+                patch.object(config_module, "JobService", FakeJobService),
+                patch.object(config_module, "HealthService", FakeHealthService),
+                patch.object(
+                    config_module,
+                    "map_exception_to_error",
+                    lambda e: MappedError(str(e)),
+                ),
+            ):
+                settings, tools = self._register_tools(fake_mcp)
+                plan_tool = tools["config_plan_dns_ntp_rollout"]
+
+                # Don't specify batch_size - should default to 5
+                device_ids = [f"dev-{i}" for i in range(12)]
+                result = await plan_tool(
+                    device_ids=device_ids,
+                    dns_servers=["1.1.1.1"],
+                    ntp_servers=None,
+                )
+
+                # Verify default batch_size=5 was used -> [5, 5, 2]
+                self.assertEqual(3, result["_meta"]["batch_count"])
+                self.assertEqual([5, 5, 2], result["_meta"]["devices_per_batch"])
+
+        asyncio.run(_run())
 
         asyncio.run(_run())
