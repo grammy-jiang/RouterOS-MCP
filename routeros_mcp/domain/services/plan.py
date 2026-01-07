@@ -1168,6 +1168,423 @@ class PlanService:
                 logger.warning(f"Failed to log audit event for rollback failure: {audit_error}")
             raise
 
+    async def apply_multi_device_plan(
+        self,
+        plan_id: str,
+        approval_token: str,
+        applied_by: str = "system",
+        dns_ntp_service: Any | None = None,
+    ) -> dict[str, Any]:
+        """Apply a multi-device plan with staged rollout and health checks.
+
+        This method implements Phase 4 staged rollout:
+        1. Divides devices into batches based on plan.batch_size
+        2. Applies changes to batch devices in parallel
+        3. Runs health checks after each batch completes
+        4. Halts rollout if devices are degraded (CPU ≥80%, memory ≥85%)
+        5. Triggers rollback if rollback_on_failure=true
+
+        Args:
+            plan_id: Plan identifier
+            approval_token: Approval token from plan creation
+            applied_by: User sub who is applying (default: "system")
+            dns_ntp_service: Optional DNS/NTP service instance (for dependency injection)
+
+        Returns:
+            Application results with per-device status and batch execution summary
+
+        Raises:
+            ValueError: If plan not found, not approved, or validation fails
+        """
+        import asyncio
+        from routeros_mcp.domain.services.dns_ntp import DNSNTPService
+        from routeros_mcp.domain.services.health import HealthService
+
+        try:
+            # Get plan
+            stmt = select(PlanModel).where(PlanModel.id == plan_id)
+            result = await self.session.execute(stmt)
+            plan = result.scalar_one_or_none()
+
+            if not plan:
+                raise ValueError(f"Plan not found: {plan_id}")
+
+            # Validate plan is approved
+            if plan.status != PlanStatus.APPROVED.value:
+                raise ValueError(
+                    f"Plan must be approved before applying. Current status: {plan.status}"
+                )
+
+            # Validate approval token
+            expires_at_str = plan.changes.get("approval_expires_at")
+            token_timestamp = plan.changes.get("approval_token_timestamp")
+            if not expires_at_str or not token_timestamp:
+                raise ValueError("Invalid approval token metadata")
+
+            expires_at = datetime.fromisoformat(expires_at_str)
+            self._validate_approval_token(
+                plan_id, plan.created_by, approval_token, expires_at, token_timestamp
+            )
+
+            # Update plan status to executing
+            plan.status = PlanStatus.EXECUTING.value
+
+            # Log audit event for plan execution start
+            self._log_audit_event(
+                action="PLAN_EXECUTION_STARTED",
+                user_sub=applied_by,
+                plan_id=plan_id,
+                tool_name=plan.tool_name,
+                result="SUCCESS",
+                metadata={
+                    "device_count": len(plan.device_ids),
+                    "batch_size": plan.batch_size,
+                    "batch_count": len(plan.device_ids) // plan.batch_size + (1 if len(plan.device_ids) % plan.batch_size else 0),
+                },
+            )
+            await self.session.commit()
+
+            # Initialize services
+            if dns_ntp_service is None:
+                dns_ntp_service = DNSNTPService(self.session, self.settings)
+            health_service = HealthService(self.session, self.settings)
+
+            # Initialize execution results
+            execution_results: dict[str, Any] = {
+                "plan_id": plan_id,
+                "status": "executing",
+                "batches_completed": 0,
+                "total_batches": 0,
+                "devices": {},
+                "summary": {
+                    "total": len(plan.device_ids),
+                    "applied": 0,
+                    "failed": 0,
+                    "rolled_back": 0,
+                },
+                "halt_reason": None,
+            }
+
+            # Get batches from plan metadata
+            batches = plan.changes.get("batches", [])
+            execution_results["total_batches"] = len(batches)
+
+            # Get change type and configuration
+            change_type = plan.changes.get("change_type", "unknown")
+            changes_config = plan.changes.copy()
+
+            # Initialize device statuses
+            device_statuses = plan.device_statuses or {}
+            for device_id in plan.device_ids:
+                device_statuses[device_id] = "pending"
+
+            # Save previous state for rollback
+            previous_state = {}
+
+            logger.info(
+                f"Starting staged rollout for plan {plan_id}",
+                extra={
+                    "plan_id": plan_id,
+                    "batch_count": len(batches),
+                    "device_count": len(plan.device_ids),
+                    "change_type": change_type,
+                },
+            )
+
+            # Process batches sequentially
+            for batch_idx, batch in enumerate(batches):
+                batch_number = batch["batch_number"]
+                batch_device_ids = batch["device_ids"]
+
+                logger.info(
+                    f"Processing batch {batch_number}/{len(batches)}",
+                    extra={
+                        "plan_id": plan_id,
+                        "batch_number": batch_number,
+                        "device_count": len(batch_device_ids),
+                    },
+                )
+
+                # Update device statuses to "applying" for this batch
+                for device_id in batch_device_ids:
+                    device_statuses[device_id] = "applying"
+                plan.device_statuses = device_statuses
+                await self.session.commit()
+
+                # Apply changes to batch devices in parallel
+                async def apply_to_device(device_id: str) -> dict[str, Any]:
+                    """Apply changes to a single device."""
+                    device_result = {
+                        "device_id": device_id,
+                        "status": "applying",
+                        "errors": [],
+                    }
+
+                    try:
+                        # Capture previous state before applying changes
+                        if change_type == "dns_ntp":
+                            # Get current DNS/NTP configuration
+                            try:
+                                current_dns = await dns_ntp_service.get_dns_servers(device_id)
+                                current_ntp = await dns_ntp_service.get_ntp_status(device_id)
+                                previous_state[device_id] = {
+                                    "dns_servers": current_dns.get("servers", []),
+                                    "ntp_servers": current_ntp.get("servers", []),
+                                    "ntp_enabled": current_ntp.get("enabled", True),
+                                }
+                            except Exception as e:
+                                logger.warning(
+                                    f"Failed to capture previous state for device {device_id}: {e}",
+                                    extra={"plan_id": plan_id, "device_id": device_id},
+                                )
+
+                            # Apply DNS/NTP changes
+                            if "dns_servers" in changes_config:
+                                await dns_ntp_service.update_dns_servers(
+                                    device_id=device_id,
+                                    dns_servers=changes_config["dns_servers"],
+                                    dry_run=False,
+                                )
+                            if "ntp_servers" in changes_config:
+                                await dns_ntp_service.update_ntp_servers(
+                                    device_id=device_id,
+                                    ntp_servers=changes_config["ntp_servers"],
+                                    enabled=changes_config.get("ntp_enabled", True),
+                                    dry_run=False,
+                                )
+
+                        # Mark device as applied
+                        device_result["status"] = "applied"
+                        device_statuses[device_id] = "applied"
+
+                        logger.info(
+                            f"Successfully applied changes to device {device_id}",
+                            extra={"plan_id": plan_id, "device_id": device_id},
+                        )
+
+                    except Exception as e:
+                        error_msg = f"Failed to apply changes: {str(e)}"
+                        device_result["errors"].append(error_msg)
+                        device_result["status"] = "failed"
+                        device_statuses[device_id] = "failed"
+
+                        logger.error(
+                            f"Failed to apply changes to device {device_id}: {e}",
+                            extra={"plan_id": plan_id, "device_id": device_id},
+                        )
+
+                    return device_result
+
+                # Apply to all devices in batch in parallel
+                apply_tasks = [apply_to_device(device_id) for device_id in batch_device_ids]
+                batch_results = await asyncio.gather(*apply_tasks, return_exceptions=False)
+
+                # Update execution results with batch results
+                for device_result in batch_results:
+                    device_id = device_result["device_id"]
+                    execution_results["devices"][device_id] = device_result
+
+                    if device_result["status"] == "applied":
+                        execution_results["summary"]["applied"] += 1
+                    elif device_result["status"] == "failed":
+                        execution_results["summary"]["failed"] += 1
+
+                # Save device statuses and previous state to plan
+                plan.device_statuses = device_statuses
+                plan.changes["previous_state"] = previous_state
+                await self.session.commit()
+
+                # Check if any devices failed in this batch
+                failed_devices = [
+                    device_id
+                    for device_id in batch_device_ids
+                    if device_statuses[device_id] == "failed"
+                ]
+
+                if failed_devices:
+                    logger.warning(
+                        f"Batch {batch_number} had {len(failed_devices)} failed devices",
+                        extra={
+                            "plan_id": plan_id,
+                            "batch_number": batch_number,
+                            "failed_devices": failed_devices,
+                        },
+                    )
+                    # Continue to health checks even with failures
+
+                # Run health checks on batch devices
+                logger.info(
+                    f"Running health checks on batch {batch_number}",
+                    extra={"plan_id": plan_id, "batch_number": batch_number},
+                )
+
+                health_results = await health_service.run_batch_health_checks(
+                    device_ids=batch_device_ids,
+                    cpu_threshold=80.0,
+                    memory_threshold=85.0,
+                )
+
+                # Check for degraded or unreachable devices
+                degraded_devices = [
+                    device_id
+                    for device_id, health in health_results.items()
+                    if health.status in ["degraded", "unreachable"]
+                ]
+
+                if degraded_devices:
+                    # Health checks failed - halt rollout
+                    logger.error(
+                        f"Health checks failed for {len(degraded_devices)} devices in batch {batch_number}",
+                        extra={
+                            "plan_id": plan_id,
+                            "batch_number": batch_number,
+                            "degraded_devices": degraded_devices,
+                        },
+                    )
+
+                    execution_results["status"] = "halted"
+                    execution_results["halt_reason"] = (
+                        f"Health checks failed for devices: {', '.join(degraded_devices)}"
+                    )
+                    execution_results["batches_completed"] = batch_number
+
+                    # Update plan status to failed
+                    plan.status = PlanStatus.FAILED.value
+                    await self.session.commit()
+
+                    # Trigger rollback if enabled
+                    if plan.rollback_on_failure:
+                        logger.info(
+                            f"Triggering rollback for plan {plan_id}",
+                            extra={"plan_id": plan_id, "reason": "health_check_failed"},
+                        )
+
+                        try:
+                            rollback_results = await self.rollback_plan(
+                                plan_id=plan_id,
+                                reason="health_check_failed",
+                                triggered_by=applied_by,
+                                dns_ntp_service=dns_ntp_service,
+                            )
+
+                            # Update execution results with rollback info
+                            execution_results["rollback"] = rollback_results
+                            execution_results["summary"]["rolled_back"] = rollback_results[
+                                "summary"
+                            ]["success"]
+
+                        except Exception as rollback_error:
+                            logger.error(
+                                f"Rollback failed for plan {plan_id}: {rollback_error}",
+                                extra={"plan_id": plan_id},
+                            )
+                            execution_results["rollback_error"] = str(rollback_error)
+
+                    # Log audit event for halted execution
+                    self._log_audit_event(
+                        action="PLAN_EXECUTION_HALTED",
+                        user_sub=applied_by,
+                        plan_id=plan_id,
+                        tool_name=plan.tool_name,
+                        result="FAILURE",
+                        error_message=execution_results["halt_reason"],
+                        metadata={
+                            "batches_completed": batch_number,
+                            "degraded_devices": degraded_devices,
+                        },
+                    )
+                    await self.session.commit()
+
+                    return execution_results
+
+                # All devices healthy - mark batch as complete
+                execution_results["batches_completed"] = batch_number
+
+                logger.info(
+                    f"Batch {batch_number} completed successfully",
+                    extra={"plan_id": plan_id, "batch_number": batch_number},
+                )
+
+                # Pause between batches (except after last batch)
+                if batch_idx < len(batches) - 1:
+                    pause_seconds = plan.pause_seconds_between_batches
+                    if pause_seconds > 0:
+                        logger.info(
+                            f"Pausing {pause_seconds}s before next batch",
+                            extra={"plan_id": plan_id, "pause_seconds": pause_seconds},
+                        )
+                        await asyncio.sleep(pause_seconds)
+
+            # All batches completed successfully
+            execution_results["status"] = "completed"
+            plan.status = PlanStatus.COMPLETED.value
+
+            # Log audit event for successful completion
+            self._log_audit_event(
+                action="PLAN_EXECUTION_COMPLETED",
+                user_sub=applied_by,
+                plan_id=plan_id,
+                tool_name=plan.tool_name,
+                result="SUCCESS",
+                metadata={
+                    "batches_completed": len(batches),
+                    "devices_applied": execution_results["summary"]["applied"],
+                    "devices_failed": execution_results["summary"]["failed"],
+                },
+            )
+            await self.session.commit()
+
+            logger.info(
+                f"Plan {plan_id} executed successfully",
+                extra={
+                    "plan_id": plan_id,
+                    "batches_completed": len(batches),
+                    "devices_applied": execution_results["summary"]["applied"],
+                },
+            )
+
+            return execution_results
+
+        except ValueError as ve:
+            # Validation errors - log but don't commit
+            logger.warning(
+                f"Plan execution validation error: {ve}",
+                extra={"plan_id": plan_id},
+            )
+            raise
+        except Exception as e:
+            # Unexpected errors - try to update plan status
+            logger.error(
+                f"Unexpected error during plan execution: {e}",
+                exc_info=True,
+                extra={"plan_id": plan_id},
+            )
+
+            try:
+                # Try to mark plan as failed
+                stmt = select(PlanModel).where(PlanModel.id == plan_id)
+                result = await self.session.execute(stmt)
+                plan = result.scalar_one_or_none()
+
+                if plan:
+                    plan.status = PlanStatus.FAILED.value
+                    self._log_audit_event(
+                        action="PLAN_EXECUTION_COMPLETED",
+                        user_sub=applied_by,
+                        plan_id=plan_id,
+                        tool_name=plan.tool_name,
+                        result="FAILURE",
+                        error_message=str(e),
+                    )
+                    await self.session.commit()
+            except Exception as commit_error:
+                logger.warning(
+                    f"Failed to update plan status after error: {commit_error}",
+                    extra={"plan_id": plan_id},
+                )
+
+            raise
+
     async def list_plans(
         self,
         created_by: str | None = None,

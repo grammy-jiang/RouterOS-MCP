@@ -235,6 +235,94 @@ class HealthService:
             unreachable_count=unreachable_count,
         )
 
+    async def run_batch_health_checks(
+        self,
+        device_ids: list[str],
+        cpu_threshold: float = 80.0,
+        memory_threshold: float = 85.0,
+    ) -> dict[str, HealthCheckResult]:
+        """Run health checks on a batch of devices in parallel.
+
+        This method is used by staged rollout to check device health after
+        applying changes to a batch. Devices are checked in parallel for
+        efficiency.
+
+        Health criteria (Phase 4 staged rollout):
+        - CPU usage < cpu_threshold (default: 80%)
+        - Memory usage < memory_threshold (default: 85%)
+        - All critical interfaces up (TODO: Phase 4+)
+
+        Args:
+            device_ids: List of device IDs to check
+            cpu_threshold: CPU usage threshold percentage (default: 80.0)
+            memory_threshold: Memory usage threshold percentage (default: 85.0)
+
+        Returns:
+            Dict mapping device_id to HealthCheckResult
+
+        Note:
+            Timeouts and connection failures are treated as "unreachable" status,
+            which is considered degraded for rollout purposes (fail-safe).
+        """
+        import asyncio
+
+        # Run health checks in parallel
+        tasks = [self.run_health_check(device_id) for device_id in device_ids]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Build results dict, handling exceptions
+        health_results = {}
+        for device_id, result in zip(device_ids, results):
+            if isinstance(result, Exception):
+                # Treat exceptions as unreachable
+                logger.warning(
+                    "Health check failed for device",
+                    extra={"device_id": device_id, "error": str(result)},
+                )
+                health_results[device_id] = HealthCheckResult(
+                    device_id=device_id,
+                    status="unreachable",
+                    timestamp=datetime.now(UTC),
+                    issues=[f"Health check failed: {str(result)}"],
+                )
+            else:
+                # Apply custom thresholds for staged rollout
+                # Re-evaluate status based on provided thresholds
+                status = result.status
+                issues = list(result.issues) if result.issues else []
+                warnings = list(result.warnings) if result.warnings else []
+
+                # Check CPU threshold
+                if result.cpu_usage_percent is not None:
+                    if result.cpu_usage_percent >= cpu_threshold:
+                        status = "degraded"
+                        issues.append(
+                            f"CPU usage above threshold: {result.cpu_usage_percent:.1f}% >= {cpu_threshold}%"
+                        )
+
+                # Check memory threshold
+                if result.memory_usage_percent is not None:
+                    if result.memory_usage_percent >= memory_threshold:
+                        status = "degraded"
+                        issues.append(
+                            f"Memory usage above threshold: {result.memory_usage_percent:.1f}% >= {memory_threshold}%"
+                        )
+
+                # Create updated result with custom thresholds applied
+                health_results[device_id] = HealthCheckResult(
+                    device_id=device_id,
+                    status=cast(Literal["healthy", "degraded", "unreachable"], status),
+                    timestamp=result.timestamp,
+                    cpu_usage_percent=result.cpu_usage_percent,
+                    memory_usage_percent=result.memory_usage_percent,
+                    uptime_seconds=result.uptime_seconds,
+                    issues=issues,
+                    warnings=warnings,
+                    metadata=result.metadata,
+                )
+
+        return health_results
+
     async def _store_health_check(
         self,
         result: HealthCheckResult,
