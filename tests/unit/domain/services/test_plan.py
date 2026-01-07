@@ -915,15 +915,13 @@ class TestPlanRollback:
         plan_model.status = PlanStatus.EXECUTING.value
         await db_session.commit()
 
-        # Attempt rollback - should indicate rollback not enabled
-        rollback_result = await service.rollback_plan(
-            plan_id=plan["plan_id"],
-            reason="health_check_failed",
-            triggered_by="system",
-        )
-
-        assert rollback_result["rollback_enabled"] is False
-        assert "not enabled" in rollback_result["message"].lower()
+        # Attempt rollback - should raise ValueError since rollback not enabled
+        with pytest.raises(ValueError, match="Rollback not enabled"):
+            await service.rollback_plan(
+                plan_id=plan["plan_id"],
+                reason="health_check_failed",
+                triggered_by="system",
+            )
 
     @pytest.mark.asyncio
     async def test_rollback_only_applies_to_completed_batches(

@@ -839,6 +839,7 @@ class PlanService:
         reason: str,
         triggered_by: str = "system",
         max_retries: int = 3,
+        dns_ntp_service: Any | None = None,
     ) -> dict[str, Any]:
         """Rollback a plan that failed health checks.
 
@@ -850,6 +851,7 @@ class PlanService:
             reason: Reason for rollback (e.g., "health_check_failed")
             triggered_by: User or system that triggered rollback
             max_retries: Maximum rollback attempts per device (default: 3)
+            dns_ntp_service: Optional DNS/NTP service instance (for dependency injection)
 
         Returns:
             Rollback results including per-device status
@@ -869,15 +871,12 @@ class PlanService:
 
             # Check if rollback is enabled for this plan
             if not plan.rollback_on_failure:
+                message = f"Rollback not enabled for plan {plan_id}"
                 logger.warning(
-                    f"Rollback not enabled for plan {plan_id}",
+                    message,
                     extra={"plan_id": plan_id, "reason": reason},
                 )
-                return {
-                    "plan_id": plan_id,
-                    "rollback_enabled": False,
-                    "message": "Rollback not enabled for this plan",
-                }
+                raise ValueError(message)
 
             # Validate state transition
             current_status = PlanStatus(plan.status)
@@ -919,172 +918,218 @@ class PlanService:
                 },
             }
 
-            # Get devices that need rollback (only those in "applied" status)
-            device_statuses = plan.device_statuses or {}
-            devices_to_rollback = [
-                device_id
-                for device_id, status in device_statuses.items()
-                if status == "applied"
-            ]
+            try:
+                # Get devices that need rollback (only those in "applied" status)
+                device_statuses = plan.device_statuses or {}
+                devices_to_rollback = [
+                    device_id
+                    for device_id, status in device_statuses.items()
+                    if status == "applied"
+                ]
 
-            rollback_results["summary"]["total"] = len(devices_to_rollback)
+                rollback_results["summary"]["total"] = len(devices_to_rollback)
 
-            # Extract previous state from plan metadata
-            previous_state = plan.changes.get("previous_state", {})
-            if not previous_state:
-                logger.error(
-                    f"No previous state found in plan {plan_id} metadata",
-                    extra={"plan_id": plan_id},
-                )
-                raise ValueError(f"No previous state available for rollback: {plan_id}")
-
-            # Initialize DNS/NTP service for rollback operations
-            dns_ntp_service = DNSNTPService(self.session, self.settings)
-
-            # Rollback each device
-            # Note: We batch status updates to reduce database commits
-            for device_id in devices_to_rollback:
-                device_result = {
-                    "device_id": device_id,
-                    "status": "rolling_back",
-                    "attempts": 0,
-                    "errors": [],
-                }
-
-                # Update device status to rolling_back (will be committed in batch)
-                device_statuses[device_id] = "rolling_back"
-
-                # Get previous state for this device
-                device_previous_state = previous_state.get(device_id, {})
-                if not device_previous_state:
-                    logger.warning(
-                        f"No previous state for device {device_id} in plan {plan_id}",
-                        extra={"plan_id": plan_id, "device_id": device_id},
+                # Extract previous state from plan metadata
+                previous_state = plan.changes.get("previous_state", {})
+                if not previous_state:
+                    logger.error(
+                        f"No previous state found in plan {plan_id} metadata",
+                        extra={"plan_id": plan_id},
                     )
-                    device_result["status"] = "failed"
-                    device_result["errors"].append("No previous state found")
-                    device_statuses[device_id] = "rollback_failed"
-                    rollback_results["devices"][device_id] = device_result
-                    rollback_results["summary"]["failed"] += 1
-                    continue
+                    raise ValueError(f"No previous state available for rollback: {plan_id}")
 
-                # Attempt rollback with retries
-                success = False
-                for attempt in range(1, max_retries + 1):
-                    device_result["attempts"] = attempt
-                    try:
-                        # Rollback DNS servers if present in previous state
-                        if "dns_servers" in device_previous_state:
-                            logger.info(
-                                f"Rolling back DNS servers for device {device_id} (attempt {attempt})",
-                                extra={
-                                    "plan_id": plan_id,
-                                    "device_id": device_id,
-                                    "dns_servers": device_previous_state["dns_servers"],
-                                },
-                            )
-                            await dns_ntp_service.update_dns_servers(
-                                device_id=device_id,
-                                dns_servers=device_previous_state["dns_servers"],
-                                dry_run=False,
-                            )
+                # Initialize DNS/NTP service for rollback operations (if not provided)
+                if dns_ntp_service is None:
+                    dns_ntp_service = DNSNTPService(self.session, self.settings)
 
-                        # Rollback NTP servers if present in previous state
-                        if "ntp_servers" in device_previous_state:
-                            logger.info(
-                                f"Rolling back NTP servers for device {device_id} (attempt {attempt})",
-                                extra={
-                                    "plan_id": plan_id,
-                                    "device_id": device_id,
-                                    "ntp_servers": device_previous_state["ntp_servers"],
-                                },
-                            )
-                            ntp_enabled = device_previous_state.get("ntp_enabled", True)
-                            await dns_ntp_service.update_ntp_servers(
-                                device_id=device_id,
-                                ntp_servers=device_previous_state["ntp_servers"],
-                                enabled=ntp_enabled,
-                                dry_run=False,
-                            )
+                # Rollback each device
+                # Note: We batch status updates to reduce database commits
+                for device_id in devices_to_rollback:
+                    device_result = {
+                        "device_id": device_id,
+                        "status": "rolling_back",
+                        "attempts": 0,
+                        "errors": [],
+                    }
 
-                        # Rollback succeeded - update status (will be committed in batch)
-                        device_result["status"] = "rolled_back"
-                        device_statuses[device_id] = "rolled_back"
-                        rollback_results["summary"]["success"] += 1
-                        success = True
+                    # Update device status to rolling_back (will be committed in batch)
+                    device_statuses[device_id] = "rolling_back"
 
-                        logger.info(
-                            f"Successfully rolled back device {device_id}",
-                            extra={"plan_id": plan_id, "device_id": device_id, "attempt": attempt},
-                        )
-                        break
-
-                    except Exception as e:
-                        error_msg = f"Attempt {attempt} failed: {str(e)}"
-                        device_result["errors"].append(error_msg)
+                    # Get previous state for this device
+                    device_previous_state = previous_state.get(device_id, {})
+                    if not device_previous_state:
                         logger.warning(
-                            f"Rollback attempt {attempt} failed for device {device_id}: {e}",
-                            extra={
-                                "plan_id": plan_id,
-                                "device_id": device_id,
-                                "attempt": attempt,
-                                "max_retries": max_retries,
-                            },
+                            f"No previous state for device {device_id} in plan {plan_id}",
+                            extra={"plan_id": plan_id, "device_id": device_id},
                         )
+                        device_result["status"] = "rollback_failed"
+                        device_result["errors"].append("No previous state found")
+                        device_statuses[device_id] = "rollback_failed"
+                        rollback_results["devices"][device_id] = device_result
+                        rollback_results["summary"]["failed"] += 1
+                        continue
 
-                        if attempt >= max_retries:
-                            device_result["status"] = "rollback_failed"
-                            device_statuses[device_id] = "rollback_failed"
-                            rollback_results["summary"]["failed"] += 1
+                    # Attempt rollback with retries and exponential backoff
+                    success = False
+                    dns_rollback_success = False
+                    ntp_rollback_success = False
+                    for attempt in range(1, max_retries + 1):
+                        device_result["attempts"] = attempt
+                        try:
+                            # Rollback DNS servers if present in previous state
+                            if "dns_servers" in device_previous_state and not dns_rollback_success:
+                                logger.info(
+                                    f"Rolling back DNS servers for device {device_id} (attempt {attempt})",
+                                    extra={
+                                        "plan_id": plan_id,
+                                        "device_id": device_id,
+                                        "dns_servers": device_previous_state["dns_servers"],
+                                    },
+                                )
+                                await dns_ntp_service.update_dns_servers(
+                                    device_id=device_id,
+                                    dns_servers=device_previous_state["dns_servers"],
+                                    dry_run=False,
+                                )
+                                dns_rollback_success = True
 
-                            logger.error(
-                                f"Rollback failed for device {device_id} after {max_retries} attempts",
-                                extra={"plan_id": plan_id, "device_id": device_id},
+                            # Rollback NTP servers if present in previous state
+                            if "ntp_servers" in device_previous_state and not ntp_rollback_success:
+                                logger.info(
+                                    f"Rolling back NTP servers for device {device_id} (attempt {attempt})",
+                                    extra={
+                                        "plan_id": plan_id,
+                                        "device_id": device_id,
+                                        "ntp_servers": device_previous_state["ntp_servers"],
+                                    },
+                                )
+                                ntp_enabled = device_previous_state.get("ntp_enabled", True)
+                                await dns_ntp_service.update_ntp_servers(
+                                    device_id=device_id,
+                                    ntp_servers=device_previous_state["ntp_servers"],
+                                    enabled=ntp_enabled,
+                                    dry_run=False,
+                                )
+                                ntp_rollback_success = True
+
+                            # Rollback succeeded - update status (will be committed in batch)
+                            device_result["status"] = "rolled_back"
+                            device_result["dns_rollback"] = dns_rollback_success
+                            device_result["ntp_rollback"] = ntp_rollback_success
+                            device_statuses[device_id] = "rolled_back"
+                            rollback_results["summary"]["success"] += 1
+                            success = True
+
+                            logger.info(
+                                f"Successfully rolled back device {device_id}",
+                                extra={"plan_id": plan_id, "device_id": device_id, "attempt": attempt},
+                            )
+                            break
+
+                        except Exception as e:
+                            error_msg = f"Attempt {attempt} failed: {str(e)}"
+                            device_result["errors"].append(error_msg)
+                            logger.warning(
+                                f"Rollback attempt {attempt} failed for device {device_id}: {e}",
+                                extra={
+                                    "plan_id": plan_id,
+                                    "device_id": device_id,
+                                    "attempt": attempt,
+                                    "max_retries": max_retries,
+                                },
                             )
 
-                rollback_results["devices"][device_id] = device_result
+                            if attempt >= max_retries:
+                                # Track partial success if any component succeeded
+                                if dns_rollback_success or ntp_rollback_success:
+                                    device_result["status"] = "partially_rolled_back"
+                                    device_result["dns_rollback"] = dns_rollback_success
+                                    device_result["ntp_rollback"] = ntp_rollback_success
+                                    device_statuses[device_id] = "partially_rolled_back"
+                                    rollback_results["summary"]["success"] += 1
+                                else:
+                                    device_result["status"] = "rollback_failed"
+                                    device_statuses[device_id] = "rollback_failed"
+                                    rollback_results["summary"]["failed"] += 1
 
-            # Commit all device status updates in a single transaction
-            plan.device_statuses = device_statuses
-            await self.session.commit()
+                                logger.error(
+                                    f"Rollback failed for device {device_id} after {max_retries} attempts",
+                                    extra={
+                                        "plan_id": plan_id,
+                                        "device_id": device_id,
+                                        "dns_rollback": dns_rollback_success,
+                                        "ntp_rollback": ntp_rollback_success,
+                                    },
+                                )
+                            else:
+                                # Exponential backoff: wait 2^attempt seconds before retry
+                                import asyncio
+                                backoff_delay = 2 ** attempt
+                                logger.info(
+                                    f"Waiting {backoff_delay}s before retry {attempt + 1}",
+                                    extra={"plan_id": plan_id, "device_id": device_id},
+                                )
+                                await asyncio.sleep(backoff_delay)
 
-            # Update plan status based on rollback results
-            if rollback_results["summary"]["failed"] == 0:
-                # All devices rolled back successfully
-                plan.status = PlanStatus.ROLLED_BACK.value
-                result_status = "SUCCESS"
-            else:
-                # Some devices failed to rollback
-                plan.status = PlanStatus.ROLLED_BACK.value  # Still mark as rolled_back
-                result_status = "PARTIAL"
+                    rollback_results["devices"][device_id] = device_result
 
-            # Log final audit event
-            self._log_audit_event(
-                action="PLAN_ROLLBACK_COMPLETED",
-                user_sub=triggered_by,
-                plan_id=plan_id,
-                tool_name=plan.tool_name,
-                result=result_status,
-                metadata={
-                    "reason": reason,
-                    "total_devices": rollback_results["summary"]["total"],
-                    "success": rollback_results["summary"]["success"],
-                    "failed": rollback_results["summary"]["failed"],
-                },
-            )
+                # Commit all device status updates in a single transaction
+                plan.device_statuses = device_statuses
+                await self.session.commit()
 
-            await self.session.commit()
+                # Update plan status based on rollback results
+                if rollback_results["summary"]["failed"] == 0:
+                    # All devices rolled back successfully
+                    plan.status = PlanStatus.ROLLED_BACK.value
+                    result_status = "SUCCESS"
+                else:
+                    # Some devices failed to rollback
+                    plan.status = PlanStatus.ROLLED_BACK.value  # Still mark as rolled_back
+                    result_status = "PARTIAL"
 
-            logger.info(
-                f"Rollback completed for plan {plan_id}",
-                extra={
-                    "plan_id": plan_id,
-                    "success": rollback_results["summary"]["success"],
-                    "failed": rollback_results["summary"]["failed"],
-                },
-            )
+                # Log final audit event
+                self._log_audit_event(
+                    action="PLAN_ROLLBACK_COMPLETED",
+                    user_sub=triggered_by,
+                    plan_id=plan_id,
+                    tool_name=plan.tool_name,
+                    result=result_status,
+                    metadata={
+                        "reason": reason,
+                        "total_devices": rollback_results["summary"]["total"],
+                        "success": rollback_results["summary"]["success"],
+                        "failed": rollback_results["summary"]["failed"],
+                    },
+                )
 
-            return rollback_results
+                await self.session.commit()
+
+                logger.info(
+                    f"Rollback completed for plan {plan_id}",
+                    extra={
+                        "plan_id": plan_id,
+                        "success": rollback_results["summary"]["success"],
+                        "failed": rollback_results["summary"]["failed"],
+                    },
+                )
+
+                return rollback_results
+
+            except Exception as rollback_error:
+                # Ensure plan status is updated even if rollback fails
+                try:
+                    plan.status = PlanStatus.ROLLED_BACK.value
+                    await self.session.commit()
+                    logger.warning(
+                        f"Plan {plan_id} marked as ROLLED_BACK despite errors",
+                        extra={"plan_id": plan_id},
+                    )
+                except Exception as commit_error:
+                    logger.error(
+                        f"Failed to update plan status after rollback error: {commit_error}",
+                        extra={"plan_id": plan_id},
+                    )
+                raise rollback_error
 
         except ValueError as ve:
             # Validation errors (e.g., plan not found, wrong state) - log but don't commit
@@ -1101,12 +1146,19 @@ class PlanService:
                 exc_info=True,
                 extra={"plan_id": plan_id, "reason": reason},
             )
+            # Rollback session to clean state before attempting audit log
+            try:
+                await self.session.rollback()
+            except Exception as rollback_error:
+                logger.warning(f"Failed to rollback session: {rollback_error}")
+            
             # Log failed rollback audit event (best effort - don't mask original error)
             try:
                 self._log_audit_event(
                     action="PLAN_ROLLBACK_COMPLETED",
                     user_sub=triggered_by,
                     plan_id=plan_id,
+                    tool_name=plan.tool_name if plan else "plan_service",
                     result="FAILURE",
                     error_message=str(e),
                     metadata={"reason": reason},
