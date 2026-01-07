@@ -285,90 +285,76 @@ View plan details with plan://{plan_id} resource.
     @mcp.tool()
     async def config_rollback_plan(
         plan_id: str,
-        approved_by: str = "system",
+        reason: str,
+        triggered_by: str = "system",
     ) -> dict[str, Any]:
-        """Attempt to rollback changes from a plan.
+        """Manually trigger rollback of an applied plan.
 
-        Professional-tier tool that attempts to revert changes made by a plan
-        using stored snapshots where available.
+        Professional-tier tool that triggers manual rollback of a plan that has
+        been applied. Useful when automatic rollback is disabled or for manual
+        recovery scenarios. Restores previous configuration from stored snapshots.
 
         Use when:
-        - A plan application caused issues
-        - Need to restore previous configuration
-        - Want to revert changes safely
+        - A plan application caused issues and needs manual recovery
+        - Automatic rollback is disabled
+        - Need to restore previous configuration with audit trail
 
         Args:
-            plan_id: Plan identifier to rollback
-            approved_by: User identifier approving the rollback
+            plan_id: Plan identifier to rollback (must be in 'executing', 'completed', or 'failed' state)
+            reason: Reason for manual rollback (required for audit trail)
+            triggered_by: User identifier triggering the rollback (default: "system")
 
         Returns:
-            Rollback results with per-device status
+            Rollback results including status and devices affected
         """
         try:
             async with session_factory.session() as session:
-                plan_service = PlanService(session)
-                dns_ntp_service = DNSNTPService(session, settings)
+                plan_service = PlanService(session, settings)
 
-                # Get plan
-                plan = await plan_service.get_plan(plan_id)
-
-                if plan["status"] not in ["completed", "applied", "failed"]:
-                    raise ValueError(f"Plan {plan_id} cannot be rolled back (status: {plan['status']})")
-
-                # Extract previous configuration
-                changes = plan["changes"]
-                devices_config = changes.get("devices", [])
-
-                results = {"plan_id": plan_id, "devices": {}}
-
-                for device_config in devices_config:
-                    device_id = device_config["device_id"]
-                    try:
-                        # Restore DNS if changed
-                        if changes.get("dns_servers") and device_config.get("current_dns"):
-                            prev_dns = device_config["current_dns"].get("dns_servers", [])
-                            if prev_dns:
-                                await dns_ntp_service.update_dns_servers(
-                                    device_id, prev_dns, dry_run=False
-                                )
-
-                        # Restore NTP if changed
-                        if changes.get("ntp_servers") and device_config.get("current_ntp"):
-                            prev_ntp = device_config["current_ntp"].get("ntp_servers", [])
-                            if prev_ntp:
-                                await dns_ntp_service.update_ntp_servers(
-                                    device_id, prev_ntp, dry_run=False
-                                )
-
-                        results["devices"][device_id] = {"status": "success"}
-
-                    except Exception as e:
-                        logger.error(
-                            f"Failed to rollback {device_id}: {e}",
-                            extra={"device_id": device_id},
-                        )
-                        results["devices"][device_id] = {
-                            "status": "failed",
-                            "error": str(e),
-                        }
-
-                # Update plan status
-                await plan_service.update_plan_status(plan_id, "cancelled")
-
-                success_count = sum(
-                    1 for r in results["devices"].values() if r.get("status") == "success"
+                # Trigger rollback via PlanService
+                rollback_results = await plan_service.rollback_plan(
+                    plan_id=plan_id,
+                    reason=reason,
+                    triggered_by=triggered_by,
                 )
 
+                # Extract summary statistics
+                summary = rollback_results.get("summary", {})
+                total_devices = summary.get("total", 0)
+                success_count = summary.get("success", 0)
+                failed_count = summary.get("failed", 0)
+
+                # Build device summary for response
+                device_summaries = []
+                for device_id, device_result in rollback_results.get("devices", {}).items():
+                    status = device_result.get("status", "unknown")
+                    device_summaries.append(f"  - {device_id}: {status}")
+
+                device_list = "\n".join(device_summaries) if device_summaries else "  (none)"
+
                 return format_tool_result(
-                    content=f"""Rollback completed for plan {plan_id}.
+                    content=f"""Manual rollback initiated for plan {plan_id}.
 
+Reason: {reason}
+Status: rolling_back
+Devices Affected: {total_devices}
 Successful: {success_count}
-Failed: {len(results['devices']) - success_count}
+Failed: {failed_count}
 
-Note: Rollback restores previous DNS/NTP configuration where available.
+Per-device results:
+{device_list}
+
+Note: Rollback restores previous DNS/NTP configuration from stored snapshots.
 Verify connectivity and health for affected devices.
 """,
-                    meta=results,
+                    meta={
+                        "plan_id": plan_id,
+                        "status": "rolling_back",
+                        "devices_affected": total_devices,
+                        "reason": reason,
+                        "summary": summary,
+                        "devices": rollback_results.get("devices", {}),
+                    },
                 )
 
         except Exception as e:
