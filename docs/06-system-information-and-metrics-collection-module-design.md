@@ -723,6 +723,10 @@ psql -d routeros_mcp -c "SELECT * FROM health_checks_hourly ORDER BY hour DESC L
 **Rollback** (if needed):
 
 ```bash
+# IMPORTANT: Back up your database before running a downgrade!
+# While the migration is designed to preserve data, backing up ensures you can
+# recover if the downgrade fails mid-execution or encounters an unexpected error.
+
 # Downgrade migration - converts back to regular table
 uv run alembic downgrade -1
 

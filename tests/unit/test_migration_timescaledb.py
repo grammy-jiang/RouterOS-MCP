@@ -1,10 +1,5 @@
 """Tests for TimescaleDB migration (migration 32)."""
-import pytest
 from unittest.mock import MagicMock, patch
-from sqlalchemy import text
-
-# Import the migration module
-import sys
 from pathlib import Path
 import importlib.util
 
@@ -60,12 +55,14 @@ class TestTimescaleDBMigration:
 
     def test_is_timescaledb_available_postgresql_with_exception(self):
         """Test that TimescaleDB check handles exceptions gracefully."""
+        from sqlalchemy.exc import OperationalError
+        
         # Create a mock bind with PostgreSQL dialect
         mock_bind = MagicMock()
         mock_bind.dialect.name = "postgresql"
         
-        # Mock execute to raise an exception
-        mock_bind.execute.side_effect = Exception("Database error")
+        # Mock execute to raise a SQLAlchemy exception
+        mock_bind.execute.side_effect = OperationalError("Database error", None, None)
         
         with patch("alembic.op.get_bind", return_value=mock_bind):
             result = migration_module._is_timescaledb_available()
@@ -143,12 +140,64 @@ class TestTimescaleDBMigration:
         mock_bind.execute = mock_execute
         
         with patch("alembic.op.get_bind", return_value=mock_bind):
-            # Should not raise exceptions even if some cleanup fails
-            try:
-                migration_module.downgrade()
-            except Exception:
-                # Downgrade may fail on some operations, that's ok
-                pass
+            # Execute downgrade; any unexpected exceptions should fail the test
+            migration_module.downgrade()
             
             # Verify some cleanup commands were attempted
             assert len(execute_calls) > 0
+
+    def test_upgrade_skips_for_postgresql_without_timescaledb(self):
+        """Test that upgrade is a no-op for PostgreSQL without TimescaleDB."""
+        mock_bind = MagicMock()
+        mock_bind.dialect.name = "postgresql"
+        
+        # Mock the execute result to return 0 (no extension)
+        mock_result = MagicMock()
+        mock_result.scalar.return_value = 0
+        mock_bind.execute.return_value = mock_result
+        
+        # Track if execute was called after the extension check
+        execute_count = 0
+        original_execute = mock_bind.execute
+        
+        def counting_execute(sql):
+            nonlocal execute_count
+            execute_count += 1
+            return original_execute(sql)
+        
+        mock_bind.execute = counting_execute
+        
+        with patch("alembic.op.get_bind", return_value=mock_bind):
+            # Should not raise any exceptions
+            migration_module.upgrade()
+            
+            # Verify only the extension check was executed (1 call)
+            assert execute_count == 1
+
+    def test_downgrade_skips_for_postgresql_without_timescaledb(self):
+        """Test that downgrade is a no-op for PostgreSQL without TimescaleDB."""
+        mock_bind = MagicMock()
+        mock_bind.dialect.name = "postgresql"
+        
+        # Mock the execute result to return 0 (no extension)
+        mock_result = MagicMock()
+        mock_result.scalar.return_value = 0
+        mock_bind.execute.return_value = mock_result
+        
+        # Track if execute was called after the extension check
+        execute_count = 0
+        original_execute = mock_bind.execute
+        
+        def counting_execute(sql):
+            nonlocal execute_count
+            execute_count += 1
+            return original_execute(sql)
+        
+        mock_bind.execute = counting_execute
+        
+        with patch("alembic.op.get_bind", return_value=mock_bind):
+            # Should not raise any exceptions
+            migration_module.downgrade()
+            
+            # Verify only the extension check was executed (1 call)
+            assert execute_count == 1

@@ -24,8 +24,8 @@ See docs/06-system-information-and-metrics-collection-module-design.md for setup
 from collections.abc import Sequence
 
 from alembic import op
-import sqlalchemy as sa
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError, ProgrammingError, SQLAlchemyError
 
 
 # revision identifiers, used by Alembic.
@@ -62,7 +62,7 @@ def _is_timescaledb_available() -> bool:
         )
         count = result.scalar()
         return count > 0
-    except Exception:
+    except (SQLAlchemyError, OperationalError, ProgrammingError):
         # If query fails, TimescaleDB is not available
         return False
 
@@ -81,7 +81,9 @@ def upgrade() -> None:
     bind = op.get_bind()
     
     # Convert health_checks to hypertable partitioned on timestamp
-    # chunk_time_interval: 7 days (default for daily data)
+    # chunk_time_interval: 7 days - chosen to balance query performance and chunk
+    # management for typical health check frequencies (e.g. every 1-5 minutes).
+    # Adjust this interval if your deployment has significantly different data volume or cadence.
     bind.execute(
         text(
             "SELECT create_hypertable('health_checks', 'timestamp', "
@@ -101,6 +103,8 @@ def upgrade() -> None:
     
     # Create continuous aggregate for hourly summaries
     # Used for dashboards and analytics without scanning raw data
+    # Created WITH NO DATA then manually refreshed to avoid timeout on large datasets
+    # and allow migration to complete faster
     bind.execute(
         text(
             """
@@ -118,12 +122,18 @@ def upgrade() -> None:
                     THEN (memory_used_bytes::float / memory_total_bytes::float * 100)
                     ELSE NULL 
                 END) AS avg_memory_percent,
+                MIN(CASE 
+                    WHEN memory_total_bytes > 0 
+                    THEN (memory_used_bytes::float / memory_total_bytes::float * 100)
+                    ELSE NULL 
+                END) AS min_memory_percent,
                 MAX(CASE 
                     WHEN memory_total_bytes > 0 
                     THEN (memory_used_bytes::float / memory_total_bytes::float * 100)
                     ELSE NULL 
                 END) AS max_memory_percent,
                 AVG(temperature_celsius) AS avg_temperature,
+                MIN(temperature_celsius) AS min_temperature,
                 MAX(temperature_celsius) AS max_temperature
             FROM health_checks
             GROUP BY hour, device_id
@@ -170,7 +180,7 @@ def downgrade() -> None:
                 "if_exists => TRUE)"
             )
         )
-    except Exception:
+    except (SQLAlchemyError, OperationalError, ProgrammingError):
         # Policy might not exist, continue
         pass
     
@@ -186,7 +196,7 @@ def downgrade() -> None:
                 "SELECT remove_retention_policy('health_checks', if_exists => TRUE)"
             )
         )
-    except Exception:
+    except (SQLAlchemyError, OperationalError, ProgrammingError):
         # Policy might not exist, continue
         pass
     
