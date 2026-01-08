@@ -26,7 +26,7 @@ class AuditService:
     Example:
         async with get_session() as session:
             service = AuditService(session)
-            
+
             # List events with filters
             result = await service.list_events(
                 page=1,
