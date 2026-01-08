@@ -74,6 +74,16 @@ async def get_job_service():
         yield JobService(session)
 
 
+async def get_audit_service():
+    """Dependency to get AuditService."""
+    # Import here to avoid namespace pollution
+    from routeros_mcp.domain.services.audit import AuditService
+    from routeros_mcp.infra.db.session import get_session
+
+    async for session in get_session():
+        yield AuditService(session)
+
+
 @router.get("", response_class=HTMLResponse)
 async def admin_dashboard(
     user: dict[str, Any] = Depends(get_current_user_dep()),
@@ -878,6 +888,263 @@ async def cancel_job(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to cancel job. Correlation ID: {correlation_id}",
+        )
+
+
+@router.get("/api/audit/events")
+async def list_audit_events(
+    page: int = 1,
+    page_size: int = 20,
+    device_id: str | None = None,
+    tool_name: str | None = None,
+    success: bool | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    search: str | None = None,
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    audit_service: Any = Depends(get_audit_service),
+) -> JSONResponse:
+    """List audit events with filtering and pagination.
+
+    Args:
+        page: Page number (1-indexed)
+        page_size: Number of events per page (max 100)
+        device_id: Filter by device ID
+        tool_name: Filter by tool name
+        success: Filter by success status
+        date_from: Filter events from this date (ISO format)
+        date_to: Filter events to this date (ISO format)
+        search: Search in event details
+        user: Current authenticated user
+        audit_service: Audit service dependency
+
+    Returns:
+        JSON with events and pagination info
+    """
+    try:
+        from datetime import datetime
+
+        # Validate and limit page size
+        page_size = min(page_size, 100)
+
+        # Parse date filters
+        date_from_dt = None
+        date_to_dt = None
+
+        if date_from:
+            try:
+                date_from_dt = datetime.fromisoformat(date_from.replace("Z", "+00:00"))
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid date_from format: {e}",
+                )
+
+        if date_to:
+            try:
+                date_to_dt = datetime.fromisoformat(date_to.replace("Z", "+00:00"))
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid date_to format: {e}",
+                )
+
+        # Query events
+        result = await audit_service.list_events(
+            page=page,
+            page_size=page_size,
+            device_id=device_id,
+            tool_name=tool_name,
+            success=success,
+            date_from=date_from_dt,
+            date_to=date_to_dt,
+            search=search,
+        )
+
+        return JSONResponse(content=result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error listing audit events: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list audit events. Correlation ID: {correlation_id}",
+        )
+
+
+@router.get("/api/audit/events/export")
+async def export_audit_events(
+    device_id: str | None = None,
+    tool_name: str | None = None,
+    success: bool | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    search: str | None = None,
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    audit_service: Any = Depends(get_audit_service),
+) -> Any:
+    """Export audit events to CSV.
+
+    Args:
+        device_id: Filter by device ID
+        tool_name: Filter by tool name
+        success: Filter by success status
+        date_from: Filter events from this date (ISO format)
+        date_to: Filter events to this date (ISO format)
+        search: Search in event details
+        user: Current authenticated user
+        audit_service: Audit service dependency
+
+    Returns:
+        CSV file download
+    """
+    try:
+        import csv
+        import io
+        from datetime import datetime
+
+        from fastapi.responses import StreamingResponse
+
+        # Parse date filters
+        date_from_dt = None
+        date_to_dt = None
+
+        if date_from:
+            try:
+                date_from_dt = datetime.fromisoformat(date_from.replace("Z", "+00:00"))
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid date_from format: {e}",
+                )
+
+        if date_to:
+            try:
+                date_to_dt = datetime.fromisoformat(date_to.replace("Z", "+00:00"))
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid date_to format: {e}",
+                )
+
+        # Query all matching events (no pagination for export)
+        result = await audit_service.list_events(
+            page=1,
+            page_size=10000,  # Large limit for export
+            device_id=device_id,
+            tool_name=tool_name,
+            success=success,
+            date_from=date_from_dt,
+            date_to=date_to_dt,
+            search=search,
+        )
+
+        # Create CSV
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        # Write header
+        writer.writerow([
+            "Timestamp",
+            "User Email",
+            "User Role",
+            "Device ID",
+            "Environment",
+            "Tool Name",
+            "Tool Tier",
+            "Action",
+            "Success",
+            "Result Summary",
+            "Error Message",
+            "Correlation ID",
+        ])
+
+        # Write rows
+        for event in result["events"]:
+            writer.writerow([
+                event["timestamp"],
+                event["user_email"] or "",
+                event["user_role"],
+                event["device_id"] or "",
+                event["environment"] or "",
+                event["tool_name"],
+                event["tool_tier"],
+                event["action"],
+                "Success" if event["success"] else "Failure",
+                event["result_summary"] or "",
+                event["error_message"] or "",
+                event["correlation_id"] or "",
+            ])
+
+        # Return CSV as download
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f"attachment; filename=audit_events_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            },
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error exporting audit events: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to export audit events. Correlation ID: {correlation_id}",
+        )
+
+
+@router.get("/api/audit/filters")
+async def get_audit_filters(
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    audit_service: Any = Depends(get_audit_service),
+) -> JSONResponse:
+    """Get available filter options for audit events.
+
+    Args:
+        user: Current authenticated user
+        audit_service: Audit service dependency
+
+    Returns:
+        JSON with available devices and tools
+    """
+    try:
+        devices = await audit_service.get_unique_devices()
+        tools = await audit_service.get_unique_tools()
+
+        return JSONResponse(
+            content={
+                "devices": devices,
+                "tools": tools,
+            }
+        )
+
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error getting audit filters: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get audit filters. Correlation ID: {correlation_id}",
         )
 
 

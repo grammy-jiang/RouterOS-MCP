@@ -6,6 +6,11 @@ import type {
   DeviceResponse,
   ConnectivityTestResponse,
 } from '../types/device';
+import type {
+  AuditEvent,
+  AuditEventsResponse,
+  AuditEventsFilter,
+} from '../types/audit';
 
 const RAW_API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
@@ -102,6 +107,84 @@ export const deviceApi = {
     return await fetchApi<ConnectivityTestResponse>(`/api/admin/devices/${id}/test`, {
       method: 'POST',
     });
+  },
+};
+
+export const auditApi = {
+  async listEvents(filter?: AuditEventsFilter): Promise<AuditEventsResponse> {
+    const params = new URLSearchParams();
+    
+    if (filter?.page !== undefined) {
+      params.append('page', filter.page.toString());
+    }
+    if (filter?.page_size !== undefined) {
+      params.append('page_size', filter.page_size.toString());
+    }
+    if (filter?.device_id) {
+      params.append('device_id', filter.device_id);
+    }
+    if (filter?.tool_name) {
+      params.append('tool_name', filter.tool_name);
+    }
+    if (filter?.success !== undefined) {
+      params.append('success', filter.success.toString());
+    }
+    if (filter?.date_from) {
+      params.append('date_from', filter.date_from);
+    }
+    if (filter?.date_to) {
+      params.append('date_to', filter.date_to);
+    }
+    if (filter?.search) {
+      params.append('search', filter.search);
+    }
+    
+    const queryString = params.toString();
+    const endpoint = `/api/audit/events${queryString ? `?${queryString}` : ''}`;
+    
+    return await fetchApi<AuditEventsResponse>(endpoint);
+  },
+
+  async exportToCsv(filter?: AuditEventsFilter): Promise<Blob> {
+    const params = new URLSearchParams();
+    
+    if (filter?.device_id) {
+      params.append('device_id', filter.device_id);
+    }
+    if (filter?.tool_name) {
+      params.append('tool_name', filter.tool_name);
+    }
+    if (filter?.success !== undefined) {
+      params.append('success', filter.success.toString());
+    }
+    if (filter?.date_from) {
+      params.append('date_from', filter.date_from);
+    }
+    if (filter?.date_to) {
+      params.append('date_to', filter.date_to);
+    }
+    if (filter?.search) {
+      params.append('search', filter.search);
+    }
+    
+    const queryString = params.toString();
+    const endpoint = `/api/audit/events/export${queryString ? `?${queryString}` : ''}`;
+    const url = `${API_BASE_URL}${endpoint}`;
+    
+    const response = await fetch(url, {
+      credentials: 'include',
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new ApiError(
+        errorData.detail || `HTTP ${response.status}: ${response.statusText}`,
+        response.status,
+        errorData
+      );
+    }
+    
+    return await response.blob();
   },
 };
 
