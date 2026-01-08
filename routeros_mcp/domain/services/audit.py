@@ -80,7 +80,7 @@ class AuditService:
             conditions.append(AuditEventORM.tool_name == tool_name)
 
         if success is not None:
-            conditions.append(AuditEventORM.success == success)
+            conditions.append(AuditEventORM.result == ("SUCCESS" if success else "FAILURE"))
 
         if date_from:
             conditions.append(AuditEventORM.timestamp >= date_from)
@@ -89,13 +89,12 @@ class AuditService:
             conditions.append(AuditEventORM.timestamp <= date_to)
 
         if search:
-            # Search in result_summary, error_message, and parameters (as JSON string)
+            # Search in error_message and meta (as JSON string)
             search_pattern = f"%{search}%"
             conditions.append(
                 or_(
-                    AuditEventORM.result_summary.ilike(search_pattern),
                     AuditEventORM.error_message.ilike(search_pattern),
-                    AuditEventORM.parameters.cast(str).ilike(search_pattern),
+                    AuditEventORM.meta.cast(str).ilike(search_pattern),
                 )
             )
 
@@ -133,11 +132,11 @@ class AuditService:
                 "action": event.action,
                 "tool_name": event.tool_name,
                 "tool_tier": event.tool_tier,
-                "success": event.success,
+                "success": event.result == "SUCCESS",
                 "error_message": event.error_message,
-                "parameters": event.parameters,
-                "result_summary": event.result_summary,
-                "correlation_id": event.correlation_id,
+                "parameters": event.meta.get("parameters") if event.meta else None,
+                "result_summary": event.meta.get("result_summary") if event.meta else None,
+                "correlation_id": event.meta.get("correlation_id") if event.meta else None,
             }
             for event in events
         ]

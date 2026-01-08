@@ -7,7 +7,6 @@ import type {
   ConnectivityTestResponse,
 } from '../types/device';
 import type {
-  AuditEvent,
   AuditEventsResponse,
   AuditEventsFilter,
 } from '../types/audit';
