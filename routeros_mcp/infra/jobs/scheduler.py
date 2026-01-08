@@ -190,14 +190,7 @@ class JobScheduler:
         """
         job_id = f"health_check_{device_id}"
         
-        # Remove existing job if present (APScheduler will raise JobLookupError if not found)
-        from apscheduler.jobstores.base import JobLookupError
-        try:
-            self.scheduler.remove_job(job_id)
-        except JobLookupError:
-            pass  # Job doesn't exist, that's fine
-        
-        # Add new job with updated interval
+        # Add new job with updated interval (replace_existing handles existing jobs)
         job = self.scheduler.add_job(
             job_func,
             trigger=IntervalTrigger(seconds=interval_seconds),

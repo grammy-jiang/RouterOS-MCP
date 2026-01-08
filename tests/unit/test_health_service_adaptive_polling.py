@@ -9,7 +9,7 @@ Tests cover:
 """
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +18,24 @@ from routeros_mcp.config import Settings
 from routeros_mcp.domain.models import HealthCheckResult
 from routeros_mcp.domain.services.health import HealthService
 from routeros_mcp.infra.db.models import Device as DeviceORM
+
+
+def _extract_update_values(update_stmt) -> dict[str, any]:
+    """Helper to extract actual values from SQLAlchemy update statement.
+    
+    Args:
+        update_stmt: SQLAlchemy Update statement
+        
+    Returns:
+        Dictionary mapping column names to their values
+    """
+    result = {}
+    if hasattr(update_stmt, "_values"):
+        for col, bind_param in update_stmt._values.items():
+            # Column name is accessible via col.name
+            # Actual value is in bind_param.value
+            result[col.name] = bind_param.value
+    return result
 
 
 class TestAdaptivePollingIntervals:
@@ -90,8 +108,12 @@ class TestAdaptivePollingIntervalAdjustment:
         call_args = session.execute.call_args_list[-1]
         update_stmt = call_args[0][0]
         
-        # Check that the update statement has correct values
-        assert hasattr(update_stmt, "_values")
+        # Extract and verify the actual values
+        values = _extract_update_values(update_stmt)
+        assert values["polling_interval_seconds"] == 90, "Interval should be 90s (60 * 1.5)"
+        assert values["consecutive_healthy_checks"] == 0, "Counter should be reset after adjustment"
+        assert values["health_status"] == "healthy"
+        assert values["last_backoff_at"] is None, "Backoff should be cleared on healthy"
 
     @pytest.mark.asyncio
     async def test_interval_capped_at_300_seconds(self):
@@ -138,6 +160,13 @@ class TestAdaptivePollingIntervalAdjustment:
 
         # Interval should be capped at 300s (not 375s = 250 * 1.5)
         session.execute.assert_called()
+        call_args = session.execute.call_args_list[-1]
+        update_stmt = call_args[0][0]
+        
+        # Extract and verify the actual values
+        values = _extract_update_values(update_stmt)
+        assert values["polling_interval_seconds"] == 300, "Interval should be capped at 300s, not 375s (250 * 1.5)"
+        assert values["consecutive_healthy_checks"] == 0, "Counter should be reset after adjustment"
 
 
 class TestAdaptivePollingReset:
@@ -189,6 +218,15 @@ class TestAdaptivePollingReset:
 
         # Verify interval was reset and consecutive count cleared
         session.execute.assert_called()
+        call_args = session.execute.call_args_list[-1]
+        update_stmt = call_args[0][0]
+        
+        # Extract and verify the actual values
+        values = _extract_update_values(update_stmt)
+        assert values["polling_interval_seconds"] == 60, "Interval should be reset to base 60s for non-critical"
+        assert values["consecutive_healthy_checks"] == 0, "Counter should be cleared on degraded"
+        assert values["health_status"] == "degraded"
+        assert values["last_backoff_at"] is None, "Backoff should be cleared"
 
     @pytest.mark.asyncio
     async def test_critical_device_resets_to_30s(self):
@@ -235,6 +273,14 @@ class TestAdaptivePollingReset:
         await service._update_adaptive_polling("dev-crit-001", health_result)
 
         session.execute.assert_called()
+        call_args = session.execute.call_args_list[-1]
+        update_stmt = call_args[0][0]
+        
+        # Extract and verify the actual values
+        values = _extract_update_values(update_stmt)
+        assert values["polling_interval_seconds"] == 30, "Interval should be reset to base 30s for critical device"
+        assert values["consecutive_healthy_checks"] == 0, "Counter should be cleared on degraded"
+        assert values["health_status"] == "degraded"
 
 
 class TestExponentialBackoff:
@@ -282,6 +328,15 @@ class TestExponentialBackoff:
 
         # Verify 60s interval was set
         session.execute.assert_called()
+        call_args = session.execute.call_args_list[-1]
+        update_stmt = call_args[0][0]
+        
+        # Extract and verify the actual values
+        values = _extract_update_values(update_stmt)
+        assert values["polling_interval_seconds"] == 60, "First unreachable should set 60s interval"
+        assert values["consecutive_healthy_checks"] == 0, "Counter should be cleared"
+        assert values["health_status"] == "unreachable"
+        assert values["last_backoff_at"] is not None, "Backoff timestamp should be set"
 
     @pytest.mark.asyncio
     async def test_exponential_backoff_doubles_interval(self):
@@ -325,6 +380,13 @@ class TestExponentialBackoff:
 
         # Verify interval doubled to 240s
         session.execute.assert_called()
+        call_args = session.execute.call_args_list[-1]
+        update_stmt = call_args[0][0]
+        
+        # Extract and verify the actual values
+        values = _extract_update_values(update_stmt)
+        assert values["polling_interval_seconds"] == 240, "Interval should double from 120s to 240s"
+        assert values["health_status"] == "unreachable"
 
     @pytest.mark.asyncio
     async def test_exponential_backoff_capped_at_960s(self):
@@ -368,6 +430,13 @@ class TestExponentialBackoff:
 
         # Verify interval stayed at 960s (not doubled to 1920s)
         session.execute.assert_called()
+        call_args = session.execute.call_args_list[-1]
+        update_stmt = call_args[0][0]
+        
+        # Extract and verify the actual values
+        values = _extract_update_values(update_stmt)
+        assert values["polling_interval_seconds"] == 960, "Interval should be capped at 960s, not doubled to 1920s"
+        assert values["health_status"] == "unreachable"
 
 
 class TestHealthStatusTracking:
