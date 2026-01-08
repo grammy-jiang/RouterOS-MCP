@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import type { Plan } from '../types/plan';
 
 interface PlanDetailsProps {
@@ -10,14 +11,60 @@ export default function PlanDetails({ plan, onClose }: PlanDetailsProps) {
     ? new Date(plan.approval_token_expires_at) < new Date()
     : false;
 
+  // Handle Escape key to close modal
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [onClose]);
+
+  // Focus trap and initial focus
+  useEffect(() => {
+    const modalElement = document.getElementById('plan-details-modal');
+    if (modalElement) {
+      const focusableElements = modalElement.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      const firstElement = focusableElements[0] as HTMLElement;
+      const lastElement = focusableElements[focusableElements.length - 1] as HTMLElement;
+
+      firstElement?.focus();
+
+      const handleTabKey = (e: KeyboardEvent) => {
+        if (e.key !== 'Tab') return;
+
+        if (e.shiftKey) {
+          if (document.activeElement === firstElement) {
+            e.preventDefault();
+            lastElement?.focus();
+          }
+        } else {
+          if (document.activeElement === lastElement) {
+            e.preventDefault();
+            firstElement?.focus();
+          }
+        }
+      };
+
+      document.addEventListener('keydown', handleTabKey);
+      return () => document.removeEventListener('keydown', handleTabKey);
+    }
+  }, []);
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+      <div id="plan-details-modal" className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="modal-title">
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center">
-          <h2 className="text-2xl font-bold text-gray-800">Plan Details</h2>
+          <h2 id="modal-title" className="text-2xl font-bold text-gray-800">Plan Details</h2>
           <button
             onClick={onClose}
             className="text-gray-500 hover:text-gray-700 text-2xl font-bold"
+            aria-label="Close modal"
           >
             ×
           </button>
@@ -91,16 +138,18 @@ export default function PlanDetails({ plan, onClose }: PlanDetailsProps) {
           </div>
 
           {/* Changes/Diff */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Proposed Changes
-            </label>
-            <div className="bg-gray-900 text-gray-100 rounded-md p-4 overflow-x-auto">
-              <pre className="text-xs font-mono whitespace-pre-wrap">
-                {JSON.stringify(plan.changes, null, 2)}
-              </pre>
+          {plan.changes && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Proposed Changes
+              </label>
+              <div className="bg-gray-900 text-gray-100 rounded-md p-4 overflow-x-auto">
+                <pre className="text-xs font-mono whitespace-pre-wrap">
+                  {JSON.stringify(plan.changes, null, 2)}
+                </pre>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Approval Info (if approved) */}
           {plan.approved_by && (

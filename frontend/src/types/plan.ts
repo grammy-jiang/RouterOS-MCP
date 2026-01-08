@@ -15,7 +15,12 @@ export interface Plan {
   status: PlanStatus;
   summary: string;
   device_ids: string[];
-  changes: Record<string, unknown>;
+  /**
+   * The proposed configuration changes for this plan.
+   * Structure varies by change type (tool_name).
+   * Only included in detailed plan responses, not in list responses.
+   */
+  changes?: Record<string, unknown>;
   created_at: string;
   approved_by?: string | null;
   approved_at?: string | null;

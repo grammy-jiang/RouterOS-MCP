@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { planApi, ApiError } from '../services/api';
 import PlanDetails from '../components/PlanDetails';
 import type { Plan } from '../types/plan';
@@ -17,10 +17,60 @@ export default function Plans() {
   const [rejecting, setRejecting] = useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [copiedToken, setCopiedToken] = useState(false);
+  const rejectModalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadPlans();
   }, []);
+
+  // Handle Escape key for reject modal
+  useEffect(() => {
+    if (!showRejectModal) return;
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowRejectModal(false);
+        setRejectingPlan(null);
+        setRejectionReason('');
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [showRejectModal]);
+
+  // Focus trap for reject modal
+  useEffect(() => {
+    if (!showRejectModal || !rejectModalRef.current) return;
+
+    const modalElement = rejectModalRef.current;
+    const focusableElements = modalElement.querySelectorAll(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    const firstElement = focusableElements[0] as HTMLElement;
+    const lastElement = focusableElements[focusableElements.length - 1] as HTMLElement;
+
+    firstElement?.focus();
+
+    const handleTabKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+
+      if (e.shiftKey) {
+        if (document.activeElement === firstElement) {
+          e.preventDefault();
+          lastElement?.focus();
+        }
+      } else {
+        if (document.activeElement === lastElement) {
+          e.preventDefault();
+          firstElement?.focus();
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleTabKey);
+    return () => document.removeEventListener('keydown', handleTabKey);
+  }, [showRejectModal]);
 
   const loadPlans = async () => {
     try {
@@ -100,12 +150,31 @@ export default function Plans() {
   const copyToClipboard = async () => {
     if (!approvalToken) return;
 
+    if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+      console.error('Clipboard API is not available in this browser/environment');
+      setOperationError(
+        'Copying is not supported in this browser. Please copy the token manually.'
+      );
+      return;
+    }
+
     try {
       await navigator.clipboard.writeText(approvalToken);
       setCopiedToken(true);
       setTimeout(() => setCopiedToken(false), 2000);
     } catch (err) {
-      setOperationError('Failed to copy to clipboard');
+      console.error('Failed to copy approval token to clipboard', err);
+
+      let message = 'Failed to copy to clipboard. Please try again.';
+      if (err && typeof err === 'object') {
+        const errorName = (err as { name?: string }).name;
+        if (errorName === 'NotAllowedError' || errorName === 'SecurityError') {
+          message =
+            'Permission to access the clipboard was denied. Please check your browser permissions and try again.';
+        }
+      }
+
+      setOperationError(message);
     }
   };
 
@@ -287,8 +356,14 @@ export default function Plans() {
 
       {showRejectModal && rejectingPlan && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">Reject Plan</h2>
+          <div 
+            ref={rejectModalRef}
+            className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reject-modal-title"
+          >
+            <h2 id="reject-modal-title" className="text-xl font-bold text-gray-800 mb-4">Reject Plan</h2>
             <p className="text-gray-600 mb-4">
               Please provide a reason for rejecting plan <strong>{rejectingPlan.id}</strong>:
             </p>
@@ -299,6 +374,7 @@ export default function Plans() {
               rows={4}
               placeholder="Enter rejection reason..."
               required
+              aria-label="Rejection reason"
             />
             {!rejectionReason.trim() && (
               <p className="text-sm text-red-600 mb-4">Reason is required</p>

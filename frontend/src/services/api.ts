@@ -206,25 +206,25 @@ export const planApi = {
     }
     
     const queryString = params.toString();
-    const endpoint = `/api/plans${queryString ? `?${queryString}` : ''}`;
+    const endpoint = `/admin/api/plans${queryString ? `?${queryString}` : ''}`;
     
     const response = await fetchApi<PlanListResponse>(endpoint);
     return response.plans;
   },
 
   async getDetail(planId: string): Promise<Plan> {
-    return await fetchApi<Plan>(`/api/plans/${planId}`);
+    return await fetchApi<Plan>(`/admin/api/plans/${planId}`);
   },
 
   async approve(planId: string): Promise<PlanApproveResponse> {
-    return await fetchApi<PlanApproveResponse>(`/api/plans/${planId}/approve`, {
+    return await fetchApi<PlanApproveResponse>(`/admin/api/plans/${planId}/approve`, {
       method: 'POST',
     });
   },
 
   async reject(planId: string, reason: string): Promise<PlanRejectResponse> {
     const data: PlanRejectRequest = { reason };
-    return await fetchApi<PlanRejectResponse>(`/api/plans/${planId}/reject`, {
+    return await fetchApi<PlanRejectResponse>(`/admin/api/plans/${planId}/reject`, {
       method: 'POST',
       body: JSON.stringify(data),
     });

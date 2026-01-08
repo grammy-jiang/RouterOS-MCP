@@ -202,20 +202,12 @@ class HTTPSSETransport:
                 },
             )
 
-        # Mount admin routes on the MCP app
-        # Get the underlying Starlette app from FastMCP and add admin routes
-        from routeros_mcp.api.admin import router as admin_router
-        
-        mcp_app = self.mcp_instance.http_app(transport="sse", path=self.settings.mcp_http_base_path)
-        
-        # Mount admin router routes directly on the MCP app
-        for route in admin_router.routes:
-            mcp_app.add_route(route.path, route.endpoint, methods=route.methods if hasattr(route, 'methods') else ['GET'])
-        
-        logger.info("Mounted admin API routes on MCP server")
-        
         # Run FastMCP with SSE transport
         # FastMCP's run_http_async handles the actual HTTP/SSE server
+        # Note: Admin API routes need to be integrated through FastMCP's custom_route
+        # decorator or by modifying how the transport creates its internal app.
+        # The admin router is defined in routeros_mcp/api/admin.py with prefix="/admin"
+        # and routes like "/api/plans", resulting in paths at "/admin/api/plans".
         await self.mcp_instance.run_http_async(
             transport="sse",
             host=self.settings.mcp_http_host,
