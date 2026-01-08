@@ -250,3 +250,161 @@ async def test_get_unique_tools(initialize_session_manager, db_session):
     assert len(tools) == 2
     assert "device_create" in tools
     assert "device_test" in tools
+
+
+@pytest.mark.asyncio
+async def test_list_events_date_range_filter(initialize_session_manager, db_session):
+    """Test filtering audit events by date range."""
+    from datetime import timedelta
+
+    base_time = datetime.now(UTC)
+    
+    # Create events at different times
+    event1 = AuditEvent(
+        id="evt-001",
+        timestamp=base_time - timedelta(days=5),
+        user_sub="user-1",
+        user_email="user1@example.com",
+        user_role="admin",
+        device_id="dev-001",
+        environment="lab",
+        action="WRITE",
+        tool_name="device_create",
+        tool_tier="fundamental",
+        result="SUCCESS",
+        meta={},
+    )
+    event2 = AuditEvent(
+        id="evt-002",
+        timestamp=base_time - timedelta(days=2),
+        user_sub="user-2",
+        user_email="user2@example.com",
+        user_role="operator",
+        device_id="dev-002",
+        environment="staging",
+        action="READ_SENSITIVE",
+        tool_name="device_test",
+        tool_tier="fundamental",
+        result="SUCCESS",
+        meta={},
+    )
+    event3 = AuditEvent(
+        id="evt-003",
+        timestamp=base_time,
+        user_sub="user-3",
+        user_email="user3@example.com",
+        user_role="admin",
+        device_id="dev-003",
+        environment="lab",
+        action="WRITE",
+        tool_name="device_update",
+        tool_tier="fundamental",
+        result="SUCCESS",
+        meta={},
+    )
+
+    db_session.add(event1)
+    db_session.add(event2)
+    db_session.add(event3)
+    await db_session.commit()
+
+    service = AuditService(db_session)
+
+    # Filter events from last 3 days
+    result = await service.list_events(
+        date_from=base_time - timedelta(days=3),
+    )
+    assert len(result["events"]) == 2
+    event_ids = [e["id"] for e in result["events"]]
+    assert "evt-002" in event_ids
+    assert "evt-003" in event_ids
+
+    # Filter events up to 3 days ago
+    result = await service.list_events(
+        date_to=base_time - timedelta(days=3),
+    )
+    assert len(result["events"]) == 1
+    assert result["events"][0]["id"] == "evt-001"
+
+    # Filter events in specific range
+    result = await service.list_events(
+        date_from=base_time - timedelta(days=4),
+        date_to=base_time - timedelta(days=1),
+    )
+    assert len(result["events"]) == 1
+    assert result["events"][0]["id"] == "evt-002"
+
+
+@pytest.mark.asyncio
+async def test_list_events_search_filter(initialize_session_manager, db_session):
+    """Test keyword search in audit events."""
+    # Create events with different error messages and metadata
+    event1 = AuditEvent(
+        id="evt-001",
+        timestamp=datetime.now(UTC),
+        user_sub="user-1",
+        user_email="user1@example.com",
+        user_role="admin",
+        device_id="dev-001",
+        environment="lab",
+        action="WRITE",
+        tool_name="device_create",
+        tool_tier="fundamental",
+        result="SUCCESS",
+        meta={"parameters": {"name": "test-router"}},
+    )
+    event2 = AuditEvent(
+        id="evt-002",
+        timestamp=datetime.now(UTC),
+        user_sub="user-2",
+        user_email="user2@example.com",
+        user_role="operator",
+        device_id="dev-002",
+        environment="staging",
+        action="WRITE",
+        tool_name="device_test",
+        tool_tier="fundamental",
+        result="FAILURE",
+        error_message="Connection timeout to device",
+        meta={},
+    )
+    event3 = AuditEvent(
+        id="evt-003",
+        timestamp=datetime.now(UTC),
+        user_sub="user-3",
+        user_email="user3@example.com",
+        user_role="admin",
+        device_id="dev-003",
+        environment="lab",
+        action="READ_SENSITIVE",
+        tool_name="device_info",
+        tool_tier="fundamental",
+        result="SUCCESS",
+        meta={"result_summary": "Retrieved firewall configuration"},
+    )
+
+    db_session.add(event1)
+    db_session.add(event2)
+    db_session.add(event3)
+    await db_session.commit()
+
+    service = AuditService(db_session)
+
+    # Search for "timeout" in error message
+    result = await service.list_events(search="timeout")
+    assert len(result["events"]) == 1
+    assert result["events"][0]["id"] == "evt-002"
+
+    # Search for "test" in metadata (should match event1's parameters)
+    result = await service.list_events(search="test-router")
+    assert len(result["events"]) == 1
+    assert result["events"][0]["id"] == "evt-001"
+
+    # Search for "firewall" in metadata
+    result = await service.list_events(search="firewall")
+    assert len(result["events"]) == 1
+    assert result["events"][0]["id"] == "evt-003"
+
+    # Search with no matches
+    result = await service.list_events(search="nonexistent")
+    assert len(result["events"]) == 0

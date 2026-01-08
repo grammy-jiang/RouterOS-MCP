@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { auditApi, deviceApi, ApiError } from '../services/api';
 import type { AuditEvent, AuditEventsFilter } from '../types/audit';
 
@@ -26,13 +26,39 @@ export default function AuditLog() {
   const [availableDevices, setAvailableDevices] = useState<string[]>([]);
   const [availableTools, setAvailableTools] = useState<string[]>([]);
 
+  // Helper function to build filter object from current state
+  const buildFilter = (): AuditEventsFilter => {
+    const filter: AuditEventsFilter = {};
+
+    if (deviceFilter) filter.device_id = deviceFilter;
+    if (toolFilter) filter.tool_name = toolFilter;
+    if (resultFilter) {
+      filter.success = resultFilter === 'success' ? true : resultFilter === 'failure' ? false : undefined;
+    }
+    if (dateFrom) {
+      const fromDate = new Date(dateFrom);
+      if (!isNaN(fromDate.getTime())) {
+        filter.date_from = fromDate.toISOString();
+      }
+    }
+    if (dateTo) {
+      const toDate = new Date(dateTo);
+      if (!isNaN(toDate.getTime())) {
+        filter.date_to = toDate.toISOString();
+      }
+    }
+    if (searchQuery) filter.search = searchQuery;
+
+    return filter;
+  };
+
   useEffect(() => {
     loadFilterOptions();
   }, []);
 
   useEffect(() => {
     loadEvents();
-  }, [currentPage, deviceFilter, toolFilter, resultFilter, dateFrom, dateTo, searchQuery]);
+  }, [loadEvents]);
 
   const loadFilterOptions = async () => {
     try {
@@ -50,24 +76,16 @@ export default function AuditLog() {
     }
   };
 
-  const loadEvents = async () => {
+  const loadEvents = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
       const filter: AuditEventsFilter = {
+        ...buildFilter(),
         page: currentPage,
         page_size: pageSize,
       };
-
-      if (deviceFilter) filter.device_id = deviceFilter;
-      if (toolFilter) filter.tool_name = toolFilter;
-      if (resultFilter) {
-        filter.success = resultFilter === 'success' ? true : resultFilter === 'failure' ? false : undefined;
-      }
-      if (dateFrom) filter.date_from = new Date(dateFrom).toISOString();
-      if (dateTo) filter.date_to = new Date(dateTo).toISOString();
-      if (searchQuery) filter.search = searchQuery;
 
       const response = await auditApi.listEvents(filter);
       setEvents(response.events);
@@ -79,20 +97,11 @@ export default function AuditLog() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, deviceFilter, toolFilter, resultFilter, dateFrom, dateTo, searchQuery, pageSize]);
 
   const handleExportCsv = async () => {
     try {
-      const filter: AuditEventsFilter = {};
-
-      if (deviceFilter) filter.device_id = deviceFilter;
-      if (toolFilter) filter.tool_name = toolFilter;
-      if (resultFilter) {
-        filter.success = resultFilter === 'success' ? true : resultFilter === 'failure' ? false : undefined;
-      }
-      if (dateFrom) filter.date_from = new Date(dateFrom).toISOString();
-      if (dateTo) filter.date_to = new Date(dateTo).toISOString();
-      if (searchQuery) filter.search = searchQuery;
+      const filter = buildFilter();
 
       const blob = await auditApi.exportToCsv(filter);
       const url = window.URL.createObjectURL(blob);

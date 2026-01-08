@@ -375,3 +375,226 @@ class TestAuthentication:
 
         response = client.get("/admin/api/plans")
         assert response.status_code == 200
+
+
+@pytest.fixture
+def mock_audit_service():
+    """Mock audit service."""
+    service = MagicMock()
+    service.list_events = AsyncMock(return_value={
+        "events": [],
+        "total": 0,
+        "page": 1,
+        "page_size": 20,
+        "total_pages": 0,
+    })
+    service.get_unique_devices = AsyncMock(return_value=[])
+    service.get_unique_tools = AsyncMock(return_value=[])
+    return service
+
+
+class TestAuditEvents:
+    """Tests for audit events API endpoints."""
+
+    def test_list_audit_events_empty(self, app, mock_audit_service):
+        """Test listing audit events when none exist."""
+        from routeros_mcp.api.admin import get_audit_service
+        
+        app.dependency_overrides[get_audit_service] = create_mock_dependency(mock_audit_service)
+        
+        client = TestClient(app)
+        response = client.get("/admin/api/audit/events")
+        assert response.status_code == 200
+        data = response.json()
+        assert "events" in data
+        assert len(data["events"]) == 0
+        assert data["total"] == 0
+
+    def test_list_audit_events_with_data(self, app, mock_audit_service):
+        """Test listing audit events with data."""
+        from routeros_mcp.api.admin import get_audit_service
+        
+        mock_events = [
+            {
+                "id": "evt-001",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "user_sub": "user-1",
+                "user_email": "user1@example.com",
+                "user_role": "admin",
+                "device_id": "dev-001",
+                "environment": "lab",
+                "action": "WRITE",
+                "tool_name": "device_create",
+                "tool_tier": "fundamental",
+                "success": True,
+                "error_message": None,
+                "parameters": None,
+                "result_summary": None,
+                "correlation_id": None,
+            }
+        ]
+        
+        mock_audit_service.list_events.return_value = {
+            "events": mock_events,
+            "total": 1,
+            "page": 1,
+            "page_size": 20,
+            "total_pages": 1,
+        }
+        
+        app.dependency_overrides[get_audit_service] = create_mock_dependency(mock_audit_service)
+        
+        client = TestClient(app)
+        response = client.get("/admin/api/audit/events")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["events"]) == 1
+        assert data["events"][0]["id"] == "evt-001"
+
+    def test_list_audit_events_with_filters(self, app, mock_audit_service):
+        """Test listing audit events with filters."""
+        from routeros_mcp.api.admin import get_audit_service
+        
+        app.dependency_overrides[get_audit_service] = create_mock_dependency(mock_audit_service)
+        
+        client = TestClient(app)
+        response = client.get(
+            "/admin/api/audit/events",
+            params={
+                "device_id": "dev-001",
+                "tool_name": "device_create",
+                "success": True,
+                "search": "test",
+            }
+        )
+        assert response.status_code == 200
+        
+        # Verify service was called with filters
+        mock_audit_service.list_events.assert_called_once()
+        call_kwargs = mock_audit_service.list_events.call_args[1]
+        assert call_kwargs["device_id"] == "dev-001"
+        assert call_kwargs["tool_name"] == "device_create"
+        assert call_kwargs["success"] is True
+        assert call_kwargs["search"] == "test"
+
+    def test_list_audit_events_with_date_range(self, app, mock_audit_service):
+        """Test listing audit events with date range filter."""
+        from routeros_mcp.api.admin import get_audit_service
+        
+        app.dependency_overrides[get_audit_service] = create_mock_dependency(mock_audit_service)
+        
+        client = TestClient(app)
+        response = client.get(
+            "/admin/api/audit/events",
+            params={
+                "date_from": "2024-01-01T00:00:00Z",
+                "date_to": "2024-01-31T23:59:59Z",
+            }
+        )
+        assert response.status_code == 200
+        
+        # Verify service was called with parsed dates
+        mock_audit_service.list_events.assert_called_once()
+        call_kwargs = mock_audit_service.list_events.call_args[1]
+        assert call_kwargs["date_from"] is not None
+        assert call_kwargs["date_to"] is not None
+
+    def test_list_audit_events_invalid_date(self, app, mock_audit_service):
+        """Test listing audit events with invalid date format."""
+        from routeros_mcp.api.admin import get_audit_service
+        
+        app.dependency_overrides[get_audit_service] = create_mock_dependency(mock_audit_service)
+        
+        client = TestClient(app)
+        response = client.get(
+            "/admin/api/audit/events",
+            params={"date_from": "invalid-date"}
+        )
+        assert response.status_code == 400
+        assert "Invalid date_from format" in response.json()["detail"]
+
+    def test_list_audit_events_pagination(self, app, mock_audit_service):
+        """Test audit events pagination."""
+        from routeros_mcp.api.admin import get_audit_service
+        
+        app.dependency_overrides[get_audit_service] = create_mock_dependency(mock_audit_service)
+        
+        client = TestClient(app)
+        response = client.get(
+            "/admin/api/audit/events",
+            params={"page": 2, "page_size": 50}
+        )
+        assert response.status_code == 200
+        
+        # Verify service was called with pagination params
+        mock_audit_service.list_events.assert_called_once()
+        call_kwargs = mock_audit_service.list_events.call_args[1]
+        assert call_kwargs["page"] == 2
+        assert call_kwargs["page_size"] == 50
+
+    def test_export_audit_events_csv(self, app, mock_audit_service):
+        """Test exporting audit events to CSV."""
+        from routeros_mcp.api.admin import get_audit_service
+        
+        mock_events = [
+            {
+                "id": "evt-001",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "user_sub": "user-1",
+                "user_email": "user1@example.com",
+                "user_role": "admin",
+                "device_id": "dev-001",
+                "environment": "lab",
+                "action": "WRITE",
+                "tool_name": "device_create",
+                "tool_tier": "fundamental",
+                "success": True,
+                "error_message": None,
+                "parameters": None,
+                "result_summary": None,
+                "correlation_id": None,
+            }
+        ]
+        
+        mock_audit_service.list_events.return_value = {
+            "events": mock_events,
+            "total": 1,
+            "page": 1,
+            "page_size": 10000,
+            "total_pages": 1,
+        }
+        
+        app.dependency_overrides[get_audit_service] = create_mock_dependency(mock_audit_service)
+        
+        client = TestClient(app)
+        response = client.get("/admin/api/audit/events/export")
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "text/csv; charset=utf-8"
+        assert "attachment" in response.headers["content-disposition"]
+        
+        # Verify CSV content
+        content = response.text
+        assert "Timestamp" in content
+        assert "User Email" in content
+        assert "user1@example.com" in content
+        assert "device_create" in content
+
+    def test_get_audit_filters(self, app, mock_audit_service):
+        """Test getting available audit filter options."""
+        from routeros_mcp.api.admin import get_audit_service
+        
+        mock_audit_service.get_unique_devices.return_value = ["dev-001", "dev-002"]
+        mock_audit_service.get_unique_tools.return_value = ["device_create", "device_test"]
+        
+        app.dependency_overrides[get_audit_service] = create_mock_dependency(mock_audit_service)
+        
+        client = TestClient(app)
+        response = client.get("/admin/api/audit/filters")
+        assert response.status_code == 200
+        data = response.json()
+        assert "devices" in data
+        assert "tools" in data
+        assert len(data["devices"]) == 2
+        assert len(data["tools"]) == 2
+        assert "dev-001" in data["devices"]
+        assert "device_create" in data["tools"]

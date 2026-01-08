@@ -7,7 +7,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import and_, desc, func, or_, select
+from sqlalchemy import String, and_, cast, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from routeros_mcp.infra.db.models import AuditEvent as AuditEventORM
@@ -97,7 +97,7 @@ class AuditService:
             conditions.append(
                 or_(
                     AuditEventORM.error_message.ilike(search_pattern),
-                    AuditEventORM.meta.cast(str).ilike(search_pattern),
+                    cast(AuditEventORM.meta, String).ilike(search_pattern),
                 )
             )
 

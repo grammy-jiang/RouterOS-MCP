@@ -8,6 +8,7 @@ See docs/09-operations-deployment-self-update-and-runbook.md for design.
 
 import logging
 import re
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -25,6 +26,31 @@ from routeros_mcp.mcp.errors import DeviceNotFoundError, EnvironmentMismatchErro
 MAX_AUDIT_EXPORT_LIMIT = 10000
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_iso_date(date_str: str | None, param_name: str) -> datetime | None:
+    """Parse ISO date string for audit event filtering.
+    
+    Args:
+        date_str: ISO format date string (e.g., "2024-01-01T00:00:00Z")
+        param_name: Parameter name for error messages
+        
+    Returns:
+        Parsed datetime object or None if date_str is None
+        
+    Raises:
+        HTTPException: If date string is invalid
+    """
+    if not date_str:
+        return None
+        
+    try:
+        return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid {param_name} format: {e}",
+        )
 
 
 # Admin router
@@ -926,32 +952,12 @@ async def list_audit_events(
         JSON with events and pagination info
     """
     try:
-        from datetime import datetime
-
         # Validate and limit page size
         page_size = min(page_size, 100)
 
         # Parse date filters
-        date_from_dt = None
-        date_to_dt = None
-
-        if date_from:
-            try:
-                date_from_dt = datetime.fromisoformat(date_from.replace("Z", "+00:00"))
-            except ValueError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid date_from format: {e}",
-                )
-
-        if date_to:
-            try:
-                date_to_dt = datetime.fromisoformat(date_to.replace("Z", "+00:00"))
-            except ValueError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid date_to format: {e}",
-                )
+        date_from_dt = _parse_iso_date(date_from, "date_from")
+        date_to_dt = _parse_iso_date(date_to, "date_to")
 
         # Query events
         result = await audit_service.list_events(
@@ -1012,31 +1018,12 @@ async def export_audit_events(
     try:
         import csv
         import io
-        from datetime import UTC, datetime
 
         from fastapi.responses import StreamingResponse
 
         # Parse date filters
-        date_from_dt = None
-        date_to_dt = None
-
-        if date_from:
-            try:
-                date_from_dt = datetime.fromisoformat(date_from.replace("Z", "+00:00"))
-            except ValueError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid date_from format: {e}",
-                )
-
-        if date_to:
-            try:
-                date_to_dt = datetime.fromisoformat(date_to.replace("Z", "+00:00"))
-            except ValueError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid date_to format: {e}",
-                )
+        date_from_dt = _parse_iso_date(date_from, "date_from")
+        date_to_dt = _parse_iso_date(date_to, "date_to")
 
         # Query all matching events (no pagination for export)
         # Note: Large exports are limited to MAX_AUDIT_EXPORT_LIMIT to prevent memory/timeout issues
