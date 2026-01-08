@@ -339,30 +339,94 @@ class DeviceService:
     ) -> None:
         """Add encrypted credentials for a device.
 
+        Supports password-based and SSH key-based credentials (Phase 4).
+
         Args:
             credential_data: Credential data
 
         Raises:
             DeviceNotFoundError: If device doesn't exist
+            ValidationError: If SSH key is invalid or required fields are missing
         """
+        from routeros_mcp.security.crypto import (
+            SSHKeyValidationError,
+            get_public_key_fingerprint,
+            validate_ssh_private_key,
+        )
+
         # Verify device exists
         await self.get_device(credential_data.device_id)
 
-        # Encrypt password
-        encrypted_secret = encrypt_string(
-            credential_data.password,
-            self.settings.encryption_key,
-        )
+        # Validate credential data based on type
+        if credential_data.credential_type == "routeros_ssh_key":
+            # SSH key authentication
+            if not credential_data.private_key:
+                raise ValidationError(
+                    "private_key is required for routeros_ssh_key credential type",
+                    data={"device_id": credential_data.device_id},
+                )
+            
+            # Validate SSH key format
+            try:
+                validate_ssh_private_key(credential_data.private_key)
+            except SSHKeyValidationError as e:
+                raise ValidationError(
+                    f"Invalid SSH private key: {e}",
+                    data={"device_id": credential_data.device_id},
+                )
+            
+            # Generate fingerprint if not provided
+            if not credential_data.public_key_fingerprint:
+                try:
+                    credential_data.public_key_fingerprint = get_public_key_fingerprint(
+                        credential_data.private_key
+                    )
+                except SSHKeyValidationError as e:
+                    raise ValidationError(
+                        f"Failed to extract public key fingerprint: {e}",
+                        data={"device_id": credential_data.device_id},
+                    )
+            
+            # Encrypt private key
+            encrypted_private_key = encrypt_string(
+                credential_data.private_key,
+                self.settings.encryption_key,
+            )
+            
+            # Create credential with SSH key
+            credential_orm = CredentialORM(
+                id=f"cred-{credential_data.device_id}-{credential_data.credential_type}",
+                device_id=credential_data.device_id,
+                credential_type=credential_data.credential_type,
+                username=credential_data.username,
+                encrypted_secret="",  # Not used for key auth
+                private_key=encrypted_private_key,
+                public_key_fingerprint=credential_data.public_key_fingerprint,
+                active=True,
+            )
+        else:
+            # Password-based authentication (rest or ssh)
+            if not credential_data.password:
+                raise ValidationError(
+                    f"password is required for {credential_data.credential_type} credential type",
+                    data={"device_id": credential_data.device_id},
+                )
+            
+            # Encrypt password
+            encrypted_secret = encrypt_string(
+                credential_data.password,
+                self.settings.encryption_key,
+            )
 
-        # Create credential
-        credential_orm = CredentialORM(
-            id=f"cred-{credential_data.device_id}-{credential_data.credential_type}",
-            device_id=credential_data.device_id,
-            credential_type=credential_data.credential_type,
-            username=credential_data.username,
-            encrypted_secret=encrypted_secret,
-            active=True,
-        )
+            # Create credential with password
+            credential_orm = CredentialORM(
+                id=f"cred-{credential_data.device_id}-{credential_data.credential_type}",
+                device_id=credential_data.device_id,
+                credential_type=credential_data.credential_type,
+                username=credential_data.username,
+                encrypted_secret=encrypted_secret,
+                active=True,
+            )
 
         self.session.add(credential_orm)
         await self.session.commit()
@@ -454,9 +518,47 @@ class DeviceService:
         """Get SSH client for device with decrypted credentials.
 
         Caller must close the returned client (`await client.close()`).
+        
+        Phase 4: Supports both SSH key and password authentication.
+        Tries routeros_ssh_key first, falls back to ssh password if not found.
         """
         device = await self.get_device(device_id)
 
+        # Phase 4: Try SSH key credential first
+        result = await self.session.execute(
+            select(CredentialORM).where(
+                CredentialORM.device_id == device_id,
+                CredentialORM.credential_type == "routeros_ssh_key",
+                CredentialORM.active == True,  # noqa: E712
+            )
+        )
+        key_credential = result.scalar_one_or_none()
+        
+        if key_credential:
+            # Use SSH key authentication
+            try:
+                private_key = decrypt_string(
+                    key_credential.private_key,
+                    self.settings.encryption_key,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to decrypt SSH key for device '{device_id}': {e}, trying password fallback"
+                )
+                key_credential = None  # Fall through to password auth
+            else:
+                client = RouterOSSSHClient(
+                    host=device.management_ip,
+                    port=22,
+                    username=key_credential.username,
+                    private_key=private_key,
+                    timeout_seconds=self.settings.routeros_rest_timeout_seconds,
+                    max_retries=self.settings.routeros_retry_attempts,
+                )
+                logger.info(f"SSH client created with key authentication for device '{device_id}'")
+                return client
+        
+        # Fallback to password-based SSH authentication
         result = await self.session.execute(
             select(CredentialORM).where(
                 CredentialORM.device_id == device_id,

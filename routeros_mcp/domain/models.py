@@ -264,9 +264,11 @@ class CredentialCreate(BaseModel):
     """DTO for creating device credentials."""
 
     device_id: str = Field(..., description="Device ID")
-    credential_type: Literal["rest", "ssh"] = Field(..., description="Credential type")
+    credential_type: Literal["rest", "ssh", "routeros_ssh_key"] = Field(..., description="Credential type")
     username: str = Field(..., description="Username")
-    password: str = Field(..., description="Password (will be encrypted)")
+    password: str | None = Field(default=None, description="Password (will be encrypted)")
+    private_key: str | None = Field(default=None, description="SSH private key (will be encrypted)")
+    public_key_fingerprint: str | None = Field(default=None, description="SSH public key fingerprint for verification")
 
 
 class HealthCheckResult(BaseModel):
