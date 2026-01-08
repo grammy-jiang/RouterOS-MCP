@@ -7,7 +7,19 @@ import type {
   ConnectivityTestResponse,
 } from '../types/device';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const RAW_API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
+if (import.meta.env.PROD && !RAW_API_BASE_URL.startsWith('https://')) {
+  // In production, require HTTPS to avoid sending credentials over plain HTTP.
+  // Configure VITE_API_BASE_URL accordingly in the deployment environment.
+  throw new Error(
+    'Insecure API base URL configuration: HTTPS is required in production. ' +
+      'Set VITE_API_BASE_URL to an https:// URL.'
+  );
+}
+
+const API_BASE_URL = RAW_API_BASE_URL;
 
 class ApiError extends Error {
   status: number;

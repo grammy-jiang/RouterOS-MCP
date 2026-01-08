@@ -18,7 +18,7 @@ from routeros_mcp.api.admin_models import (
     DeviceUpdateRequest,
     RejectionRequest,
 )
-from routeros_mcp.mcp.errors import DeviceNotFoundError
+from routeros_mcp.mcp.errors import DeviceNotFoundError, EnvironmentMismatchError
 
 logger = logging.getLogger(__name__)
 
@@ -179,9 +179,22 @@ async def create_device(
         )
 
     try:
-        # Generate device ID from name
-        import re
-        device_id = f"dev-{re.sub(r'[^a-z0-9-]', '-', device_data.name.lower())}"
+        # Generate device ID from name with collision handling
+        base_slug = re.sub(r'[^a-z0-9]+', '-', device_data.name.lower()).strip('-')
+        device_id = f"dev-{base_slug}"
+
+        # Check for collision and add counter if needed
+        counter = 1
+        original_id = device_id
+        while True:
+            try:
+                await device_service.get_device(device_id)
+                # Device exists, try next counter
+                device_id = f"{original_id}-{counter}"
+                counter += 1
+            except DeviceNotFoundError:
+                # Device doesn't exist, we can use this ID
+                break
 
         # Create device with credentials
         device = await device_service.create_device(
@@ -209,8 +222,23 @@ async def create_device(
             },
         )
 
+    except DeviceNotFoundError as e:
+        # This should never happen due to the collision check above
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error during device ID generation",
+        ) from e
     except Exception as e:
+        from routeros_mcp.domain.exceptions import EnvironmentNotAllowedError
         from routeros_mcp.infra.observability.logging import get_correlation_id
+
+        # Handle environment mismatch as 400 Bad Request
+        if isinstance(e, (EnvironmentNotAllowedError, EnvironmentMismatchError)):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            ) from e
+
         correlation_id = get_correlation_id()
         logger.error(
             f"Error creating device: {e}",
@@ -220,7 +248,7 @@ async def create_device(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create device. Correlation ID: {correlation_id}",
-        )
+        ) from e
 
 
 @router.put("/api/admin/devices/{device_id}")
@@ -249,7 +277,9 @@ async def update_device(
         )
 
     try:
+        from sqlalchemy import delete as sql_delete
         from routeros_mcp.domain.models import DeviceUpdate, CredentialCreate
+        from routeros_mcp.infra.db.models import Credential as CredentialORM
 
         # Build device update
         update_fields = {}
@@ -259,6 +289,8 @@ async def update_device(
             update_fields["management_ip"] = device_data.hostname
         if device_data.port is not None:
             update_fields["management_port"] = device_data.port
+        if device_data.environment is not None:
+            update_fields["environment"] = device_data.environment
 
         if update_fields:
             device = await device_service.update_device(
@@ -268,8 +300,15 @@ async def update_device(
         else:
             device = await device_service.get_device(device_id)
 
-        # Update credentials if provided
+        # Update credentials if both username and password provided
         if device_data.username is not None and device_data.password is not None:
+            # Delete existing credential if it exists, then create new one
+            await device_service.session.execute(
+                sql_delete(CredentialORM).where(
+                    CredentialORM.device_id == device_id,
+                    CredentialORM.credential_type == "rest"
+                )
+            )
             await device_service.add_credential(
                 CredentialCreate(
                     device_id=device_id,
@@ -297,7 +336,7 @@ async def update_device(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
-        )
+        ) from e
     except Exception as e:
         from routeros_mcp.infra.observability.logging import get_correlation_id
         correlation_id = get_correlation_id()
@@ -309,7 +348,7 @@ async def update_device(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update device. Correlation ID: {correlation_id}",
-        )
+        ) from e
 
 
 @router.delete("/api/admin/devices/{device_id}")
@@ -336,23 +375,16 @@ async def delete_device(
         )
 
     try:
-        from sqlalchemy import delete as sql_delete
-        from routeros_mcp.infra.db.models import Device as DeviceORM, Credential as CredentialORM
+        from routeros_mcp.infra.db.models import Device as DeviceORM
 
-        # Verify device exists
+        # Verify device exists via domain service (for name, domain checks, etc.)
         device = await device_service.get_device(device_id)
 
-        # Delete credentials
-        await device_service.session.execute(
-            sql_delete(CredentialORM).where(CredentialORM.device_id == device_id)
-        )
-
-        # Delete device
-        await device_service.session.execute(
-            sql_delete(DeviceORM).where(DeviceORM.id == device_id)
-        )
-
-        await device_service.session.commit()
+        # Load ORM device instance for deletion so ORM/DB cascades can apply
+        device_orm = await device_service.session.get(DeviceORM, device_id)
+        if device_orm is not None:
+            await device_service.session.delete(device_orm)
+            await device_service.session.commit()
 
         logger.info(
             "Deleted device",
@@ -370,7 +402,7 @@ async def delete_device(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
-        )
+        ) from e
     except Exception as e:
         from routeros_mcp.infra.observability.logging import get_correlation_id
         correlation_id = get_correlation_id()
@@ -382,7 +414,7 @@ async def delete_device(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete device. Correlation ID: {correlation_id}",
-        )
+        ) from e
 
 
 @router.post("/api/admin/devices/{device_id}/test")
@@ -417,7 +449,7 @@ async def test_device_connectivity(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
-        )
+        ) from e
     except Exception as e:
         from routeros_mcp.infra.observability.logging import get_correlation_id
         correlation_id = get_correlation_id()
@@ -429,7 +461,7 @@ async def test_device_connectivity(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to test connectivity. Correlation ID: {correlation_id}",
-        )
+        ) from e
 
 
 @router.get("/api/plans")

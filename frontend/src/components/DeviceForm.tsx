@@ -77,12 +77,24 @@ export default function DeviceForm({ device, onSubmit, onCancel }: DeviceFormPro
           name: formData.name !== device.name ? formData.name : undefined,
           hostname: formData.hostname !== device.management_ip ? formData.hostname : undefined,
           port: formData.port !== device.management_port ? formData.port : undefined,
+          environment: formData.environment !== device.environment ? formData.environment : undefined,
         };
         
-        // Only include credentials if they were provided
+        // Only include credentials if both are provided
         if (formData.username && formData.password) {
           updateData.username = formData.username;
           updateData.password = formData.password;
+        } else if (formData.username || formData.password) {
+          // If only one credential field is provided, show error
+          const newErrors: Record<string, string> = {};
+          if (!formData.username) {
+            newErrors.username = 'Username is required when updating password';
+          }
+          if (!formData.password) {
+            newErrors.password = 'Password is required when updating username';
+          }
+          setErrors(newErrors);
+          return;
         }
         
         await onSubmit(updateData);
@@ -195,8 +207,14 @@ export default function DeviceForm({ device, onSubmit, onCancel }: DeviceFormPro
               <input
                 type="number"
                 id="port"
-                value={formData.port}
-                onChange={(e) => setFormData({ ...formData, port: parseInt(e.target.value) || 443 })}
+                value={Number.isNaN(formData.port) ? '' : formData.port}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setFormData({
+                    ...formData,
+                    port: value === '' ? 443 : parseInt(value, 10) || 443,
+                  });
+                }}
                 className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                   errors.port ? 'border-red-500' : 'border-gray-300'
                 }`}

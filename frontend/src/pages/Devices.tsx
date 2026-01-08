@@ -7,6 +7,7 @@ export default function Devices() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [operationError, setOperationError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingDevice, setEditingDevice] = useState<Device | undefined>(undefined);
   const [deletingDevice, setDeletingDevice] = useState<Device | null>(null);
@@ -33,12 +34,13 @@ export default function Devices() {
 
   const handleAddDevice = async (data: DeviceCreateRequest | DeviceUpdateRequest) => {
     try {
+      setOperationError(null);
       await deviceApi.create(data as DeviceCreateRequest);
       setShowForm(false);
       await loadDevices();
     } catch (err) {
       const message = err instanceof ApiError ? err.message : 'Failed to create device';
-      alert(`Error: ${message}`);
+      setOperationError(message);
       throw err;
     }
   };
@@ -47,13 +49,14 @@ export default function Devices() {
     if (!editingDevice) return;
 
     try {
+      setOperationError(null);
       await deviceApi.update(editingDevice.id, data as DeviceUpdateRequest);
       setEditingDevice(undefined);
       setShowForm(false);
       await loadDevices();
     } catch (err) {
       const message = err instanceof ApiError ? err.message : 'Failed to update device';
-      alert(`Error: ${message}`);
+      setOperationError(message);
       throw err;
     }
   };
@@ -62,18 +65,19 @@ export default function Devices() {
     if (!deletingDevice) return;
 
     try {
+      setOperationError(null);
       await deviceApi.delete(deletingDevice.id);
       setDeletingDevice(null);
       await loadDevices();
     } catch (err) {
       const message = err instanceof ApiError ? err.message : 'Failed to delete device';
-      alert(`Error: ${message}`);
+      setOperationError(message);
     }
   };
 
   const handleTestConnectivity = async (device: Device) => {
     setTestingDeviceId(device.id);
-    setTestResult(null);
+    setTestResult(null);  // Clear previous test result
 
     try {
       const result = await deviceApi.testConnectivity(device.id);
@@ -135,8 +139,28 @@ export default function Devices() {
       </div>
 
       {error && (
-        <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-md">
-          {error}
+        <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-md flex items-start justify-between">
+          <p>{error}</p>
+          <button
+            type="button"
+            onClick={() => setError(null)}
+            className="ml-4 text-sm text-red-600 hover:text-red-800"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {operationError && (
+        <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-md flex items-start justify-between">
+          <p>{operationError}</p>
+          <button
+            type="button"
+            onClick={() => setOperationError(null)}
+            className="ml-4 text-sm text-red-600 hover:text-red-800"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 
@@ -233,10 +257,25 @@ export default function Devices() {
       )}
 
       {testResult && (
-        <div className={`mt-4 p-4 rounded-md ${testResult.success ? 'bg-green-100 border border-green-400' : 'bg-red-100 border border-red-400'}`}>
+        <div
+          className={`mt-4 p-4 rounded-md flex items-start justify-between ${
+            testResult.success
+              ? 'bg-green-100 border border-green-400'
+              : 'bg-red-100 border border-red-400'
+          }`}
+        >
           <p className={testResult.success ? 'text-green-700' : 'text-red-700'}>
             {testResult.message}
           </p>
+          <button
+            type="button"
+            onClick={() => setTestResult(null)}
+            className={`ml-4 text-sm ${
+              testResult.success ? 'text-green-600 hover:text-green-800' : 'text-red-600 hover:text-red-800'
+            }`}
+          >
+            Dismiss
+          </button>
         </div>
       )}
 
