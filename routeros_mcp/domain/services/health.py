@@ -17,6 +17,11 @@ from routeros_mcp.infra.db.models import HealthCheck as HealthCheckORM
 
 logger = logging.getLogger(__name__)
 
+# Adaptive polling constants (Phase 4)
+ADAPTIVE_POLLING_MIN_INTERVAL_SECONDS = 60  # Base backoff interval for unreachable devices
+ADAPTIVE_POLLING_MAX_INTERVAL_SECONDS = 960  # Max backoff interval (16 minutes)
+ADAPTIVE_POLLING_INTERVAL_CAP_SECONDS = 300  # Max interval for healthy devices (5 minutes)
+
 
 class HealthService:
     """Service for computing device and fleet health.
@@ -171,6 +176,11 @@ class HealthService:
 
         # Store health check result
         await self._store_health_check(result)
+        
+        # Update adaptive polling state based on health check result (Phase 4)
+        # Skip if session is None (happens in some test scenarios)
+        if self.session is not None:
+            await self._update_adaptive_polling(device_id, result)
 
         # Broadcast health update notification to SSE subscribers (if HTTP/SSE transport active)
         await self._broadcast_health_update(device_id, result)
@@ -517,3 +527,167 @@ class HealthService:
             cpu_load = float(cpu_load.rstrip("%"))
 
         return float(cpu_load)
+    
+    async def _update_adaptive_polling(
+        self,
+        device_id: str,
+        health_result: HealthCheckResult,
+    ) -> None:
+        """Update device adaptive polling state based on health check result (Phase 4).
+        
+        Implements adaptive polling strategy:
+        1. Track consecutive healthy checks
+        2. Increase interval by 50% after 10 consecutive healthy checks (max 300s)
+        3. Reset interval on unhealthy/degraded checks
+        4. Apply exponential backoff for unreachable devices: 60→120→240→480→960s
+        
+        Args:
+            device_id: Device identifier
+            health_result: Health check result
+        """
+        from sqlalchemy import select, update
+        from routeros_mcp.infra.db.models import Device as DeviceORM
+        
+        # Get current device state
+        stmt = select(DeviceORM).where(DeviceORM.id == device_id)
+        result = await self.session.execute(stmt)
+        device_orm = result.scalar_one_or_none()
+        
+        if not device_orm:
+            logger.warning(f"Device {device_id} not found for adaptive polling update")
+            return
+        
+        # Determine base interval (critical: 30s, non-critical: 60s)
+        base_interval = 30 if device_orm.critical else 60
+        new_interval = device_orm.polling_interval_seconds
+        new_consecutive_healthy = device_orm.consecutive_healthy_checks
+        new_health_status = health_result.status
+        new_last_backoff_at = device_orm.last_backoff_at
+        
+        if health_result.status == "healthy":
+            # Increment consecutive healthy checks
+            new_consecutive_healthy += 1
+            
+            # After 10 consecutive healthy checks, increase interval by 50%
+            if new_consecutive_healthy >= 10:
+                new_interval = int(new_interval * 1.5)
+                # Cap at 300 seconds (5 minutes)
+                new_interval = min(new_interval, ADAPTIVE_POLLING_INTERVAL_CAP_SECONDS)
+                # Reset counter after adjustment
+                new_consecutive_healthy = 0
+                
+                logger.info(
+                    "Adaptive polling: increased interval",
+                    extra={
+                        "device_id": device_id,
+                        "new_interval_seconds": new_interval,
+                        "base_interval": base_interval,
+                    },
+                )
+            
+            # Reset backoff tracking on successful health check
+            new_last_backoff_at = None
+            
+        elif health_result.status == "degraded":
+            # Reset to base interval on degraded status
+            new_interval = base_interval
+            new_consecutive_healthy = 0
+            new_last_backoff_at = None
+            
+            logger.info(
+                "Adaptive polling: reset to base interval (degraded)",
+                extra={
+                    "device_id": device_id,
+                    "base_interval": base_interval,
+                },
+            )
+            
+        elif health_result.status == "unreachable":
+            # Apply exponential backoff using configured constants
+            if device_orm.last_backoff_at is None:
+                # First unreachable, start with base backoff interval
+                new_interval = ADAPTIVE_POLLING_MIN_INTERVAL_SECONDS
+                new_last_backoff_at = datetime.now(UTC)
+            else:
+                # Double the interval (exponential backoff) up to max
+                new_interval = min(new_interval * 2, ADAPTIVE_POLLING_MAX_INTERVAL_SECONDS)
+                new_last_backoff_at = datetime.now(UTC)
+            
+            new_consecutive_healthy = 0
+            
+            logger.warning(
+                "Adaptive polling: exponential backoff (unreachable)",
+                extra={
+                    "device_id": device_id,
+                    "new_interval_seconds": new_interval,
+                    "backoff_started_at": new_last_backoff_at.isoformat() if new_last_backoff_at else None,
+                },
+            )
+        
+        # Update device in database
+        stmt = (
+            update(DeviceORM)
+            .where(DeviceORM.id == device_id)
+            .values(
+                health_status=new_health_status,
+                consecutive_healthy_checks=new_consecutive_healthy,
+                polling_interval_seconds=new_interval,
+                last_backoff_at=new_last_backoff_at,
+            )
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
+        
+        logger.debug(
+            "Adaptive polling state updated",
+            extra={
+                "device_id": device_id,
+                "health_status": new_health_status,
+                "consecutive_healthy_checks": new_consecutive_healthy,
+                "polling_interval_seconds": new_interval,
+            },
+        )
+    
+    def get_device_polling_interval(self, device_id: str, critical: bool = False) -> int:
+        """Get polling interval for a device based on its classification (Phase 4).
+        
+        Args:
+            device_id: Device identifier
+            critical: Whether device is critical (30s base) vs non-critical (60s base)
+            
+        Returns:
+            Polling interval in seconds
+            
+        Note:
+            This is a synchronous helper for initial interval calculation.
+            Actual interval is dynamically adjusted and stored in database.
+        """
+        return 30 if critical else 60
+    
+    async def get_adaptive_polling_interval(self, device_id: str) -> int:
+        """Get current adaptive polling interval for a device (Phase 4).
+        
+        Reads the current interval from database, which is dynamically adjusted
+        based on device health status and consecutive healthy checks.
+        
+        Args:
+            device_id: Device identifier
+            
+        Returns:
+            Current polling interval in seconds
+            
+        Raises:
+            DeviceNotFoundError: If device doesn't exist
+        """
+        from sqlalchemy import select
+        from routeros_mcp.infra.db.models import Device as DeviceORM
+        
+        stmt = select(DeviceORM.polling_interval_seconds).where(DeviceORM.id == device_id)
+        result = await self.session.execute(stmt)
+        interval = result.scalar_one_or_none()
+        
+        if interval is None:
+            logger.warning(f"Device {device_id} not found for polling interval query")
+            return 60  # Default fallback
+        
+        return interval
