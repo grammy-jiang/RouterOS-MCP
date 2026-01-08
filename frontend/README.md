@@ -15,7 +15,7 @@ This is a React + TypeScript + Vite application providing a web UI for:
 - **React 19.2.0** - UI framework
 - **TypeScript 5.9.3** - Type safety
 - **Vite 7.3.1** - Build tool and dev server
-- **Tailwind CSS 3.4.0** - Utility-first CSS framework
+- **Tailwind CSS 3.4.19** - Utility-first CSS framework
 - **React Router 7.12.0** - Client-side routing
 
 ## Requirements
