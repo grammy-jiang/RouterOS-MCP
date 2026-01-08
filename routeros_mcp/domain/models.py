@@ -329,11 +329,15 @@ class Device(BaseModel):
             elif current_val < target_val:
                 return False
 
-        # If numeric parts are equal, version with no suffix (stable) > version with suffix (rc/beta)
+        # Numeric parts are equal - handle suffix comparison
+        # Stable (no suffix) > RC/beta (has suffix)
+        if not current_suffix and target_suffix:
+            return True  # Current is stable, target has suffix
         if current_suffix and not target_suffix:
-            return False  # Current is rc/beta, target is stable
+            return False  # Current has suffix, target is stable
 
-        return True  # Equal or current is stable
+        # Both have suffixes or both are stable - consider equal (>= is True)
+        return True
 
 
 class CredentialCreate(BaseModel):

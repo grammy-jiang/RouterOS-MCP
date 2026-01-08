@@ -299,3 +299,26 @@ class TestDeviceVersionHelpers:
         assert device_v6.version_ge("6.48.6") is True
         assert device_v6.version_ge("6.49") is False
         assert device_v6.version_ge("7.0") is False
+
+    def test_version_ge_both_rc_versions(self) -> None:
+        """Test version_ge() when both versions have RC suffixes."""
+        device_rc2 = Device(
+            id="dev-001",
+            name="test-router",
+            management_ip="192.168.1.1",
+            management_port=443,
+            environment="lab",
+            status="healthy",
+            tags={},
+            allow_advanced_writes=False,
+            allow_professional_workflows=False,
+            routeros_version="7.11-rc2",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        # When both have RC suffixes and numeric parts are equal, consider >= true
+        # (We don't parse RC numbers, so rc2 >= rc1 returns True by design)
+        assert device_rc2.version_ge("7.11-rc1") is True
+        assert device_rc2.version_ge("7.11-rc2") is True
+        assert device_rc2.version_ge("7.11-rc3") is True  # Can't distinguish RC numbers

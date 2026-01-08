@@ -62,7 +62,12 @@ async def main():
 
 
 def compare_version(current: str, target: str) -> bool:
-    """Simple version comparison (matches Device.version_ge logic)."""
+    """Simple version comparison (matches Device.version_ge logic).
+
+    Note: This function duplicates the logic from Device.version_ge() to make
+    this example self-contained. In production code, you would use the Device
+    model instance's version_ge() method directly.
+    """
     def parse_version(v: str) -> tuple[list[int], str]:
         parts = v.split("-", 1)
         version_str = parts[0]
@@ -89,6 +94,9 @@ def compare_version(current: str, target: str) -> bool:
         elif current_val < target_val:
             return False
 
+    # Numeric parts are equal - handle suffix comparison
+    if not current_suffix and target_suffix:
+        return True
     if current_suffix and not target_suffix:
         return False
 
