@@ -1211,3 +1211,312 @@ async def test_capability_checks_logs_include_all_required_capabilities(
     assert "allow_routing_writes" in log_record.required_capabilities
     assert len(log_record.required_capabilities) == 2
 
+
+# Phase 4: SSH Key Authentication Tests
+
+
+@pytest.mark.asyncio
+async def test_add_credential_with_ssh_key_valid(
+    db_session: AsyncSession, settings: Settings
+):
+    """Test adding SSH key credential with valid key."""
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    service = DeviceService(db_session, settings)
+    
+    # Register device
+    await service.register_device(
+        DeviceCreate(
+            id="dev-ssh-key",
+            name="router-ssh",
+            management_ip="10.0.0.5",
+            environment="lab",
+        )
+    )
+
+    # Generate test SSH key
+    key = rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=2048,
+        backend=default_backend()
+    )
+    private_pem = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption()
+    ).decode()
+
+    # Add SSH key credential
+    await service.add_credential(
+        CredentialCreate(
+            device_id="dev-ssh-key",
+            credential_type="routeros_ssh_key",
+            username="admin",
+            private_key=private_pem,
+        )
+    )
+
+    # Verify credential was stored
+    credential = await db_session.get(CredentialORM, "cred-dev-ssh-key-routeros_ssh_key")
+    assert credential is not None
+    assert credential.credential_type == "routeros_ssh_key"
+    assert credential.private_key is not None
+    assert credential.private_key.startswith("enc-")  # Encrypted
+    assert credential.public_key_fingerprint is not None
+    assert credential.public_key_fingerprint.startswith("SHA256:")
+
+
+@pytest.mark.asyncio
+async def test_add_credential_with_ssh_key_invalid_format(
+    db_session: AsyncSession, settings: Settings
+):
+    """Test adding SSH key credential with invalid key format fails validation."""
+    service = DeviceService(db_session, settings)
+    
+    # Register device
+    await service.register_device(
+        DeviceCreate(
+            id="dev-bad-key",
+            name="router-bad-key",
+            management_ip="10.0.0.6",
+            environment="lab",
+        )
+    )
+
+    # Try to add invalid SSH key
+    with pytest.raises(ValidationError, match="Invalid SSH private key"):
+        await service.add_credential(
+            CredentialCreate(
+                device_id="dev-bad-key",
+                credential_type="routeros_ssh_key",
+                username="admin",
+                private_key="not-a-valid-key",
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_add_credential_with_ssh_key_missing_private_key(
+    db_session: AsyncSession, settings: Settings
+):
+    """Test adding SSH key credential without private_key field fails validation."""
+    service = DeviceService(db_session, settings)
+    
+    # Register device
+    await service.register_device(
+        DeviceCreate(
+            id="dev-no-key",
+            name="router-no-key",
+            management_ip="10.0.0.7",
+            environment="lab",
+        )
+    )
+
+    # Try to add SSH key credential without private_key
+    # This should fail at model validation level
+    with pytest.raises(ValueError, match="private_key is required"):
+        CredentialCreate(
+            device_id="dev-no-key",
+            credential_type="routeros_ssh_key",
+            username="admin",
+            # private_key missing
+        )
+
+
+@pytest.mark.asyncio
+async def test_add_credential_with_ssh_key_auto_generates_fingerprint(
+    db_session: AsyncSession, settings: Settings
+):
+    """Test that fingerprint is auto-generated when not provided."""
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    service = DeviceService(db_session, settings)
+    
+    # Register device
+    await service.register_device(
+        DeviceCreate(
+            id="dev-auto-fp",
+            name="router-auto-fp",
+            management_ip="10.0.0.8",
+            environment="lab",
+        )
+    )
+
+    # Generate test SSH key
+    key = rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=2048,
+        backend=default_backend()
+    )
+    private_pem = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption()
+    ).decode()
+
+    # Add SSH key credential WITHOUT fingerprint
+    await service.add_credential(
+        CredentialCreate(
+            device_id="dev-auto-fp",
+            credential_type="routeros_ssh_key",
+            username="admin",
+            private_key=private_pem,
+            # public_key_fingerprint NOT provided
+        )
+    )
+
+    # Verify fingerprint was auto-generated
+    credential = await db_session.get(CredentialORM, "cred-dev-auto-fp-routeros_ssh_key")
+    assert credential is not None
+    assert credential.public_key_fingerprint is not None
+    assert credential.public_key_fingerprint.startswith("SHA256:")
+
+
+@pytest.mark.asyncio
+async def test_get_ssh_client_with_key_credential(
+    db_session: AsyncSession, settings: Settings, fake_ssh_client: _FakeSSHClient
+):
+    """Test get_ssh_client successfully retrieves SSH key credential."""
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    service = DeviceService(db_session, settings)
+    
+    # Register device
+    await service.register_device(
+        DeviceCreate(
+            id="dev-ssh-get",
+            name="router-ssh-get",
+            management_ip="10.0.0.9",
+            environment="lab",
+        )
+    )
+
+    # Generate and add SSH key credential
+    key = rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=2048,
+        backend=default_backend()
+    )
+    private_pem = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption()
+    ).decode()
+
+    await service.add_credential(
+        CredentialCreate(
+            device_id="dev-ssh-get",
+            credential_type="routeros_ssh_key",
+            username="admin",
+            private_key=private_pem,
+        )
+    )
+
+    # Get SSH client - should use key credential
+    client = await service.get_ssh_client("dev-ssh-get")
+    assert client is fake_ssh_client
+
+
+@pytest.mark.asyncio
+async def test_get_ssh_client_fallback_to_password_on_decryption_failure(
+    db_session: AsyncSession, settings: Settings, fake_ssh_client: _FakeSSHClient
+):
+    """Test get_ssh_client falls back to password when key decryption fails."""
+    from routeros_mcp.security.crypto import encrypt_string
+
+    service = DeviceService(db_session, settings)
+    
+    # Register device
+    await service.register_device(
+        DeviceCreate(
+            id="dev-fallback",
+            name="router-fallback",
+            management_ip="10.0.0.10",
+            environment="lab",
+        )
+    )
+
+    # Manually create a corrupt SSH key credential (encrypted with different key)
+    # Use a valid Fernet key, but different from settings.encryption_key
+    wrong_key = "5R3dF-OaeUaCXWAUdmigGEtX5_2Z4I7aXZL224KbECI="
+    corrupt_encrypted_key = encrypt_string("fake-key-data", wrong_key)
+    credential_ssh_key = CredentialORM(
+        id="cred-dev-fallback-routeros_ssh_key",
+        device_id="dev-fallback",
+        credential_type="routeros_ssh_key",
+        username="admin",
+        encrypted_secret="",
+        private_key=corrupt_encrypted_key,
+        public_key_fingerprint="SHA256:corrupt",
+        active=True,
+    )
+    db_session.add(credential_ssh_key)
+
+    # Add valid password credential as fallback
+    await service.add_credential(
+        CredentialCreate(
+            device_id="dev-fallback",
+            credential_type="ssh",
+            username="admin",
+            password="fallback-password",
+        )
+    )
+    await db_session.commit()
+
+    # Get SSH client - should fall back to password due to key decryption failure
+    client = await service.get_ssh_client("dev-fallback")
+    assert client is fake_ssh_client
+
+
+@pytest.mark.asyncio
+async def test_get_ssh_client_with_null_private_key_falls_back(
+    db_session: AsyncSession, settings: Settings, fake_ssh_client: _FakeSSHClient
+):
+    """Test get_ssh_client falls back when private_key field is null."""
+    service = DeviceService(db_session, settings)
+    
+    # Register device
+    await service.register_device(
+        DeviceCreate(
+            id="dev-null-key",
+            name="router-null-key",
+            management_ip="10.0.0.11",
+            environment="lab",
+        )
+    )
+
+    # Manually create SSH key credential with null private_key
+    credential_null_key = CredentialORM(
+        id="cred-dev-null-key-routeros_ssh_key",
+        device_id="dev-null-key",
+        credential_type="routeros_ssh_key",
+        username="admin",
+        encrypted_secret="",
+        private_key=None,  # NULL private key
+        public_key_fingerprint="SHA256:null",
+        active=True,
+    )
+    db_session.add(credential_null_key)
+
+    # Add valid password credential as fallback
+    await service.add_credential(
+        CredentialCreate(
+            device_id="dev-null-key",
+            credential_type="ssh",
+            username="admin",
+            password="fallback-password",
+        )
+    )
+    await db_session.commit()
+
+    # Get SSH client - should fall back to password due to null private_key
+    client = await service.get_ssh_client("dev-null-key")
+    assert client is fake_ssh_client
+
+

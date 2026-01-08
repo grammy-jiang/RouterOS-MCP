@@ -98,6 +98,7 @@ class RouterOSSSHClient:
         port: int = 22,
         username: str | None = None,
         password: str | None = None,
+        private_key: str | None = None,
         timeout_seconds: float = 60.0,
         max_retries: int = 3,
     ) -> None:
@@ -107,7 +108,8 @@ class RouterOSSSHClient:
             host: RouterOS device hostname or IP
             port: SSH port (default: 22)
             username: RouterOS username
-            password: RouterOS password
+            password: RouterOS password (optional if private_key provided)
+            private_key: SSH private key in PEM format (Phase 4)
             timeout_seconds: Command execution timeout
             max_retries: Maximum retry attempts for connection
         """
@@ -115,23 +117,29 @@ class RouterOSSSHClient:
         self.port = port
         self.username = username
         self.password = password
+        self.private_key = private_key
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
 
         self._connection: asyncssh.SSHClientConnection | None = None
 
-    def set_credentials(self, username: str, password: str) -> None:
+    def set_credentials(self, username: str, password: str | None = None, private_key: str | None = None) -> None:
         """Set or update authentication credentials.
 
         Args:
             username: RouterOS username
-            password: RouterOS password
+            password: RouterOS password (optional if private_key provided)
+            private_key: SSH private key in PEM format (Phase 4)
         """
         self.username = username
         self.password = password
+        self.private_key = private_key
 
     async def _get_connection(self) -> asyncssh.SSHClientConnection:
         """Get or create SSH connection with retries.
+
+        Tries key authentication first (if private_key is provided),
+        then falls back to password authentication.
 
         Returns:
             SSH connection
@@ -140,8 +148,11 @@ class RouterOSSSHClient:
             RouterOSSSHAuthenticationError: On auth failure
             RouterOSSSHError: On connection errors
         """
-        if not self.username or not self.password:
-            raise ValueError("Credentials not set. Call set_credentials() first.")
+        if not self.username:
+            raise ValueError("Username not set. Call set_credentials() first.")
+        
+        if not self.private_key and not self.password:
+            raise ValueError("Either private_key or password must be set. Call set_credentials() first.")
 
         # Reuse existing connection if still alive
         if self._connection is not None and not self._connection.is_closed():
@@ -150,20 +161,57 @@ class RouterOSSSHClient:
         # Create new connection with retries
         for attempt in range(self.max_retries):
             try:
-                self._connection = await asyncssh.connect(
-                    self.host,
-                    port=self.port,
-                    username=self.username,
-                    password=self.password,
-                    known_hosts=None,  # Skip host key verification (lab usage)
-                )
-                logger.info(f"SSH connection established: {self.host}:{self.port}")
-                return self._connection
+                # Phase 4: Try key auth first, fallback to password
+                if self.private_key:
+                    try:
+                        # Import asyncssh key from PEM string
+                        from asyncssh import public_key
+                        try:
+                            key = public_key.import_private_key(self.private_key)
+                        except (ValueError, KeyError, TypeError) as key_err:
+                            # Key import failed - treat as authentication error (no retry)
+                            logger.error(f"Failed to import SSH private key for {self.host}: {key_err}")
+                            raise RouterOSSSHAuthenticationError(
+                                f"Invalid SSH private key format: {key_err}"
+                            ) from key_err
+                        
+                        self._connection = await asyncssh.connect(
+                            self.host,
+                            port=self.port,
+                            username=self.username,
+                            client_keys=[key],
+                            known_hosts=None,  # Skip host key verification (lab usage)
+                        )
+                        logger.info(f"SSH connection established (key auth): {self.host}:{self.port}")
+                        return self._connection
+                    except asyncssh.PermissionDenied:
+                        # Key auth failed, try password if available
+                        logger.warning(f"SSH key authentication failed for {self.host}, trying password fallback")
+                        if not self.password:
+                            # No password fallback available, let outer handler convert to RouterOSSSHAuthenticationError
+                            # (Authentication errors should not be retried)
+                            raise
+                
+                # Try password authentication (either as fallback or primary method)
+                if self.password:
+                    self._connection = await asyncssh.connect(
+                        self.host,
+                        port=self.port,
+                        username=self.username,
+                        password=self.password,
+                        known_hosts=None,  # Skip host key verification (lab usage)
+                    )
+                    logger.info(f"SSH connection established (password auth): {self.host}:{self.port}")
+                    return self._connection
 
             except asyncssh.PermissionDenied as e:
                 raise RouterOSSSHAuthenticationError(
                     f"SSH authentication failed: {self.host}"
                 ) from e
+            
+            except RouterOSSSHAuthenticationError:
+                # Re-raise authentication errors without retry
+                raise
 
             except Exception as e:
                 if attempt == self.max_retries - 1:

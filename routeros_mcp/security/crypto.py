@@ -281,3 +281,100 @@ def decrypt_string(ciphertext: str, encryption_key: str) -> str:
     crypto = CredentialEncryption(encryption_key)
     return crypto.decrypt(ciphertext)
 
+
+# SSH Key Validation and Helpers (Phase 4)
+
+
+class SSHKeyValidationError(Exception):
+    """Raised when SSH key validation fails."""
+
+    pass
+
+
+def validate_ssh_private_key(private_key: str) -> bool:
+    """Validate SSH private key format.
+
+    Args:
+        private_key: SSH private key in PEM format
+
+    Returns:
+        True if valid
+
+    Raises:
+        SSHKeyValidationError: If key is invalid
+
+    Example:
+        try:
+            validate_ssh_private_key(key_pem)
+            print("Key is valid")
+        except SSHKeyValidationError as e:
+            print(f"Invalid key: {e}")
+    """
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives import serialization
+
+    try:
+        # Try to load the private key
+        serialization.load_pem_private_key(
+            private_key.encode("utf-8"),
+            password=None,  # Phase 4: No passphrase support yet
+            backend=default_backend(),
+        )
+        return True
+    except ValueError as e:
+        raise SSHKeyValidationError(f"Invalid SSH private key format: {e}") from e
+    except Exception as e:
+        raise SSHKeyValidationError(f"Failed to validate SSH private key: {e}") from e
+
+
+def get_public_key_fingerprint(private_key: str) -> str:
+    """Extract public key fingerprint from private key.
+
+    Args:
+        private_key: SSH private key in PEM format
+
+    Returns:
+        SHA256 fingerprint of public key (format: SHA256:base64)
+
+    Raises:
+        SSHKeyValidationError: If key is invalid
+
+    Example:
+        fingerprint = get_public_key_fingerprint(private_key_pem)
+        print(f"Fingerprint: {fingerprint}")
+    """
+    import base64
+    import hashlib
+
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives import serialization
+
+    try:
+        # Load private key
+        private_key_obj = serialization.load_pem_private_key(
+            private_key.encode("utf-8"),
+            password=None,
+            backend=default_backend(),
+        )
+
+        # Extract public key
+        public_key_obj = private_key_obj.public_key()
+
+        # Serialize public key to DER format (SubjectPublicKeyInfo)
+        # Note: This produces a different hash than ssh-keygen's OpenSSH wire format.
+        # The fingerprint is used for internal identification/verification only.
+        public_key_der = public_key_obj.public_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+
+        # Compute SHA256 hash
+        hash_obj = hashlib.sha256(public_key_der)
+        fingerprint = base64.b64encode(hash_obj.digest()).decode("utf-8")
+
+        return f"SHA256:{fingerprint}"
+
+    except Exception as e:
+        raise SSHKeyValidationError(f"Failed to extract public key fingerprint: {e}") from e
+
+

@@ -311,7 +311,7 @@ class Credential(Base):
     )
 
     credential_type: Mapped[str] = mapped_column(
-        String(32), nullable=False, comment="Credential type: rest/ssh"
+        String(32), nullable=False, comment="Credential type: rest/ssh/routeros_ssh_key"
     )
 
     username: Mapped[str] = mapped_column(
@@ -320,6 +320,15 @@ class Credential(Base):
 
     encrypted_secret: Mapped[str] = mapped_column(
         Text, nullable=False, comment="Encrypted password/key"
+    )
+    
+    # Phase 4: SSH key authentication fields
+    private_key: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="Encrypted SSH private key (Phase 4)"
+    )
+    
+    public_key_fingerprint: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, comment="SSH public key fingerprint for verification (Phase 4)"
     )
 
     active: Mapped[bool] = mapped_column(
