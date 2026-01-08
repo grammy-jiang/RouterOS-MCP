@@ -216,10 +216,10 @@ class Device(BaseModel):
     allow_bandwidth_test: bool = False
     
     # Phase 4 adaptive polling fields
-    critical: bool = False
-    health_status: Literal["healthy", "degraded", "unreachable"] = "healthy"
-    consecutive_healthy_checks: int = 0
-    polling_interval_seconds: int = 60
+    critical: bool = Field(default=False)
+    health_status: Literal["healthy", "degraded", "unreachable"] = Field(default="healthy")
+    consecutive_healthy_checks: int = Field(default=0)
+    polling_interval_seconds: int = Field(default=60)
 
     # RouterOS metadata
     routeros_version: str | None = None
@@ -234,6 +234,30 @@ class Device(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+    
+    @field_validator("allow_bandwidth_test", "critical", mode="before")
+    @classmethod
+    def validate_bool_with_none(cls, v: bool | None) -> bool:
+        """Handle None values from ORM by returning default False."""
+        return v if v is not None else False
+    
+    @field_validator("health_status", mode="before")
+    @classmethod
+    def validate_health_status_with_none(cls, v: str | None) -> str:
+        """Handle None values from ORM by returning default 'healthy'."""
+        return v if v is not None else "healthy"
+    
+    @field_validator("consecutive_healthy_checks", mode="before")
+    @classmethod
+    def validate_consecutive_healthy_checks_with_none(cls, v: int | None) -> int:
+        """Handle None values from ORM by returning default 0."""
+        return v if v is not None else 0
+    
+    @field_validator("polling_interval_seconds", mode="before")
+    @classmethod
+    def validate_polling_interval_seconds_with_none(cls, v: int | None) -> int:
+        """Handle None values from ORM by returning default 60."""
+        return v if v is not None else 60
 
 
 class CredentialCreate(BaseModel):

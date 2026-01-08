@@ -173,7 +173,9 @@ class HealthService:
         await self._store_health_check(result)
         
         # Update adaptive polling state based on health check result (Phase 4)
-        await self._update_adaptive_polling(device_id, result)
+        # Skip if session is None (happens in some test scenarios)
+        if self.session is not None:
+            await self._update_adaptive_polling(device_id, result)
 
         # Broadcast health update notification to SSE subscribers (if HTTP/SSE transport active)
         await self._broadcast_health_update(device_id, result)
