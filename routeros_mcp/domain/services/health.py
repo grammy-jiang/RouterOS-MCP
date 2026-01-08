@@ -17,6 +17,11 @@ from routeros_mcp.infra.db.models import HealthCheck as HealthCheckORM
 
 logger = logging.getLogger(__name__)
 
+# Adaptive polling constants (Phase 4)
+ADAPTIVE_POLLING_MIN_INTERVAL_SECONDS = 60  # Base backoff interval for unreachable devices
+ADAPTIVE_POLLING_MAX_INTERVAL_SECONDS = 960  # Max backoff interval (16 minutes)
+ADAPTIVE_POLLING_INTERVAL_CAP_SECONDS = 300  # Max interval for healthy devices (5 minutes)
+
 
 class HealthService:
     """Service for computing device and fleet health.
@@ -567,7 +572,7 @@ class HealthService:
             if new_consecutive_healthy >= 10:
                 new_interval = int(new_interval * 1.5)
                 # Cap at 300 seconds (5 minutes)
-                new_interval = min(new_interval, 300)
+                new_interval = min(new_interval, ADAPTIVE_POLLING_INTERVAL_CAP_SECONDS)
                 # Reset counter after adjustment
                 new_consecutive_healthy = 0
                 
@@ -598,15 +603,14 @@ class HealthService:
             )
             
         elif health_result.status == "unreachable":
-            # Apply exponential backoff: 60→120→240→480→960s (max)
-            # Base backoff starts at 60s (1 minute)
+            # Apply exponential backoff using configured constants
             if device_orm.last_backoff_at is None:
-                # First unreachable, start with 60s
-                new_interval = 60
+                # First unreachable, start with base backoff interval
+                new_interval = ADAPTIVE_POLLING_MIN_INTERVAL_SECONDS
                 new_last_backoff_at = datetime.now(UTC)
             else:
-                # Double the interval (exponential backoff)
-                new_interval = min(new_interval * 2, 960)  # Cap at 960s (16 minutes)
+                # Double the interval (exponential backoff) up to max
+                new_interval = min(new_interval * 2, ADAPTIVE_POLLING_MAX_INTERVAL_SECONDS)
                 new_last_backoff_at = datetime.now(UTC)
             
             new_consecutive_healthy = 0
