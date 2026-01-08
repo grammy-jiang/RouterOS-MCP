@@ -13,7 +13,12 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from routeros_mcp.api.admin_models import RejectionRequest
+from routeros_mcp.api.admin_models import (
+    DeviceCreateRequest,
+    DeviceUpdateRequest,
+    RejectionRequest,
+)
+from routeros_mcp.mcp.errors import DeviceNotFoundError, EnvironmentMismatchError
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +46,7 @@ async def get_device_service():
     from routeros_mcp.config import Settings
     from routeros_mcp.domain.services.device import DeviceService
     from routeros_mcp.infra.db.session import get_session
-    
+
     async for session in get_session():
         settings = Settings()
         yield DeviceService(session, settings)
@@ -53,7 +58,7 @@ async def get_plan_service():
     from routeros_mcp.config import Settings
     from routeros_mcp.domain.services.plan import PlanService
     from routeros_mcp.infra.db.session import get_session
-    
+
     async for session in get_session():
         settings = Settings()
         yield PlanService(session, settings)
@@ -64,7 +69,7 @@ async def get_job_service():
     # Import here to avoid namespace pollution
     from routeros_mcp.domain.services.job import JobService
     from routeros_mcp.infra.db.session import get_session
-    
+
     async for session in get_session():
         yield JobService(session)
 
@@ -112,10 +117,10 @@ async def list_devices(
 
         # Convert to JSON-serializable format with staleness checking
         from datetime import UTC, datetime, timedelta
-        
+
         # Consider devices stale if not seen in 10 minutes
         stale_threshold = datetime.now(UTC) - timedelta(minutes=10)
-        
+
         devices_data = [
             {
                 "id": device.id,
@@ -127,7 +132,7 @@ async def list_devices(
                 "capabilities": device.capabilities,
                 "last_seen": device.last_seen.isoformat() if device.last_seen else None,
                 "status": (
-                    "online" if device.last_seen and device.last_seen > stale_threshold 
+                    "online" if device.last_seen and device.last_seen > stale_threshold
                     else "offline"
                 ),
             }
@@ -148,6 +153,315 @@ async def list_devices(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to list devices. Correlation ID: {correlation_id}",
         )
+
+
+@router.post("/api/admin/devices")
+async def create_device(
+    device_data: DeviceCreateRequest,
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    device_service: Any = Depends(get_device_service),
+) -> JSONResponse:
+    """Create a new device with credentials.
+
+    Args:
+        device_data: Device creation request
+        user: Current authenticated user (must have admin role)
+        device_service: Device service dependency
+
+    Returns:
+        JSON with created device details
+    """
+    # Check user role
+    if user.get("role") not in ["admin", "operator"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions to create devices",
+        )
+
+    try:
+        # Generate device ID from name with collision handling
+        base_slug = re.sub(r'[^a-z0-9]+', '-', device_data.name.lower()).strip('-')
+        device_id = f"dev-{base_slug}"
+
+        # Check for collision and add counter if needed
+        counter = 1
+        original_id = device_id
+        while True:
+            try:
+                await device_service.get_device(device_id)
+                # Device exists, try next counter
+                device_id = f"{original_id}-{counter}"
+                counter += 1
+            except DeviceNotFoundError:
+                # Device doesn't exist, we can use this ID
+                break
+
+        # Create device with credentials
+        device = await device_service.create_device(
+            device_id=device_id,
+            name=device_data.name,
+            management_ip=device_data.hostname,
+            username=device_data.username,
+            password=device_data.password,
+            environment=device_data.environment,
+            management_port=device_data.port,
+        )
+
+        return JSONResponse(
+            status_code=status.HTTP_201_CREATED,
+            content={
+                "message": "Device created successfully",
+                "device": {
+                    "id": device.id,
+                    "name": device.name,
+                    "management_ip": device.management_ip,
+                    "management_port": device.management_port,
+                    "environment": device.environment,
+                    "status": device.status,
+                },
+            },
+        )
+
+    except DeviceNotFoundError as e:
+        # This should never happen due to the collision check above
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error during device ID generation",
+        ) from e
+    except Exception as e:
+        from routeros_mcp.domain.exceptions import EnvironmentNotAllowedError
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+
+        # Handle environment mismatch as 400 Bad Request
+        if isinstance(e, (EnvironmentNotAllowedError, EnvironmentMismatchError)):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            ) from e
+
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error creating device: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create device. Correlation ID: {correlation_id}",
+        ) from e
+
+
+@router.put("/api/admin/devices/{device_id}")
+async def update_device(
+    device_id: str,
+    device_data: DeviceUpdateRequest,
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    device_service: Any = Depends(get_device_service),
+) -> JSONResponse:
+    """Update an existing device.
+
+    Args:
+        device_id: Device identifier
+        device_data: Device update request
+        user: Current authenticated user (must have admin role)
+        device_service: Device service dependency
+
+    Returns:
+        JSON with updated device details
+    """
+    # Check user role
+    if user.get("role") not in ["admin", "operator"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions to update devices",
+        )
+
+    try:
+        from sqlalchemy import delete as sql_delete
+        from routeros_mcp.domain.models import DeviceUpdate, CredentialCreate
+        from routeros_mcp.infra.db.models import Credential as CredentialORM
+
+        # Build device update
+        update_fields = {}
+        if device_data.name is not None:
+            update_fields["name"] = device_data.name
+        if device_data.hostname is not None:
+            update_fields["management_ip"] = device_data.hostname
+        if device_data.port is not None:
+            update_fields["management_port"] = device_data.port
+        if device_data.environment is not None:
+            update_fields["environment"] = device_data.environment
+
+        if update_fields:
+            device = await device_service.update_device(
+                device_id=device_id,
+                updates=DeviceUpdate(**update_fields),
+            )
+        else:
+            device = await device_service.get_device(device_id)
+
+        # Update credentials if both username and password provided
+        if device_data.username is not None and device_data.password is not None:
+            # Delete existing credential if it exists, then create new one
+            await device_service.session.execute(
+                sql_delete(CredentialORM).where(
+                    CredentialORM.device_id == device_id,
+                    CredentialORM.credential_type == "rest"
+                )
+            )
+            await device_service.add_credential(
+                CredentialCreate(
+                    device_id=device_id,
+                    credential_type="rest",
+                    username=device_data.username,
+                    password=device_data.password,
+                )
+            )
+
+        return JSONResponse(
+            content={
+                "message": "Device updated successfully",
+                "device": {
+                    "id": device.id,
+                    "name": device.name,
+                    "management_ip": device.management_ip,
+                    "management_port": device.management_port,
+                    "environment": device.environment,
+                    "status": device.status,
+                },
+            }
+        )
+
+    except DeviceNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error updating device {device_id}: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update device. Correlation ID: {correlation_id}",
+        ) from e
+
+
+@router.delete("/api/admin/devices/{device_id}")
+async def delete_device(
+    device_id: str,
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    device_service: Any = Depends(get_device_service),
+) -> JSONResponse:
+    """Delete a device and its credentials.
+
+    Args:
+        device_id: Device identifier
+        user: Current authenticated user (must have admin role)
+        device_service: Device service dependency
+
+    Returns:
+        JSON confirmation
+    """
+    # Check user role
+    if user.get("role") not in ["admin", "operator"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions to delete devices",
+        )
+
+    try:
+        from routeros_mcp.infra.db.models import Device as DeviceORM
+
+        # Verify device exists via domain service (for name, domain checks, etc.)
+        device = await device_service.get_device(device_id)
+
+        # Load ORM device instance for deletion so ORM/DB cascades can apply
+        device_orm = await device_service.session.get(DeviceORM, device_id)
+        if device_orm is not None:
+            await device_service.session.delete(device_orm)
+            await device_service.session.commit()
+
+        logger.info(
+            "Deleted device",
+            extra={"device_id": device_id, "device_name": device.name},
+        )
+
+        return JSONResponse(
+            content={
+                "message": f"Device '{device.name}' deleted successfully",
+                "device_id": device_id,
+            }
+        )
+
+    except DeviceNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error deleting device {device_id}: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete device. Correlation ID: {correlation_id}",
+        ) from e
+
+
+@router.post("/api/admin/devices/{device_id}/test")
+async def test_device_connectivity(
+    device_id: str,
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    device_service: Any = Depends(get_device_service),
+) -> JSONResponse:
+    """Test connectivity to a device.
+
+    Args:
+        device_id: Device identifier
+        user: Current authenticated user
+        device_service: Device service dependency
+
+    Returns:
+        JSON with connectivity test results
+    """
+    try:
+        is_reachable, metadata = await device_service.check_connectivity(device_id)
+
+        return JSONResponse(
+            content={
+                "device_id": device_id,
+                "reachable": is_reachable,
+                "metadata": metadata,
+                "message": "Device is reachable" if is_reachable else "Device is not reachable",
+            }
+        )
+
+    except DeviceNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error testing connectivity for device {device_id}: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to test connectivity. Correlation ID: {correlation_id}",
+        ) from e
 
 
 @router.get("/api/plans")
@@ -415,7 +729,7 @@ async def get_job_status(
         # Calculate progress percentage
         total_devices = len(job["device_ids"])
         progress_percent = 0
-        
+
         if job["status"] == "success":
             progress_percent = 100
         elif job["status"] in ["running", "cancelled"]:
