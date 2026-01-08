@@ -1,0 +1,32 @@
+# HTTP Lab Configuration for RouterOS MCP Service
+# This configuration is for testing the web UI
+# DO NOT USE IN PRODUCTION
+
+# Application
+environment: lab
+debug: true
+log_level: DEBUG
+log_format: text
+
+# MCP (HTTP for web UI testing)
+mcp_transport: http
+http_host: 0.0.0.0
+http_port: 8000
+
+# OIDC (disabled for local testing)
+oidc_enabled: false
+
+# Database (SQLite for easy development with async driver)
+database_url: sqlite+aiosqlite:///./data/routeros_mcp_lab.db
+database_echo: false
+
+# RouterOS (permissive for lab)
+routeros_rest_timeout_seconds: 10.0
+routeros_retry_attempts: 2
+
+# Health checks (more frequent for testing)
+health_check_interval_seconds: 30
+health_check_jitter_seconds: 5
+
+# Security (lab encryption key - DO NOT use in production!)
+encryption_key: "e9IQ087sn4sumtRu6xA3vIuREHHllDYTUe1s-reUFZw="
