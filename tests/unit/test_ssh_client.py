@@ -475,7 +475,7 @@ class TestRouterOSSSHClient:
         """Test that credentials are required before creating connection."""
         client = RouterOSSSHClient(host="127.0.0.1")
 
-        with pytest.raises(ValueError, match="Credentials not set"):
+        with pytest.raises(ValueError, match="Username not set"):
             await client._get_connection()
 
     @pytest.mark.asyncio
