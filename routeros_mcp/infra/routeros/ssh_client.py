@@ -165,8 +165,8 @@ class RouterOSSSHClient:
                 if self.private_key:
                     try:
                         # Import asyncssh key from PEM string
-                        import asyncssh.public_key
-                        key = asyncssh.public_key.import_private_key(self.private_key)
+                        from asyncssh import public_key
+                        key = public_key.import_private_key(self.private_key)
                         
                         self._connection = await asyncssh.connect(
                             self.host,

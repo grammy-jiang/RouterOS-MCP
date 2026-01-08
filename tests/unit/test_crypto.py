@@ -215,3 +215,108 @@ class TestValidateEncryptionKey:
     def test_non_base64_string_returns_false(self) -> None:
         """Test that non-base64 string returns False."""
         assert validate_encryption_key("this-is-not-base64!@#$") is False
+
+
+class TestSSHKeyValidation:
+    """Tests for SSH key validation functions (Phase 4)."""
+
+    def test_validate_ssh_private_key_valid_rsa(self) -> None:
+        """Test validation of valid RSA private key."""
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+
+        from routeros_mcp.security.crypto import validate_ssh_private_key
+
+        # Generate a test RSA key
+        key = rsa.generate_private_key(
+            public_exponent=65537, key_size=2048, backend=default_backend()
+        )
+        private_pem = key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode("utf-8")
+
+        # Should not raise
+        assert validate_ssh_private_key(private_pem) is True
+
+    def test_validate_ssh_private_key_invalid(self) -> None:
+        """Test validation rejects invalid SSH key."""
+        from routeros_mcp.security.crypto import (
+            SSHKeyValidationError,
+            validate_ssh_private_key,
+        )
+
+        with pytest.raises(SSHKeyValidationError, match="Invalid SSH private key format"):
+            validate_ssh_private_key("not-a-valid-key")
+
+    def test_validate_ssh_private_key_empty(self) -> None:
+        """Test validation rejects empty key."""
+        from routeros_mcp.security.crypto import (
+            SSHKeyValidationError,
+            validate_ssh_private_key,
+        )
+
+        with pytest.raises(SSHKeyValidationError):
+            validate_ssh_private_key("")
+
+    def test_get_public_key_fingerprint(self) -> None:
+        """Test extracting public key fingerprint from private key."""
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+
+        from routeros_mcp.security.crypto import get_public_key_fingerprint
+
+        # Generate a test RSA key
+        key = rsa.generate_private_key(
+            public_exponent=65537, key_size=2048, backend=default_backend()
+        )
+        private_pem = key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode("utf-8")
+
+        fingerprint = get_public_key_fingerprint(private_pem)
+
+        # Should return SHA256:base64 format
+        assert fingerprint.startswith("SHA256:")
+        assert len(fingerprint) > 10  # SHA256: + base64 hash
+
+    def test_get_public_key_fingerprint_invalid(self) -> None:
+        """Test fingerprint extraction fails for invalid key."""
+        from routeros_mcp.security.crypto import (
+            SSHKeyValidationError,
+            get_public_key_fingerprint,
+        )
+
+        with pytest.raises(SSHKeyValidationError, match="Failed to extract public key fingerprint"):
+            get_public_key_fingerprint("not-a-valid-key")
+
+    def test_ssh_key_encryption_roundtrip(self) -> None:
+        """Test SSH key can be encrypted and decrypted."""
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+
+        from routeros_mcp.security.crypto import decrypt_string, encrypt_string
+
+        # Generate a test RSA key
+        key = rsa.generate_private_key(
+            public_exponent=65537, key_size=2048, backend=default_backend()
+        )
+        private_pem = key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode("utf-8")
+
+        # Encrypt and decrypt
+        encryption_key = generate_encryption_key()
+        encrypted = encrypt_string(private_pem, encryption_key)
+        decrypted = decrypt_string(encrypted, encryption_key)
+
+        assert decrypted == private_pem
+        assert encrypted != private_pem

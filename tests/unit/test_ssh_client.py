@@ -477,3 +477,138 @@ class TestRouterOSSSHClient:
 
         with pytest.raises(ValueError, match="Credentials not set"):
             await client._get_connection()
+
+    @pytest.mark.asyncio
+    async def test_key_auth_successful(self, monkeypatch) -> None:
+        """Test successful SSH key authentication (Phase 4)."""
+        client = RouterOSSSHClient(
+            host="127.0.0.1",
+            username="admin",
+            private_key="-----BEGIN RSA PRIVATE KEY-----\ntest_key\n-----END RSA PRIVATE KEY-----",
+        )
+
+        mock_connection = AsyncMock()
+        mock_connection.is_closed.return_value = False
+        
+        # Mock the key import
+        mock_key = MagicMock()
+
+        async def mock_connect(*args, **kwargs):
+            return mock_connection
+
+        import routeros_mcp.infra.routeros.ssh_client as ssh_module
+        from asyncssh import public_key as pk_module
+
+        monkeypatch.setattr(ssh_module.asyncssh, "connect", mock_connect)
+        monkeypatch.setattr(pk_module, "import_private_key", lambda x: mock_key)
+
+        connection = await client._get_connection()
+
+        assert connection == mock_connection
+
+    @pytest.mark.asyncio
+    async def test_key_auth_fallback_to_password(self, monkeypatch) -> None:
+        """Test SSH key auth fails and falls back to password (Phase 4)."""
+        client = RouterOSSSHClient(
+            host="127.0.0.1",
+            username="admin",
+            private_key="-----BEGIN RSA PRIVATE KEY-----\ntest_key\n-----END RSA PRIVATE KEY-----",
+            password="secret",
+        )
+
+        mock_connection = AsyncMock()
+        mock_connection.is_closed.return_value = False
+        
+        # Mock the key import
+        mock_key = MagicMock()
+
+        call_count = 0
+
+        async def mock_connect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # First call with key auth fails
+                if "client_keys" in kwargs:
+                    raise asyncssh.PermissionDenied("Key auth failed")
+            # Second call with password succeeds
+            return mock_connection
+
+        import routeros_mcp.infra.routeros.ssh_client as ssh_module
+        from asyncssh import public_key as pk_module
+
+        monkeypatch.setattr(ssh_module.asyncssh, "connect", mock_connect)
+        monkeypatch.setattr(pk_module, "import_private_key", lambda x: mock_key)
+
+        connection = await client._get_connection()
+
+        assert connection == mock_connection
+        assert call_count == 2  # Key auth tried, then password
+
+    @pytest.mark.asyncio
+    async def test_key_auth_only_no_password_fallback(self, monkeypatch) -> None:
+        """Test SSH key auth fails with no password fallback (Phase 4)."""
+        client = RouterOSSSHClient(
+            host="127.0.0.1",
+            username="admin",
+            private_key="-----BEGIN RSA PRIVATE KEY-----\ntest_key\n-----END RSA PRIVATE KEY-----",
+        )
+        
+        # Mock the key import
+        mock_key = MagicMock()
+
+        async def mock_connect(*args, **kwargs):
+            raise asyncssh.PermissionDenied("Key auth failed")
+
+        import routeros_mcp.infra.routeros.ssh_client as ssh_module
+        from asyncssh import public_key as pk_module
+
+        monkeypatch.setattr(ssh_module.asyncssh, "connect", mock_connect)
+        monkeypatch.setattr(pk_module, "import_private_key", lambda x: mock_key)
+
+        with pytest.raises(RouterOSSSHAuthenticationError, match="SSH authentication failed"):
+            await client._get_connection()
+
+    @pytest.mark.asyncio
+    async def test_set_credentials_with_key(self) -> None:
+        """Test setting credentials with SSH key (Phase 4)."""
+        client = RouterOSSSHClient(host="127.0.0.1")
+
+        assert client.username is None
+        assert client.password is None
+        assert client.private_key is None
+
+        client.set_credentials(
+            "admin",
+            password="secret",
+            private_key="-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----",
+        )
+
+        assert client.username == "admin"
+        assert client.password == "secret"
+        assert client.private_key == "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----"
+
+    @pytest.mark.asyncio
+    async def test_password_only_auth(self, monkeypatch) -> None:
+        """Test password-only authentication still works (Phase 4)."""
+        client = RouterOSSSHClient(
+            host="127.0.0.1",
+            username="admin",
+            password="secret",
+        )
+
+        mock_connection = AsyncMock()
+        mock_connection.is_closed.return_value = False
+
+        async def mock_connect(*args, **kwargs):
+            # Should not have client_keys in kwargs
+            assert "client_keys" not in kwargs
+            return mock_connection
+
+        import routeros_mcp.infra.routeros.ssh_client as ssh_module
+
+        monkeypatch.setattr(ssh_module.asyncssh, "connect", mock_connect)
+
+        connection = await client._get_connection()
+
+        assert connection == mock_connection
