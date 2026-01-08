@@ -1012,7 +1012,7 @@ async def export_audit_events(
     try:
         import csv
         import io
-        from datetime import datetime
+        from datetime import UTC, datetime
 
         from fastapi.responses import StreamingResponse
 
@@ -1094,7 +1094,7 @@ async def export_audit_events(
             iter([output.getvalue()]),
             media_type="text/csv",
             headers={
-                "Content-Disposition": f"attachment; filename=audit_events_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                "Content-Disposition": f"attachment; filename=audit_events_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}.csv"
             },
         )
 

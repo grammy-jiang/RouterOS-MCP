@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { auditApi, deviceApi, ApiError } from '../services/api';
 import type { AuditEvent, AuditEventsFilter } from '../types/audit';
 
@@ -338,8 +338,8 @@ export default function AuditLog() {
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {events.map((event) => (
-                  <>
-                    <tr key={event.id} className="hover:bg-gray-50">
+                  <React.Fragment key={event.id}>
+                    <tr className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         {formatTimestamp(event.timestamp)}
                       </td>
@@ -405,7 +405,7 @@ export default function AuditLog() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>
