@@ -2,8 +2,6 @@
 
 from datetime import UTC, datetime
 
-import pytest
-
 from routeros_mcp.domain.models import Device
 
 
