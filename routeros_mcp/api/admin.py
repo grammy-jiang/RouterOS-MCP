@@ -18,6 +18,10 @@ from routeros_mcp.api.admin_models import (
     DeviceUpdateRequest,
     RejectionRequest,
 )
+
+# Maximum number of audit events to export to CSV in a single request
+# Large exports may cause memory issues and timeouts
+MAX_AUDIT_EXPORT_LIMIT = 10000
 from routeros_mcp.mcp.errors import DeviceNotFoundError, EnvironmentMismatchError
 
 logger = logging.getLogger(__name__)
@@ -1035,9 +1039,10 @@ async def export_audit_events(
                 )
 
         # Query all matching events (no pagination for export)
+        # Note: Large exports are limited to MAX_AUDIT_EXPORT_LIMIT to prevent memory/timeout issues
         result = await audit_service.list_events(
             page=1,
-            page_size=10000,  # Large limit for export
+            page_size=MAX_AUDIT_EXPORT_LIMIT,
             device_id=device_id,
             tool_name=tool_name,
             success=success,

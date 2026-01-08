@@ -185,6 +185,10 @@ export const auditApi = {
     
     return await response.blob();
   },
+
+  async getFilters(): Promise<{ devices: string[]; tools: string[] }> {
+    return await fetchApi<{ devices: string[]; tools: string[] }>('/api/audit/filters');
+  },
 };
 
 export { ApiError };

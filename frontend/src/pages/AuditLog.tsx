@@ -41,14 +41,9 @@ export default function AuditLog() {
       setAvailableDevices(devices.map(d => d.id));
 
       // Load available filter options from audit API
-      const response = await fetch('/api/audit/filters', {
-        credentials: 'include',
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.tools) {
-          setAvailableTools(data.tools);
-        }
+      const filterData = await auditApi.getFilters();
+      if (filterData.tools) {
+        setAvailableTools(filterData.tools);
       }
     } catch (err) {
       console.error('Failed to load filter options:', err);
@@ -67,7 +62,9 @@ export default function AuditLog() {
 
       if (deviceFilter) filter.device_id = deviceFilter;
       if (toolFilter) filter.tool_name = toolFilter;
-      if (resultFilter) filter.success = resultFilter === 'success';
+      if (resultFilter) {
+        filter.success = resultFilter === 'success' ? true : resultFilter === 'failure' ? false : undefined;
+      }
       if (dateFrom) filter.date_from = new Date(dateFrom).toISOString();
       if (dateTo) filter.date_to = new Date(dateTo).toISOString();
       if (searchQuery) filter.search = searchQuery;
