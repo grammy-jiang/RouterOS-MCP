@@ -183,6 +183,41 @@ class Device(Base):
         default=False,
         comment="Allow device to be target of bandwidth tests (Phase 4)",
     )
+    
+    # Phase 4 adaptive polling fields
+    critical: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="Critical device (30s base polling) vs non-critical (60s base polling) - Phase 4",
+    )
+    
+    health_status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="healthy",
+        comment="Current health status: healthy/degraded/unreachable - Phase 4",
+    )
+    
+    consecutive_healthy_checks: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        comment="Count of consecutive healthy checks for interval adjustment - Phase 4",
+    )
+    
+    polling_interval_seconds: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=60,
+        comment="Current adaptive polling interval in seconds - Phase 4",
+    )
+    
+    last_backoff_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Last exponential backoff timestamp for unreachable devices - Phase 4",
+    )
 
     # RouterOS metadata
     routeros_version: Mapped[str | None] = mapped_column(

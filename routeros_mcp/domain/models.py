@@ -82,6 +82,21 @@ class PlanStatus(str, Enum):
     ROLLED_BACK = "rolled_back"    # Phase 4: Rollback completed
 
 
+class HealthStatus(str, Enum):
+    """Device health status for adaptive polling (Phase 4).
+    
+    Used to track device health state and adjust polling intervals.
+    
+    States:
+    - HEALTHY: Device responding normally, all metrics within thresholds
+    - DEGRADED: Device responding but with warnings or threshold violations
+    - UNREACHABLE: Device not responding to health checks
+    """
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    UNREACHABLE = "unreachable"
+
+
 class ToolHint(BaseModel):
     """Structured hint for tool responses.
 
@@ -120,6 +135,9 @@ class DeviceCreate(BaseModel):
     
     # Phase 4 diagnostics capability flags
     allow_bandwidth_test: bool = Field(default=False, description="Allow bandwidth test (target device)")
+    
+    # Phase 4 adaptive polling fields
+    critical: bool = Field(default=False, description="Critical device (30s polling) vs non-critical (60s)")
 
     @field_validator("management_ip")
     @classmethod
@@ -153,6 +171,9 @@ class DeviceUpdate(BaseModel):
     
     # Phase 4 diagnostics capability flags
     allow_bandwidth_test: bool | None = None
+    
+    # Phase 4 adaptive polling fields
+    critical: bool | None = None
     
     status: Literal["healthy", "degraded", "unreachable", "pending", "decommissioned"] | None = None
 
@@ -193,6 +214,12 @@ class Device(BaseModel):
     
     # Phase 4 diagnostics capability flags
     allow_bandwidth_test: bool = False
+    
+    # Phase 4 adaptive polling fields
+    critical: bool = False
+    health_status: Literal["healthy", "degraded", "unreachable"] = "healthy"
+    consecutive_healthy_checks: int = 0
+    polling_interval_seconds: int = 60
 
     # RouterOS metadata
     routeros_version: str | None = None

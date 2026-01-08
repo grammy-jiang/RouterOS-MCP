@@ -169,6 +169,94 @@ class JobScheduler:
 
         return job.id
 
+    def add_health_check_job(
+        self,
+        device_id: str,
+        job_func: Callable,
+        interval_seconds: int,
+    ) -> str:
+        """Add or update health check job for a device (Phase 4 adaptive polling).
+        
+        Creates a per-device health check job with specified interval.
+        If job already exists, updates the interval.
+        
+        Args:
+            device_id: Device identifier
+            job_func: Async function to execute health check
+            interval_seconds: Health check interval in seconds
+            
+        Returns:
+            Job ID
+        """
+        job_id = f"health_check_{device_id}"
+        
+        # Remove existing job if present
+        try:
+            self.scheduler.remove_job(job_id)
+        except Exception:
+            pass  # Job doesn't exist, that's fine
+        
+        # Add new job with updated interval
+        job = self.scheduler.add_job(
+            job_func,
+            trigger=IntervalTrigger(seconds=interval_seconds),
+            id=job_id,
+            name=f"Health Check: {device_id}",
+            replace_existing=True,
+            kwargs={"device_id": device_id},
+        )
+        
+        logger.info(
+            f"Added/updated health check job for device {device_id} (interval: {interval_seconds}s)",
+            extra={
+                "job_id": job.id,
+                "device_id": device_id,
+                "interval_seconds": interval_seconds,
+            },
+        )
+        
+        return job.id
+    
+    def update_health_check_interval(
+        self,
+        device_id: str,
+        new_interval_seconds: int,
+    ) -> bool:
+        """Update health check interval for a device (Phase 4 adaptive polling).
+        
+        Modifies the interval trigger for an existing health check job.
+        
+        Args:
+            device_id: Device identifier
+            new_interval_seconds: New interval in seconds
+            
+        Returns:
+            True if job was updated, False if job not found
+        """
+        job_id = f"health_check_{device_id}"
+        job = self.scheduler.get_job(job_id)
+        
+        if not job:
+            logger.warning(
+                f"Cannot update interval: health check job not found for device {device_id}",
+                extra={"device_id": device_id, "job_id": job_id},
+            )
+            return False
+        
+        # Update the job's trigger with new interval
+        job.reschedule(IntervalTrigger(seconds=new_interval_seconds))
+        
+        logger.info(
+            f"Updated health check interval for device {device_id} to {new_interval_seconds}s",
+            extra={
+                "device_id": device_id,
+                "job_id": job_id,
+                "new_interval_seconds": new_interval_seconds,
+            },
+        )
+        
+        return True
+
     def remove_job(self, job_id: str) -> None:
         """Remove a scheduled job.
 
