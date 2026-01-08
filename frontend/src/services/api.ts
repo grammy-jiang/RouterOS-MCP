@@ -10,6 +10,13 @@ import type {
   AuditEventsResponse,
   AuditEventsFilter,
 } from '../types/audit';
+import type {
+  Plan,
+  PlanListResponse,
+  PlanApproveResponse,
+  PlanRejectRequest,
+  PlanRejectResponse,
+} from '../types/plan';
 
 const RAW_API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
@@ -188,6 +195,39 @@ export const auditApi = {
 
   async getFilters(): Promise<{ devices: string[]; tools: string[] }> {
     return await fetchApi<{ devices: string[]; tools: string[] }>('/api/audit/filters');
+  },
+};
+
+export const planApi = {
+  async list(statusFilter?: string): Promise<Plan[]> {
+    const params = new URLSearchParams();
+    if (statusFilter) {
+      params.append('status_filter', statusFilter);
+    }
+    
+    const queryString = params.toString();
+    const endpoint = `/admin/api/plans${queryString ? `?${queryString}` : ''}`;
+    
+    const response = await fetchApi<PlanListResponse>(endpoint);
+    return response.plans;
+  },
+
+  async getDetail(planId: string): Promise<Plan> {
+    return await fetchApi<Plan>(`/admin/api/plans/${planId}`);
+  },
+
+  async approve(planId: string): Promise<PlanApproveResponse> {
+    return await fetchApi<PlanApproveResponse>(`/admin/api/plans/${planId}/approve`, {
+      method: 'POST',
+    });
+  },
+
+  async reject(planId: string, reason: string): Promise<PlanRejectResponse> {
+    const data: PlanRejectRequest = { reason };
+    return await fetchApi<PlanRejectResponse>(`/admin/api/plans/${planId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   },
 };
 
