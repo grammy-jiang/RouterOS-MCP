@@ -90,6 +90,9 @@ class AuditService:
 
         if search:
             # Search in error_message and meta (as JSON string)
+            # Note: Casting JSON to string for search can be inefficient for large datasets
+            # Consider using database-specific JSON search operators (e.g., PostgreSQL's jsonb_path_query)
+            # or creating a GIN index on meta for better performance if this becomes a bottleneck
             search_pattern = f"%{search}%"
             conditions.append(
                 or_(
