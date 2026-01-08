@@ -360,14 +360,15 @@ def get_public_key_fingerprint(private_key: str) -> str:
         # Extract public key
         public_key_obj = private_key_obj.public_key()
 
-        # Serialize public key to OpenSSH format
-        public_key_bytes = public_key_obj.public_bytes(
-            encoding=serialization.Encoding.OpenSSH,
-            format=serialization.PublicFormat.OpenSSH,
+        # Serialize public key to DER format (raw key data)
+        # This matches how ssh-keygen computes fingerprints
+        public_key_der = public_key_obj.public_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
 
         # Compute SHA256 hash
-        hash_obj = hashlib.sha256(public_key_bytes)
+        hash_obj = hashlib.sha256(public_key_der)
         fingerprint = base64.b64encode(hash_obj.digest()).decode("utf-8")
 
         return f"SHA256:{fingerprint}"

@@ -51,7 +51,12 @@ from routeros_mcp.mcp.errors import (
     EnvironmentMismatchError,
     ValidationError,
 )
-from routeros_mcp.security.crypto import decrypt_string, encrypt_string
+from routeros_mcp.security.crypto import (
+    DecryptionError,
+    EncryptionError,
+    decrypt_string,
+    encrypt_string,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -541,7 +546,8 @@ class DeviceService:
                     key_credential.private_key,
                     self.settings.encryption_key,
                 )
-            except Exception as e:
+            except (DecryptionError, EncryptionError) as e:
+                # Decryption failed - key may be corrupted or wrong encryption key
                 logger.warning(
                     f"Failed to decrypt SSH key for device '{device_id}': {e}, trying password fallback"
                 )

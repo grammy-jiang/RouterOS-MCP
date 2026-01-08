@@ -181,7 +181,9 @@ class RouterOSSSHClient:
                         # Key auth failed, try password if available
                         logger.warning(f"SSH key authentication failed for {self.host}, trying password fallback")
                         if not self.password:
-                            raise  # Re-raise if no password fallback
+                            # No password fallback available, let outer handler convert to RouterOSSSHAuthenticationError
+                            # (Authentication errors should not be retried)
+                            raise
                 
                 # Try password authentication (either as fallback or primary method)
                 if self.password:
