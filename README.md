@@ -61,11 +61,15 @@ All design decisions for the 1.x line are captured in the [`docs/`](docs/) direc
   - State machine validation
   - Comprehensive audit logging
   - Health check verification
-- ❌ Web-based admin UI deferred to Phase 4
+- ✅ Web UI scaffolding (React + Vite + Tailwind CSS + React Router)
+  - Layout with sidebar navigation
+  - Placeholder pages for Dashboard, Devices, Plans, Audit Log
+  - Production build system ready
+  - **Note:** Backend integration pending
 - ❌ Diagnostics tools deferred to Phase 4+
 - ❌ SSH key authentication deferred to Phase 4+
 
-### Phase 4 (Planned)
+### Phase 4 (In Progress)
 
 ## Current Implementation Status
 
