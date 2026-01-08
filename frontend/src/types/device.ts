@@ -44,6 +44,6 @@ export interface DeviceResponse {
 export interface ConnectivityTestResponse {
   device_id: string;
   reachable: boolean;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   message: string;
 }

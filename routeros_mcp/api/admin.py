@@ -46,7 +46,7 @@ async def get_device_service():
     from routeros_mcp.config import Settings
     from routeros_mcp.domain.services.device import DeviceService
     from routeros_mcp.infra.db.session import get_session
-    
+
     async for session in get_session():
         settings = Settings()
         yield DeviceService(session, settings)
@@ -58,7 +58,7 @@ async def get_plan_service():
     from routeros_mcp.config import Settings
     from routeros_mcp.domain.services.plan import PlanService
     from routeros_mcp.infra.db.session import get_session
-    
+
     async for session in get_session():
         settings = Settings()
         yield PlanService(session, settings)
@@ -69,7 +69,7 @@ async def get_job_service():
     # Import here to avoid namespace pollution
     from routeros_mcp.domain.services.job import JobService
     from routeros_mcp.infra.db.session import get_session
-    
+
     async for session in get_session():
         yield JobService(session)
 
@@ -117,10 +117,10 @@ async def list_devices(
 
         # Convert to JSON-serializable format with staleness checking
         from datetime import UTC, datetime, timedelta
-        
+
         # Consider devices stale if not seen in 10 minutes
         stale_threshold = datetime.now(UTC) - timedelta(minutes=10)
-        
+
         devices_data = [
             {
                 "id": device.id,
@@ -132,7 +132,7 @@ async def list_devices(
                 "capabilities": device.capabilities,
                 "last_seen": device.last_seen.isoformat() if device.last_seen else None,
                 "status": (
-                    "online" if device.last_seen and device.last_seen > stale_threshold 
+                    "online" if device.last_seen and device.last_seen > stale_threshold
                     else "offline"
                 ),
             }
@@ -182,7 +182,7 @@ async def create_device(
         # Generate device ID from name
         import re
         device_id = f"dev-{re.sub(r'[^a-z0-9-]', '-', device_data.name.lower())}"
-        
+
         # Create device with credentials
         device = await device_service.create_device(
             device_id=device_id,
@@ -250,7 +250,7 @@ async def update_device(
 
     try:
         from routeros_mcp.domain.models import DeviceUpdate, CredentialCreate
-        
+
         # Build device update
         update_fields = {}
         if device_data.name is not None:
@@ -259,7 +259,7 @@ async def update_device(
             update_fields["management_ip"] = device_data.hostname
         if device_data.port is not None:
             update_fields["management_port"] = device_data.port
-        
+
         if update_fields:
             device = await device_service.update_device(
                 device_id=device_id,
@@ -267,7 +267,7 @@ async def update_device(
             )
         else:
             device = await device_service.get_device(device_id)
-        
+
         # Update credentials if provided
         if device_data.username is not None and device_data.password is not None:
             await device_service.add_credential(
@@ -338,22 +338,22 @@ async def delete_device(
     try:
         from sqlalchemy import delete as sql_delete
         from routeros_mcp.infra.db.models import Device as DeviceORM, Credential as CredentialORM
-        
+
         # Verify device exists
         device = await device_service.get_device(device_id)
-        
+
         # Delete credentials
         await device_service.session.execute(
             sql_delete(CredentialORM).where(CredentialORM.device_id == device_id)
         )
-        
+
         # Delete device
         await device_service.session.execute(
             sql_delete(DeviceORM).where(DeviceORM.id == device_id)
         )
-        
+
         await device_service.session.commit()
-        
+
         logger.info(
             "Deleted device",
             extra={"device_id": device_id, "device_name": device.name},
@@ -697,7 +697,7 @@ async def get_job_status(
         # Calculate progress percentage
         total_devices = len(job["device_ids"])
         progress_percent = 0
-        
+
         if job["status"] == "success":
             progress_percent = 100
         elif job["status"] in ["running", "cancelled"]:
