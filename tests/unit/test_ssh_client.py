@@ -496,10 +496,9 @@ class TestRouterOSSSHClient:
         async def mock_connect(*args, **kwargs):
             return mock_connection
 
-        import routeros_mcp.infra.routeros.ssh_client as ssh_module
         from asyncssh import public_key as pk_module
 
-        monkeypatch.setattr(ssh_module.asyncssh, "connect", mock_connect)
+        monkeypatch.setattr(asyncssh, "connect", mock_connect)
         monkeypatch.setattr(pk_module, "import_private_key", lambda x: mock_key)
 
         connection = await client._get_connection()
@@ -534,10 +533,9 @@ class TestRouterOSSSHClient:
             # Second call with password succeeds
             return mock_connection
 
-        import routeros_mcp.infra.routeros.ssh_client as ssh_module
         from asyncssh import public_key as pk_module
 
-        monkeypatch.setattr(ssh_module.asyncssh, "connect", mock_connect)
+        monkeypatch.setattr(asyncssh, "connect", mock_connect)
         monkeypatch.setattr(pk_module, "import_private_key", lambda x: mock_key)
 
         connection = await client._get_connection()
@@ -560,10 +558,9 @@ class TestRouterOSSSHClient:
         async def mock_connect(*args, **kwargs):
             raise asyncssh.PermissionDenied("Key auth failed")
 
-        import routeros_mcp.infra.routeros.ssh_client as ssh_module
         from asyncssh import public_key as pk_module
 
-        monkeypatch.setattr(ssh_module.asyncssh, "connect", mock_connect)
+        monkeypatch.setattr(asyncssh, "connect", mock_connect)
         monkeypatch.setattr(pk_module, "import_private_key", lambda x: mock_key)
 
         with pytest.raises(RouterOSSSHAuthenticationError, match="SSH authentication failed"):
@@ -605,9 +602,7 @@ class TestRouterOSSSHClient:
             assert "client_keys" not in kwargs
             return mock_connection
 
-        import routeros_mcp.infra.routeros.ssh_client as ssh_module
-
-        monkeypatch.setattr(ssh_module.asyncssh, "connect", mock_connect)
+        monkeypatch.setattr(asyncssh, "connect", mock_connect)
 
         connection = await client._get_connection()
 

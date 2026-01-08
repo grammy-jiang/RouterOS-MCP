@@ -10,7 +10,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # Device Capability Flag Constants (Phase 3)
@@ -269,6 +269,17 @@ class CredentialCreate(BaseModel):
     password: str | None = Field(default=None, description="Password (will be encrypted)")
     private_key: str | None = Field(default=None, description="SSH private key (will be encrypted)")
     public_key_fingerprint: str | None = Field(default=None, description="SSH public key fingerprint for verification")
+
+    @model_validator(mode="after")
+    def validate_credential_fields(self) -> "CredentialCreate":
+        """Validate that required fields are provided based on credential type."""
+        if self.credential_type == "routeros_ssh_key":
+            if not self.private_key:
+                raise ValueError("private_key is required for credential_type='routeros_ssh_key'")
+        elif self.credential_type in ["rest", "ssh"]:
+            if not self.password:
+                raise ValueError(f"password is required for credential_type='{self.credential_type}'")
+        return self
 
 
 class HealthCheckResult(BaseModel):

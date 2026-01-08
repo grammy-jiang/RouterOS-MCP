@@ -540,29 +540,40 @@ class DeviceService:
         key_credential = result.scalar_one_or_none()
         
         if key_credential:
-            # Use SSH key authentication
-            try:
-                private_key = decrypt_string(
-                    key_credential.private_key,
-                    self.settings.encryption_key,
-                )
-            except (DecryptionError, EncryptionError) as e:
-                # Decryption failed - key may be corrupted or wrong encryption key
+            # Check if private_key is actually present
+            if not key_credential.private_key:
                 logger.warning(
-                    f"Failed to decrypt SSH key for device '{device_id}': {e}, trying password fallback"
+                    "Active SSH key credential for device '%s' has no private key; "
+                    "falling back to password authentication",
+                    device_id,
                 )
                 key_credential = None  # Fall through to password auth
             else:
-                client = RouterOSSSHClient(
-                    host=device.management_ip,
-                    port=22,
-                    username=key_credential.username,
-                    private_key=private_key,
-                    timeout_seconds=self.settings.routeros_rest_timeout_seconds,
-                    max_retries=self.settings.routeros_retry_attempts,
-                )
-                logger.info(f"SSH client created with key authentication for device '{device_id}'")
-                return client
+                # Use SSH key authentication
+                try:
+                    private_key = decrypt_string(
+                        key_credential.private_key,
+                        self.settings.encryption_key,
+                    )
+                except (DecryptionError, EncryptionError) as e:
+                    # Decryption failed - key may be corrupted or wrong encryption key
+                    logger.warning(
+                        f"Failed to decrypt SSH key for device '{device_id}': {e}, trying password fallback"
+                    )
+                    key_credential = None  # Fall through to password auth
+                else:
+                    client = RouterOSSSHClient(
+                        host=device.management_ip,
+                        port=22,
+                        username=key_credential.username,
+                        private_key=private_key,
+                        timeout_seconds=self.settings.routeros_rest_timeout_seconds,
+                        max_retries=self.settings.routeros_retry_attempts,
+                    )
+                    logger.info(
+                        f"SSH client created with key authentication for device '{device_id}'"
+                    )
+                    return client
         
         # Fallback to password-based SSH authentication
         result = await self.session.execute(

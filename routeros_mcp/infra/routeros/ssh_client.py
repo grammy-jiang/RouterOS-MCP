@@ -166,7 +166,14 @@ class RouterOSSSHClient:
                     try:
                         # Import asyncssh key from PEM string
                         from asyncssh import public_key
-                        key = public_key.import_private_key(self.private_key)
+                        try:
+                            key = public_key.import_private_key(self.private_key)
+                        except (ValueError, KeyError, TypeError) as key_err:
+                            # Key import failed - treat as authentication error (no retry)
+                            logger.error(f"Failed to import SSH private key for {self.host}: {key_err}")
+                            raise RouterOSSSHAuthenticationError(
+                                f"Invalid SSH private key format: {key_err}"
+                            ) from key_err
                         
                         self._connection = await asyncssh.connect(
                             self.host,
@@ -201,6 +208,10 @@ class RouterOSSSHClient:
                 raise RouterOSSSHAuthenticationError(
                     f"SSH authentication failed: {self.host}"
                 ) from e
+            
+            except RouterOSSSHAuthenticationError:
+                # Re-raise authentication errors without retry
+                raise
 
             except Exception as e:
                 if attempt == self.max_retries - 1:

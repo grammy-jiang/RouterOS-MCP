@@ -360,8 +360,9 @@ def get_public_key_fingerprint(private_key: str) -> str:
         # Extract public key
         public_key_obj = private_key_obj.public_key()
 
-        # Serialize public key to DER format (raw key data)
-        # This matches how ssh-keygen computes fingerprints
+        # Serialize public key to DER format (SubjectPublicKeyInfo)
+        # Note: This produces a different hash than ssh-keygen's OpenSSH wire format.
+        # The fingerprint is used for internal identification/verification only.
         public_key_der = public_key_obj.public_bytes(
             encoding=serialization.Encoding.DER,
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
