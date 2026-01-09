@@ -1,5 +1,7 @@
 # RouterOS MCP Service
 
+> **Phase 4 Complete! 🎉** - Multi-device coordination, diagnostics tools, and HTTP/SSE transport now available. See [Phase 4 Migration Guide](docs/PHASE4_MIGRATION_GUIDE.md) for upgrade instructions.
+
 A **Model Context Protocol (MCP)** service for managing multiple MikroTik RouterOS v7 devices via their REST API (and tightly-scoped SSH/CLI where necessary). This service exposes safe, well-typed, auditable operations to AI tools (e.g., ChatGPT via Claude Desktop) and human operators, with strong security and operational guardrails.
 
 ## Overview
@@ -66,26 +68,38 @@ All design decisions for the 1.x line are captured in the [`docs/`](docs/) direc
   - Placeholder pages for Dashboard, Devices, Plans, Audit Log
   - Production build system ready
   - **Note:** Backend integration pending
-- ❌ Diagnostics tools deferred to Phase 4+
-- ❌ SSH key authentication deferred to Phase 4+
 
-### Phase 4 (Planned)
+### Phase 4 (COMPLETED) ✅
 
-- Multi-device coordination with staged rollouts
-- Web-based admin UI for device and plan management
-- Diagnostics tools (ping, traceroute, bandwidth test)
-- **Automated approval tokens** for trusted workflows (documented - see [docs/02](docs/02-security-oauth-integration-and-access-control.md#2a-automated-approval-tokens-phase-4))
-- SSH key authentication
-- Long-running operations with JSON-RPC streaming
+- ✅ **Multi-device coordination with staged rollouts**
+  - Batch operations across multiple devices
+  - Staged rollout support with health checks
+  - Multi-device plan/apply framework
+- ✅ **Diagnostics tools enabled**
+  - 3 diagnostic tools now registered: ping, traceroute, bandwidth_test
+  - Real-time progress streaming for long-running operations
+  - Rate limiting and safety guardrails
+- ✅ **HTTP/SSE Transport**
+  - Production-ready HTTP/SSE transport implementation
+  - Real-time resource subscriptions via SSE
+  - OAuth 2.1/OIDC authentication
+- ✅ **Web-based admin UI integration**
+  - Backend API endpoints for device management
+  - Plan approval and monitoring
+  - Comprehensive E2E tests (19 tests)
+- ✅ **Long-running operations with streaming**
+  - JSON-RPC progress notifications
+  - SSE-based real-time updates
+  - Metrics and audit logging
 
 ## Current Implementation Status
 
-### Phase 1-3 (COMPLETED)
+### Phase 1-4 (COMPLETED) ✅
 
 **MCP Surface:**
 
-- **62 Tools (registered):** 
-  - Platform helpers (echo, service health)
+- **66 Tools (registered):** 
+  - Platform helpers (echo, service health, device health)
   - Device management (2 tools)
   - System (4 tools)
   - Interface (3 tools)
@@ -98,24 +112,15 @@ All design decisions for the 1.x line are captured in the [`docs/`](docs/) direc
   - Bridge (6 tools)
   - Wireless (9 tools)
   - Config/Plan (3 tools)
-- **Diagnostics tools (2 tools, ping + traceroute):** Implemented but intentionally not registered in Phase 1–3; planned for enablement in Phase 4+ per [docs/04-mcp-tools-interface](docs/04-mcp-tools-interface-and-json-schema-specification.md).
+  - **Diagnostics (3 tools):** ping, traceroute, bandwidth_test (Phase 4)
 - **12+ Resources (templates + 1 concrete):** Concrete resource `fleet://health-summary` plus templated URIs for device/fleet/plan/audit (e.g., `device://{device_id}/overview`, `plan://{plan_id}/details`)
 - **8 Prompts:** address-list-sync, comprehensive-device-review, device-onboarding, dns-ntp-rollout, fleet-health-review, security-audit, troubleshoot-device, troubleshoot-dns-ntp
-- **Transport:** STDIO fully functional (HTTP/SSE scaffold exists but not wired)
+- **Transport:** STDIO fully functional, HTTP/SSE production-ready (Phase 4)
 
 **SSH Fallbacks:**
 
 - Read-only CLI commands (e.g., `/ip/route/print`, `/interface/print`, `/system/package/print`) used when REST data is incomplete
 - Details in [docs/15](docs/15-mcp-resources-and-prompts-design.md#ssh-commands-used-by-phase-1-resourcestools-reference)
-
-### Phase 2 Remaining Tasks (HTTP/SSE Transport Completion)
-
-- [ ] Add `sse-starlette` dependency
-- [ ] Complete `_process_mcp_request()` integration with FastMCP
-- [ ] Wire HTTP mode in `mcp/server.py`
-- [ ] OAuth/OIDC middleware
-- [ ] Resource subscription via SSE
-- [ ] E2E testing
 
 See [docs/04](docs/04-mcp-tools-interface-and-json-schema-specification.md#phase-1-current-implementation-tool-snapshot) for detailed tool list.
 
@@ -151,7 +156,7 @@ Built on the official **FastMCP SDK** for Python:
 - Wireless interfaces, clients, CAPsMAN status
 - DHCP server status, leases
 - Bridge topology, port listings
-- Diagnostics (ping/traceroute) - Phase 4
+- **Diagnostics (ping, traceroute, bandwidth_test) - Phase 4 ✅**
 
 **Advanced Tier** (single-device, low-risk writes):
 
@@ -163,8 +168,9 @@ Built on the official **FastMCP SDK** for Python:
 
 **Professional Tier** (multi-device, high-risk):
 
-- Multi-device DNS/NTP rollouts with plan/apply (Phase 4)
+- Multi-device DNS/NTP rollouts with plan/apply (Phase 4 ✅)
 - Fleet-level health and drift reporting
+- Staged rollout coordination (Phase 4 ✅)
 - Requires human approval tokens and immutable plans
 
 ### MCP Resources
@@ -290,14 +296,16 @@ Implementation is organized into phases that reflect increasing capability and r
 - Management path protection
 - Plan/apply framework with HMAC-signed tokens
 
-### Phase 4 – Multi-Device Coordination & Diagnostics (Planned)
+### Phase 4 – Multi-Device Coordination & Diagnostics ✅ (COMPLETED)
 
-- Coordinated multi-device plan/apply with staged rollout
-- Web-based admin UI for device and plan management
-- Diagnostics tools (ping/traceroute/bandwidth-test)
-- SSH key-based authentication
-- Client compatibility modes for legacy RouterOS
-- **Automated approval tokens for trusted environments**
+- ✅ Coordinated multi-device plan/apply with staged rollout
+- ✅ Diagnostics tools (ping/traceroute/bandwidth-test) enabled and registered
+- ✅ HTTP/SSE transport production-ready with OAuth/OIDC
+- ✅ Real-time resource subscriptions via SSE
+- ✅ Web-based admin API for device and plan management
+- ✅ Long-running operations with streaming progress
+- ⚠️ SSH key-based authentication (deferred to Phase 5)
+- ⚠️ Automated approval tokens for trusted environments (documented, implementation deferred to Phase 5)
   - Pre-approved workflows for lab automation and scheduled maintenance
   - Configuration-based trusted workflow definitions
   - Support for runbooks, CI/CD integration, and scheduled operations
@@ -916,20 +924,21 @@ This design follows official MCP best practices from Anthropic:
 
 ---
 
-**Phase 1-3 Complete, Phase 4 Planned** - This repository contains a production-ready design specification with 24+ comprehensive documents. Phase 1-3 implementation is complete with 62 tools, 12+ resources, 8 prompts, and full STDIO transport. Phase 4 will focus on HTTP/SSE transport completion, web admin UI, and multi-device coordination.
+**Phase 1-4 Complete, Phase 5 Planned** - This repository contains a production-ready implementation with 24+ comprehensive design documents. Phase 1-4 implementation is complete with 66 tools, 12+ resources, 8 prompts, full STDIO transport, and production-ready HTTP/SSE transport. Phase 5 will focus on multi-user RBAC and enterprise governance features.
 
-**Key Metrics (Phase 1-3)**:
+**Key Metrics (Phase 1-4)**:
 
-- **62 MCP tools** registered across 13 categories (Platform 2 + Device 2 + System 4 + Interface 3 + IP 5 + DNS/NTP 6 + Routing 6 + Firewall logs 5 + Firewall write 5 + DHCP 6 + Bridge 6 + Wireless 9 + Config 3)
+- **66 MCP tools** registered across 14 categories (Platform 3 + Device 2 + System 4 + Interface 3 + IP 5 + DNS/NTP 6 + Routing 6 + Firewall logs 5 + Firewall write 5 + DHCP 6 + Bridge 6 + Wireless 9 + Config 3 + Diagnostics 3)
 - **12+ resource URIs** (device, fleet, plan, audit)
 - **8 prompts** for guided workflows
 - **STDIO transport** fully functional
-- **HTTP/SSE transport** scaffold exists (Phase 4 completion)
+- **HTTP/SSE transport** production-ready with OAuth/OIDC
 - **Admin CLI** complete with device management and plan approval
 - **Plan/Apply framework** with HMAC-signed tokens and automatic rollback
+- **Multi-device coordination** with staged rollouts
 - **24+ design documents** (~40,000 lines) with comprehensive specifications
-- **3 security tiers** with OS-level auth (Phase 1) + OAuth 2.1/OIDC (Phase 4)
-- **Test coverage**: 80%+ overall (Phase 1-3), targeting 85% non-core / 95%+ core
-- **Test coverage targets**: at least 85% for non-core modules and at least 95% (ideally 100%) for core modules
+- **3 security tiers** with OAuth 2.1/OIDC authentication
+- **Test coverage**: 80%+ overall (Phase 1-4), targeting 85% non-core / 95%+ core
+- **583 tests** (564 unit + 19 e2e) validating all functionality
 
 For questions or contributions, please open an issue or discussion on GitHub.

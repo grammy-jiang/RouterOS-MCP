@@ -855,3 +855,63 @@ After completing deployment:
 3. **Monitor Health** – Set up Prometheus/Grafana dashboards
 4. **Review Security** – Run security audit checklist
 5. **Document Runbook** – Customize for your environment
+
+
+---
+
+## Phase 4 Production Deployment Notes
+
+### Phase 4 Enhancements
+
+Phase 4 introduces production-ready HTTP/SSE transport with the following enhancements:
+
+1. **Diagnostics Tools Enabled**
+   - `ping`, `traceroute`, `bandwidth_test` now registered and available
+   - Rate limiting enforced (10 pings per device per minute)
+   - Optional real-time progress streaming via SSE
+   - Safety guardrails prevent abuse
+
+2. **Multi-Device Coordination**
+   - Batch operations across device groups
+   - Staged rollouts with health checks between stages
+   - Enhanced plan/apply framework with device targeting
+   - Rollback capabilities for failed deployments
+
+3. **Real-Time Subscriptions**
+   - SSE-based resource subscriptions for live updates
+   - Fleet health monitoring with automatic refresh
+   - Plan execution progress tracking
+   - Audit log streaming
+
+4. **Enhanced Testing**
+   - 19 comprehensive E2E tests covering HTTP/SSE workflows
+   - SSE subscription validation
+   - Multi-device plan execution tests
+   - Metrics and audit log verification
+
+### Production Deployment Checklist
+
+Phase 4-specific requirements:
+
+- [ ] **Diagnostics Rate Limiting**: Configure per-device rate limits in settings
+- [ ] **SSE Connection Management**: Monitor active SSE connections via metrics
+- [ ] **Multi-Device Batching**: Test staged rollout workflows in staging
+- [ ] **OAuth Token Validation**: Ensure OIDC provider tokens are valid
+- [ ] **Database Performance**: Verify connection pool sizing for concurrent operations
+- [ ] **Load Balancer Config**: Configure sticky sessions for SSE connections
+- [ ] **Metrics Collection**: Enable Prometheus scraping for Phase 4 metrics
+- [ ] **Audit Log Storage**: Ensure adequate storage for increased audit volume
+
+### Migration from Phase 3
+
+See [PHASE4_MIGRATION_GUIDE.md](PHASE4_MIGRATION_GUIDE.md) for detailed upgrade instructions including:
+- Database migration steps (if any)
+- Configuration changes required
+- Testing procedures
+- Rollback instructions
+
+---
+
+**Document Status**: ✅ Production Ready (Phase 4 Complete)  
+**Last Updated**: January 9, 2026  
+**Next Steps**: Review Phase 5 roadmap for multi-user RBAC features

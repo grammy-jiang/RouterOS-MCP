@@ -4,11 +4,11 @@
 
 Define the MCP-facing API—tool taxonomy, capability tiers (fundamental/advanced/professional), input/output JSON schemas, and safety guardrails that map cleanly to RouterOS operations. This document is the contract between MCP clients (including AI tools) and the RouterOS MCP service.
 
-## Phase 1-3 (current implementation) tool snapshot
+## Phase 1-4 (current implementation) tool snapshot
 
-The running service currently registers **62 tools** across 13 categories. This list is authoritative for Phase 1-3; the larger catalogs below remain forward-looking. SSH fallback commands used by these tools are documented in [Doc 15](15-mcp-resources-and-prompts-design.md#ssh-commands-used-by-phase-1-resourcestools-reference).
+The running service currently registers **66 tools** across 14 categories. This list is authoritative for Phase 1-4; the larger catalogs below remain forward-looking. SSH fallback commands used by these tools are documented in [Doc 15](15-mcp-resources-and-prompts-design.md#ssh-commands-used-by-phase-1-resourcestools-reference).
 
-- **Platform/health helpers (2):** `echo`, `service_health`
+- **Platform/health helpers (3):** `echo`, `service_health`, `device_health`
 - **Device registry (2):** `list_devices`, `check_connectivity`
 - **System (4):** `get_system_overview`, `get_system_packages`, `get_system_clock`, `set_system_identity` (advanced)
 - **Interface (3):** `list_interfaces`, `get_interface`, `get_interface_stats`
@@ -21,9 +21,9 @@ The running service currently registers **62 tools** across 13 categories. This 
 - **Bridge (6):** `list_bridges`, `get_bridge`, `get_bridge_ports`, `plan_create_bridge`, `plan_modify_bridge_ports`, `apply_bridge_plan`
 - **Wireless (9):** `get_wireless_interfaces`, `get_wireless_clients`, `get_capsman_remote_caps`, `get_capsman_registrations`, `plan_create_wireless_ssid`, `plan_modify_wireless_ssid`, `plan_remove_wireless_ssid`, `plan_wireless_rf_settings`, `apply_wireless_plan`
 - **Config/Plan workflows (3):** `config_plan_dns_ntp_rollout`, `config_apply_dns_ntp_rollout`, `config_rollback_plan`
-- **Diagnostics (2):** `ping`, `traceroute` (implemented but not registered in Phase 1-3; enabled in Phase 4+)
+- **Diagnostics (3):** `ping`, `traceroute`, `bandwidth_test` (Phase 4 ✅)
 
-> Diagnostics (`ping`, `traceroute`) are implemented in code but **not registered** in Phase 1-3; they will be enabled in Phase 4+ once guardrails are finalized.
+> Diagnostics tools (`ping`, `traceroute`, `bandwidth_test`) are now registered and available in Phase 4. They include rate limiting, safety guardrails, and optional real-time progress streaming.
 
 Prompts and resources currently exposed are listed in [Doc 15](15-mcp-resources-and-prompts-design.md#phase-1-current-implementation-snapshot).
 
@@ -1810,15 +1810,17 @@ Use when:
 Returns: Packets sent/received, packet loss percentage, min/avg/max RTT.
 
 Constraints:
-- Max 10 pings per call (count parameter)
-- Results are snapshot, not continuous monitoring
+- Max 100 pings per call (count parameter, default: 4)
+- Packet size: 28-65500 bytes (default: 64)
+- Rate limited: 10 pings per device per minute
+- Optional streaming progress for real-time per-packet updates (HTTP transport only)
 
-Tip: Use interval_ms parameter to control ping frequency.
+Tip: Use stream_progress=true for long-running pings to get per-packet feedback.
 ```
 
 **Tier**: Fundamental
-**Phase**: Phase 1
-**RouterOS Endpoint**: `POST /rest/tool/ping`
+**Phase**: Phase 4 ✅
+**RouterOS Endpoint**: SSH `/ping` command
 
 **Request**:
 
@@ -1828,12 +1830,13 @@ Tip: Use interval_ms parameter to control ping frequency.
   "id": "req-022",
   "method": "tools/call",
   "params": {
-    "name": "tool/ping",
+    "name": "ping",
     "arguments": {
       "device_id": "dev-lab-01",
-      "address": "8.8.8.8",
-      "count": 4, // Max 10
-      "interval_ms": 1000
+      "target": "8.8.8.8",
+      "count": 4,
+      "packet_size": 64,
+      "stream_progress": false
     }
   }
 }
@@ -1849,19 +1852,25 @@ Tip: Use interval_ms parameter to control ping frequency.
     "content": [
       {
         "type": "text",
-        "text": "Ping to 8.8.8.8: 4 sent, 4 received, 0% loss"
+        "text": "Ping to 8.8.8.8: 4 sent, 4 received, 0% loss\nMin/Avg/Max RTT: 10.0/12.0/15.0 ms"
       }
     ],
     "isError": false,
     "_meta": {
       "device_id": "dev-lab-01",
-      "host": "8.8.8.8",
+      "target": "8.8.8.8",
       "packets_sent": 4,
       "packets_received": 4,
-      "packet_loss_percent": 0,
+      "packet_loss_percent": 0.0,
       "min_rtt_ms": 10.0,
       "avg_rtt_ms": 12.0,
-      "max_rtt_ms": 15.0
+      "max_rtt_ms": 15.0,
+      "responses": [
+        {"seq": 1, "ttl": 64, "time_ms": 10.0, "size": 64},
+        {"seq": 2, "ttl": 64, "time_ms": 12.0, "size": 64},
+        {"seq": 3, "ttl": 64, "time_ms": 15.0, "size": 64},
+        {"seq": 4, "ttl": 64, "time_ms": 11.0, "size": 64}
+      ]
     }
   }
 }
@@ -1886,15 +1895,16 @@ Use when:
 Returns: List of hops with hop number, IP address, and RTT.
 
 Constraints:
-- Max 30 hops
-- Max 3 probes per hop (count parameter)
+- Max 30 hops (default: 20)
+- Rate limited per device
+- Results may show * for unresponsive hops
 
-Tip: Some hops may not respond (shown as * in results).
+Tip: Some hops may not respond (shown as null in results).
 ```
 
 **Tier**: Fundamental
-**Phase**: Phase 1
-**RouterOS Endpoint**: `POST /rest/tool/traceroute`
+**Phase**: Phase 4 ✅
+**RouterOS Endpoint**: SSH `/tool/traceroute` command
 
 **Request**:
 
@@ -1904,11 +1914,11 @@ Tip: Some hops may not respond (shown as * in results).
   "id": "req-023",
   "method": "tools/call",
   "params": {
-    "name": "tool/traceroute",
+    "name": "traceroute",
     "arguments": {
       "device_id": "dev-lab-01",
-      "address": "8.8.8.8",
-      "count": 1 // Max 3 probes per hop
+      "target": "8.8.8.8",
+      "max_hops": 20
     }
   }
 }
@@ -1924,7 +1934,7 @@ Tip: Some hops may not respond (shown as * in results).
     "content": [
       {
         "type": "text",
-        "text": "Traceroute to 8.8.8.8 completed in 8 hops"
+        "text": "Traceroute to 8.8.8.8 completed in 8 hops\n1: 192.168.1.254 (1.5 ms)\n2: 10.0.0.1 (5.2 ms)\n..."
       }
     ],
     "isError": false,
@@ -1935,15 +1945,18 @@ Tip: Some hops may not respond (shown as * in results).
         {
           "hop": 1,
           "address": "192.168.1.254",
-          "rtt_ms": 1.5
+          "rtt_ms": 1.5,
+          "loss_percent": 0.0
         },
         {
           "hop": 2,
           "address": "10.0.0.1",
-          "rtt_ms": 5.2
+          "rtt_ms": 5.2,
+          "loss_percent": 0.0
         }
       ],
-      "total_hops": 8
+      "total_hops": 8,
+      "target_reached": true
     }
   }
 }
@@ -1951,12 +1964,12 @@ Tip: Some hops may not respond (shown as * in results).
 
 ---
 
-##### `tool/bandwidth-test`
+##### `tool/bandwidth_test`
 
 **Description:**
 
 ```
-Run bandwidth test between router and target RouterOS device.
+Run bandwidth test between router and target host.
 
 Use when:
 - User asks "test bandwidth to X" or "how fast is the link?"
@@ -1965,19 +1978,22 @@ Use when:
 - Verifying link capacity
 - Testing after configuration changes
 
-Returns: TX/RX throughput in bits per second.
+Returns: TX/RX throughput in bits per second, packet loss, jitter.
 
 Constraints:
-- Max 60 second duration
-- Target must be another RouterOS device with bandwidth-test enabled
+- Max 60 second duration (default: 10)
 - Generates traffic load (use carefully in production)
+- Rate limited per device
+- Optional streaming progress for real-time throughput updates (HTTP transport only)
+- Supports TCP and UDP protocols
+- Direction: upload, download, or both
 
 Note: This is an active test that consumes bandwidth.
 ```
 
 **Tier**: Fundamental
-**Phase**: Phase 1
-**RouterOS Endpoint**: `POST /rest/tool/bandwidth-test`
+**Phase**: Phase 4 ✅
+**RouterOS Endpoint**: SSH `/tool/bandwidth-test` command
 
 **Request**:
 
@@ -1987,7 +2003,7 @@ Note: This is an active test that consumes bandwidth.
   "id": "req-024",
   "method": "tools/call",
   "params": {
-    "name": "tool/bandwidth-test",
+    "name": "bandwidth_test",
     "arguments": {
       "device_id": "dev-lab-01",
       "address": "192.168.1.254",
@@ -4627,4 +4643,4 @@ print(f"Success: {result['_meta']['successful']}/{result['_meta']['total_devices
 
 ---
 
-**Document Status**: ✅ Complete with 62 tools (Phase 1-3 implemented: fundamental read-only, advanced single-device writes including firewall/DHCP/bridge/wireless; Phase 4 planned: diagnostics, multi-device coordination), full JSON-RPC schemas, intent-based descriptions, and phase assignments
+**Document Status**: ✅ Complete with 66 tools (Phase 1-4 implemented: fundamental read-only, advanced single-device writes including firewall/DHCP/bridge/wireless, diagnostics tools enabled; Phase 5 planned: multi-user RBAC, enterprise governance), full JSON-RPC schemas, intent-based descriptions, and phase assignments
