@@ -349,6 +349,267 @@ async def config_apply_dns_ntp_rollout(
 6. Operator calls `config/apply-dns-ntp-rollout` with `plan_id` and `approval_token`
 7. MCP validates token, executes plan, marks token as used
 
+#### 2a. Automated Approval Tokens (Phase 4)
+
+**Automated approval tokens enable pre-approved workflows in trusted environments, reducing manual intervention for routine operations like lab DNS rollouts or scheduled maintenance.**
+
+**⚠️ SECURITY WARNING**: Automated approval tokens bypass manual approval steps. Use ONLY in trusted environments (lab, CI/CD pipelines, scheduled runbooks). Production use requires explicit risk acceptance.
+
+**Use Cases:**
+
+1. **Lab Automation**: Automated DNS/NTP configuration changes during development
+2. **Scheduled Maintenance**: Routine updates via cron jobs or APScheduler
+3. **CI/CD Integration**: Infrastructure-as-code deployments via GitHub Actions, GitLab CI
+4. **Runbook Automation**: Pre-approved playbooks for common operations
+
+**Configuration Format:**
+
+Automated approval tokens are configured via YAML in the application configuration file:
+
+```yaml
+# config/lab.yaml or config/staging.yaml
+trusted_workflows:
+  - name: "lab-dns-rollout"
+    description: "Automated DNS server updates for lab devices"
+    environment: lab  # Required: must match service environment
+    device_scope: "lab-*"  # Device ID pattern (glob-style)
+    change_types:
+      - dns_ntp  # Allowed change types: dns_ntp, firewall, dhcp, bridge, wireless, ip
+    auto_approve: true
+    enabled: true
+    audit_tag: "automated-lab-dns"  # Tag for audit trail filtering
+
+  - name: "staging-ntp-sync"
+    description: "Nightly NTP server synchronization for staging"
+    environment: staging
+    device_scope: "staging-router-*"
+    change_types:
+      - dns_ntp
+    auto_approve: true
+    enabled: true
+    schedule: "0 2 * * *"  # Optional: cron expression for scheduled execution
+    audit_tag: "automated-staging-ntp"
+```
+
+**Configuration Fields:**
+
+- `name` (required): Unique workflow identifier
+- `description` (required): Human-readable workflow description
+- `environment` (required): Must match service environment (lab/staging/prod)
+- `device_scope` (required): Device ID pattern using glob syntax (`*`, `?`, `[a-z]`)
+- `change_types` (required): List of allowed change types
+  - Valid values: `dns_ntp`, `firewall`, `dhcp`, `bridge`, `wireless`, `ip`, `system`
+- `auto_approve` (required): Set to `true` to enable automated approval
+- `enabled` (required): Set to `false` to temporarily disable without removing config
+- `schedule` (optional): Cron expression for scheduled execution
+- `audit_tag` (optional): Custom tag for filtering audit events
+
+**Audit Trail:**
+
+All auto-approved plans are flagged in the audit log with:
+
+- `action: AUTO_APPROVED_PLAN_APPLY`
+- `metadata.workflow_name`: Name of the trusted workflow
+- `metadata.auto_approved: true`
+- `metadata.audit_tag`: Custom tag from workflow config (if specified)
+- `metadata.device_scope`: Device pattern that matched
+- `correlation_id`: Links all plan operations together
+
+**Example Output:**
+
+```json
+{
+  "id": "audit-550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2026-01-09T00:30:00Z",
+  "action": "AUTO_APPROVED_PLAN_APPLY",
+  "tool_name": "config/apply-dns-ntp-rollout",
+  "tool_tier": "professional",
+  "device_id": "lab-router-01",
+  "environment": "lab",
+  "plan_id": "plan-123abc",
+  "result": "SUCCESS",
+  "metadata": {
+    "workflow_name": "lab-dns-rollout",
+    "auto_approved": true,
+    "audit_tag": "automated-lab-dns",
+    "device_scope": "lab-*",
+    "change_type": "dns_ntp"
+  },
+  "correlation_id": "corr-660e8400-e29b-41d4-a716-446655440001"
+}
+```
+
+**Implementation Details:**
+
+When a plan is created that matches a trusted workflow:
+
+1. Service validates the plan matches all workflow constraints:
+   - Environment matches
+   - Device ID matches `device_scope` pattern
+   - Change type is in `change_types` list
+   - Workflow is `enabled: true` and `auto_approve: true`
+
+2. If all constraints match, service automatically:
+   - Generates approval token via existing HMAC mechanism
+   - Marks plan as `APPROVED` status
+   - Sets `auto_approved: true` in plan metadata
+   - Logs `AUTO_APPROVED_PLAN_APPLY` audit event
+
+3. Plan can be executed immediately without manual approval step
+
+4. If constraints don't match, normal approval workflow applies
+
+**Security Considerations:**
+
+1. **Environment Restriction**: Trusted workflows MUST specify `environment` and it must match the service's configured environment. Cannot auto-approve cross-environment plans.
+
+2. **Device Scoping**: Use narrow `device_scope` patterns. Avoid wildcards like `*` that match all devices. Prefer specific patterns like `lab-router-*` or `staging-dns-*`.
+
+3. **Change Type Limits**: Only enable required `change_types`. Don't use broad permissions like `["*"]`.
+
+4. **Audit Retention**: Auto-approved plans are logged with special flags. Review audit logs regularly to detect misuse.
+
+5. **Temporary Disable**: Use `enabled: false` to temporarily disable a workflow without removing its configuration.
+
+6. **Production Warning**: Auto-approval in production environments requires explicit risk acceptance. Most organizations should use manual approval for production.
+
+**Integration with Plan/Apply:**
+
+Automated approval tokens integrate seamlessly with the existing plan/apply framework:
+
+```python
+# Plan creation (no changes to tool interface)
+result = await config_plan_dns_ntp_rollout(
+    device_ids=["lab-router-01", "lab-router-02"],
+    dns_servers=["8.8.8.8", "8.8.4.4"]
+)
+
+# If plan matches trusted workflow, plan is auto-approved
+# and approval_token is automatically generated
+if result["status"] == "approved":
+    # Can apply immediately without manual approval
+    apply_result = await config_apply_dns_ntp_rollout(
+        plan_id=result["plan_id"],
+        approval_token=result["approval_token"]  # Auto-generated
+    )
+```
+
+**Example 1: Lab DNS Rollout with Auto-Approval**
+
+```yaml
+# config/lab.yaml
+environment: lab
+
+trusted_workflows:
+  - name: "lab-dns-rollout"
+    description: "Daily DNS server updates for all lab routers"
+    environment: lab
+    device_scope: "lab-router-*"
+    change_types:
+      - dns_ntp
+    auto_approve: true
+    enabled: true
+    schedule: "0 9 * * *"  # Daily at 9 AM
+    audit_tag: "automated-lab-dns"
+```
+
+**Usage:**
+
+```python
+# Create plan for lab routers
+plan = await config_plan_dns_ntp_rollout(
+    device_ids=["lab-router-01", "lab-router-02", "lab-router-03"],
+    dns_servers=["10.0.0.1", "10.0.0.2"]
+)
+
+# Plan is automatically approved (matches trusted workflow)
+assert plan["status"] == "approved"
+assert plan["auto_approved"] == True
+assert plan["workflow_name"] == "lab-dns-rollout"
+
+# Apply immediately without manual approval
+result = await config_apply_dns_ntp_rollout(
+    plan_id=plan["plan_id"],
+    approval_token=plan["approval_token"]  # Auto-generated token
+)
+
+# Audit log shows AUTO_APPROVED_PLAN_APPLY
+```
+
+**Example 2: Staging NTP Update with Auto-Approval**
+
+```yaml
+# config/staging.yaml
+environment: staging
+
+trusted_workflows:
+  - name: "staging-ntp-sync"
+    description: "Weekly NTP server synchronization for staging routers"
+    environment: staging
+    device_scope: "staging-*"
+    change_types:
+      - dns_ntp
+    auto_approve: true
+    enabled: true
+    schedule: "0 2 * * 0"  # Weekly on Sunday at 2 AM
+    audit_tag: "automated-staging-ntp"
+```
+
+**Usage:**
+
+```python
+# Scheduled job (via APScheduler or cron)
+async def staging_ntp_sync():
+    """Weekly staging NTP synchronization."""
+    devices = await device_service.list_devices(
+        environment="staging",
+        pattern="staging-*"
+    )
+    
+    plan = await config_plan_dns_ntp_rollout(
+        device_ids=[d.id for d in devices],
+        ntp_servers=["pool.ntp.org", "time.google.com"]
+    )
+    
+    # Auto-approved if matches trusted workflow
+    if plan["auto_approved"]:
+        result = await config_apply_dns_ntp_rollout(
+            plan_id=plan["plan_id"],
+            approval_token=plan["approval_token"]
+        )
+        logger.info(
+            "Staging NTP sync completed",
+            extra={
+                "workflow": "staging-ntp-sync",
+                "devices": len(devices),
+                "result": result["status"]
+            }
+        )
+```
+
+**Disabling Automated Approval:**
+
+To disable a workflow without removing its configuration:
+
+```yaml
+trusted_workflows:
+  - name: "lab-dns-rollout"
+    # ... other fields ...
+    enabled: false  # Temporarily disabled
+```
+
+When disabled, plans that match the workflow will use normal approval workflow (manual approval required).
+
+**Best Practices:**
+
+1. **Start with Lab**: Test automated approval in lab environment first
+2. **Narrow Scopes**: Use specific device patterns, not broad wildcards
+3. **Minimal Permissions**: Only enable required change types
+4. **Audit Review**: Monitor `AUTO_APPROVED_PLAN_APPLY` events regularly
+5. **Scheduled Operations**: Use `schedule` field for predictable maintenance windows
+6. **Emergency Disable**: Keep `enabled: false` option available for quick rollback
+7. **Documentation**: Document each workflow's purpose and risk acceptance
+
 #### 3. Blast Radius Controls
 
 **Professional tools enforce strict blast radius limits to prevent widespread failures:**
