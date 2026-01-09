@@ -569,3 +569,214 @@ class TestRouterOSRestClientSSLVerification:
         assert len(created_clients) == 1
         args = created_clients[0][1]
         assert args["verify"] is False
+
+
+class TestRouterOSRestClientVersionDetection:
+    """Tests for RouterOS version detection."""
+
+    @pytest.mark.asyncio
+    async def test_version_detection_success_single_package(self) -> None:
+        """Test successful version detection from single package response."""
+        client = RouterOSRestClient(
+            host="127.0.0.1",
+            username="admin",
+            password="secret",
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = b'{"name": "routeros", "version": "7.10.2"}'
+        mock_response.json.return_value = {"name": "routeros", "version": "7.10.2"}
+
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_client = AsyncMock()
+            mock_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_client
+
+            version = await client.detect_version()
+
+            assert version == "7.10.2"
+            mock_client.request.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_version_detection_success_package_list(self) -> None:
+        """Test successful version detection from list of packages."""
+        client = RouterOSRestClient(
+            host="127.0.0.1",
+            username="admin",
+            password="secret",
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = b'[{"name": "dhcp", "version": "7.10.2"}, {"name": "routeros", "version": "7.10.2"}]'
+        mock_response.json.return_value = [
+            {"name": "dhcp", "version": "7.10.2"},
+            {"name": "routeros", "version": "7.10.2"},
+        ]
+
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_client = AsyncMock()
+            mock_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_client
+
+            version = await client.detect_version()
+
+            assert version == "7.10.2"
+
+    @pytest.mark.asyncio
+    async def test_version_detection_v6_format(self) -> None:
+        """Test version detection with RouterOS v6.x format."""
+        client = RouterOSRestClient(
+            host="127.0.0.1",
+            username="admin",
+            password="secret",
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = b'[{"name": "system", "version": "6.48.6"}]'
+        mock_response.json.return_value = [{"name": "system", "version": "6.48.6"}]
+
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_client = AsyncMock()
+            mock_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_client
+
+            version = await client.detect_version()
+
+            assert version == "6.48.6"
+
+    @pytest.mark.asyncio
+    async def test_version_detection_rc_version(self) -> None:
+        """Test version detection with RC/beta version string."""
+        client = RouterOSRestClient(
+            host="127.0.0.1",
+            username="admin",
+            password="secret",
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = b'{"name": "routeros", "version": "7.11-rc1"}'
+        mock_response.json.return_value = {"name": "routeros", "version": "7.11-rc1"}
+
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_client = AsyncMock()
+            mock_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_client
+
+            version = await client.detect_version()
+
+            assert version == "7.11-rc1"
+
+    @pytest.mark.asyncio
+    async def test_version_detection_no_routeros_package(self) -> None:
+        """Test version detection when routeros package is not found."""
+        client = RouterOSRestClient(
+            host="127.0.0.1",
+            username="admin",
+            password="secret",
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = b'[{"name": "dhcp", "version": "7.10.2"}]'
+        mock_response.json.return_value = [{"name": "dhcp", "version": "7.10.2"}]
+
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_client = AsyncMock()
+            mock_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_client
+
+            version = await client.detect_version()
+
+            assert version is None
+
+    @pytest.mark.asyncio
+    async def test_version_detection_empty_response(self) -> None:
+        """Test version detection with empty package list."""
+        client = RouterOSRestClient(
+            host="127.0.0.1",
+            username="admin",
+            password="secret",
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = b'[]'
+        mock_response.json.return_value = []
+
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_client = AsyncMock()
+            mock_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_client
+
+            version = await client.detect_version()
+
+            assert version is None
+
+    @pytest.mark.asyncio
+    async def test_version_detection_404_not_found(self) -> None:
+        """Test version detection when endpoint doesn't exist (old RouterOS)."""
+        client = RouterOSRestClient(
+            host="127.0.0.1",
+            username="admin",
+            password="secret",
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        mock_response.text = "Not found"
+        mock_response.json.side_effect = ValueError()
+
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_client = AsyncMock()
+            mock_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_client
+
+            version = await client.detect_version()
+
+            # Should return None and log warning instead of raising
+            assert version is None
+
+    @pytest.mark.asyncio
+    async def test_version_detection_network_error(self) -> None:
+        """Test version detection handles network errors gracefully."""
+        client = RouterOSRestClient(
+            host="127.0.0.1",
+            username="admin",
+            password="secret",
+        )
+
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_client = AsyncMock()
+            mock_client.request.side_effect = httpx.NetworkError("Connection failed")
+            mock_get_client.return_value = mock_client
+
+            # Network errors should propagate (not caught by detect_version)
+            with pytest.raises(RouterOSNetworkError):
+                await client.detect_version()
+
+    @pytest.mark.asyncio
+    async def test_version_detection_missing_version_field(self) -> None:
+        """Test version detection when package entry lacks version field."""
+        client = RouterOSRestClient(
+            host="127.0.0.1",
+            username="admin",
+            password="secret",
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = b'{"name": "routeros"}'
+        mock_response.json.return_value = {"name": "routeros"}
+
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_client = AsyncMock()
+            mock_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_client
+
+            version = await client.detect_version()
+
+            assert version is None

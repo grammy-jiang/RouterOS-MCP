@@ -357,3 +357,50 @@ class RouterOSRestClient:
             await client.delete("/rest/ip/firewall/address-list/123")
         """
         return await self._request("DELETE", path)
+
+    async def detect_version(self) -> str | None:
+        """Detect RouterOS version from system package.
+
+        Queries /rest/system/package endpoint and extracts the RouterOS version
+        from the 'routeros' package entry. This is used for device capability
+        detection and API compatibility checking.
+
+        Returns:
+            RouterOS version string (e.g., "7.10.2", "6.48.6") or None if unavailable
+
+        Raises:
+            RouterOSError: On connection or authentication errors
+
+        Example:
+            version = await client.detect_version()
+            if version:
+                print(f"RouterOS version: {version}")
+        """
+        try:
+            # Query system packages
+            response = await self.get("/rest/system/package")
+
+            # Response can be a list of packages or a single package dict
+            packages = response if isinstance(response, list) else [response]  # type: ignore[unreachable]
+
+            # Find the 'routeros' or 'system' package and extract version
+            for package in packages:
+                if isinstance(package, dict):
+                    name = package.get("name", "").lower()
+                    if name in ["routeros", "system"]:
+                        version = package.get("version")
+                        if version:
+                            return str(version)
+
+            # If no routeros package found, log and return None
+            logger.warning(
+                f"RouterOS version not found in package list for {self.host}:{self.port}"
+            )
+            return None
+
+        except (RouterOSNotFoundError, RouterOSClientError) as e:
+            # Endpoint might not exist on very old devices
+            logger.warning(
+                f"Failed to detect RouterOS version for {self.host}:{self.port}: {e}"
+            )
+            return None

@@ -259,6 +259,86 @@ class Device(BaseModel):
         """Handle None values from ORM by returning default 60."""
         return v if v is not None else 60
 
+    def is_v6(self) -> bool:
+        """Check if device is running RouterOS v6.x.
+
+        Returns:
+            True if version starts with "6.", False otherwise
+        """
+        if not self.routeros_version:
+            return False
+        return self.routeros_version.startswith("6.")
+
+    def is_v7(self) -> bool:
+        """Check if device is running RouterOS v7.x.
+
+        Returns:
+            True if version starts with "7.", False otherwise
+        """
+        if not self.routeros_version:
+            return False
+        return self.routeros_version.startswith("7.")
+
+    def version_ge(self, target: str) -> bool:
+        """Check if device version is greater than or equal to target version.
+
+        Performs simple string-based version comparison suitable for RouterOS
+        version strings (e.g., "7.10", "6.48.6", "7.11-rc1").
+
+        Args:
+            target: Target version string (e.g., "7.10", "6.48")
+
+        Returns:
+            True if current version >= target, False if version unknown or less than target
+
+        Example:
+            if device.version_ge("7.10"):
+                # Use v7.10+ features
+        """
+        if not self.routeros_version:
+            return False
+
+        # Parse version components (handle rc/beta suffixes)
+        def parse_version(v: str) -> tuple[list[int], str]:
+            """Parse version string into (numeric_parts, suffix)."""
+            # Split on hyphen to separate version from suffix (e.g., "7.11-rc1")
+            parts = v.split("-", 1)
+            version_str = parts[0]
+            suffix = parts[1] if len(parts) > 1 else ""
+
+            # Parse numeric components
+            numeric_parts = []
+            for part in version_str.split("."):
+                try:
+                    numeric_parts.append(int(part))
+                except ValueError:
+                    break
+
+            return numeric_parts, suffix
+
+        current_parts, current_suffix = parse_version(self.routeros_version)
+        target_parts, target_suffix = parse_version(target)
+
+        # Compare numeric parts
+        for i in range(max(len(current_parts), len(target_parts))):
+            current_val = current_parts[i] if i < len(current_parts) else 0
+            target_val = target_parts[i] if i < len(target_parts) else 0
+
+            if current_val > target_val:
+                return True
+            elif current_val < target_val:
+                return False
+
+        # Numeric parts are equal - handle suffix comparison
+        # Stable (no suffix) > RC/beta (has suffix)
+        if not current_suffix and target_suffix:
+            return True  # Current is stable, target has suffix
+        if current_suffix and not target_suffix:
+            return False  # Current has suffix, target is stable
+
+        # Both have suffixes or both are stable - consider equal (>= is True)
+        return True
+
 
 class CredentialCreate(BaseModel):
     """DTO for creating device credentials."""
