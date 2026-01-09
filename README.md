@@ -69,7 +69,14 @@ All design decisions for the 1.x line are captured in the [`docs/`](docs/) direc
 - ❌ Diagnostics tools deferred to Phase 4+
 - ❌ SSH key authentication deferred to Phase 4+
 
-### Phase 4 (In Progress)
+### Phase 4 (Planned)
+
+- Multi-device coordination with staged rollouts
+- Web-based admin UI for device and plan management
+- Diagnostics tools (ping, traceroute, bandwidth test)
+- **Automated approval tokens** for trusted workflows (documented - see [docs/02](docs/02-security-oauth-integration-and-access-control.md#2a-automated-approval-tokens-phase-4))
+- SSH key authentication
+- Long-running operations with JSON-RPC streaming
 
 ## Current Implementation Status
 
@@ -290,7 +297,11 @@ Implementation is organized into phases that reflect increasing capability and r
 - Diagnostics tools (ping/traceroute/bandwidth-test)
 - SSH key-based authentication
 - Client compatibility modes for legacy RouterOS
-- Automated approval tokens for trusted environments
+- **Automated approval tokens for trusted environments**
+  - Pre-approved workflows for lab automation and scheduled maintenance
+  - Configuration-based trusted workflow definitions
+  - Support for runbooks, CI/CD integration, and scheduled operations
+  - See [docs/02](docs/02-security-oauth-integration-and-access-control.md#2a-automated-approval-tokens-phase-4) for detailed configuration examples
 - Long-running operations with JSON-RPC streaming
 
 ### Phase 5 – Multi-User RBAC & Governance (Optional)
