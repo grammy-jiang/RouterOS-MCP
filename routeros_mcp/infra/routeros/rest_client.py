@@ -381,7 +381,7 @@ class RouterOSRestClient:
             response = await self.get("/rest/system/package")
 
             # Response can be a list of packages or a single package dict
-            packages = response if isinstance(response, list) else [response]
+            packages = response if isinstance(response, list) else [response]  # type: ignore[unreachable]
 
             # Find the 'routeros' or 'system' package and extract version
             for package in packages:
