@@ -1,0 +1,192 @@
+name: Copilot Agent CI
+
+# Main CI pipeline for all commits and PRs (including those from Copilot agent)
+# Ensures code quality gates are enforced consistently
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+  pull_request:
+    branches:
+      - main
+      - master
+      - develop
+  workflow_dispatch:
+
+jobs:
+  # Lint and type checking job
+  lint-and-typecheck:
+    name: Lint and Type Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Use the pre-warmed environment from copilot-setup-steps
+    # This ensures consistent setup and faster execution
+    needs: []
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Check code formatting with black
+        run: |
+          black --check routeros_mcp tests
+        continue-on-error: false
+
+      - name: Lint with ruff
+        run: |
+          ruff check routeros_mcp tests
+        continue-on-error: false
+
+      - name: Type check with mypy
+        run: |
+          mypy routeros_mcp
+        continue-on-error: false
+
+  # Test job with full coverage
+  tests:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # Use the pre-warmed environment
+    needs: []
+
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Initialize database
+        run: |
+          alembic upgrade head || echo "Database migration skipped (in-memory SQLite)"
+        env:
+          ROUTEROS_MCP_DATABASE_URL: "sqlite+aiosqlite:///:memory:"
+
+      - name: Configure test environment
+        run: |
+          echo "ROUTEROS_MCP_ENCRYPTION_KEY=dGVzdC1rZXktZm9yLWNpLWVudmlyb25tZW50LTMyLWJ5dGVz" > .env
+          echo "ROUTEROS_MCP_LOG_LEVEL=WARNING" >> .env
+
+      - name: Run unit tests
+        run: |
+          pytest tests/unit -v --cov=routeros_mcp --cov-report=xml --cov-report=term-missing
+        env:
+          ROUTEROS_MCP_DEBUG: "false"
+          ROUTEROS_MCP_LOG_LEVEL: "WARNING"
+
+      - name: Run smoke tests
+        run: |
+          pytest tests/smoke -v
+        env:
+          ROUTEROS_MCP_DEBUG: "false"
+          ROUTEROS_MCP_LOG_LEVEL: "WARNING"
+
+      - name: Run e2e tests
+        run: |
+          pytest tests/e2e -v
+        env:
+          ROUTEROS_MCP_DEBUG: "false"
+          ROUTEROS_MCP_LOG_LEVEL: "WARNING"
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v4
+        if: matrix.python-version == '3.11'
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+        continue-on-error: true
+
+      - name: Check coverage threshold
+        if: matrix.python-version == '3.11'
+        run: |
+          coverage report --fail-under=80
+        continue-on-error: false
+
+  # Security scanning job
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+          pip install bandit[toml] safety
+
+      - name: Run bandit security scan
+        run: |
+          bandit -r routeros_mcp -f json -o bandit-report.json || true
+          bandit -r routeros_mcp
+        continue-on-error: true
+
+      - name: Check for known vulnerabilities
+        run: |
+          safety check --json || echo "::warning::Some dependencies have known vulnerabilities"
+        continue-on-error: true
+
+  # All checks must pass
+  all-checks:
+    name: All Checks Passed
+    runs-on: ubuntu-latest
+    needs: [lint-and-typecheck, tests, security]
+    if: always()
+
+    steps:
+      - name: Check all jobs
+        run: |
+          if [[ "${{ needs.lint-and-typecheck.result }}" != "success" ]] || \
+             [[ "${{ needs.tests.result }}" != "success" ]] || \
+             [[ "${{ needs.security.result }}" != "success" ]]; then
+            echo "::error::One or more required checks failed"
+            exit 1
+          fi
+          echo "✅ All required checks passed!"

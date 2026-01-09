@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 💬 GitHub Discussions
+    url: https://github.com/grammy-jiang/RouterOS-MCP/discussions
+    about: Ask questions and discuss ideas with the community
+  - name: 📖 Documentation
+    url: https://github.com/grammy-jiang/RouterOS-MCP/tree/master/docs
+    about: Read the comprehensive documentation
+  - name: 🤖 Copilot Best Practices
+    url: https://github.com/grammy-jiang/RouterOS-MCP/blob/master/docs/best_practice/github-copilot-coding-agent-best-practices.md
+    about: Learn how to effectively use GitHub Copilot coding agent

@@ -1,0 +1,42 @@
+# CODEOWNERS - Automatic PR review assignment
+# Lines starting with '#' are comments.
+# Each line is a file pattern followed by one or more owners.
+
+# Default owners for everything in the repo.
+# These owners will be requested for review when someone opens a pull request.
+*       @grammy-jiang
+
+# Core domain logic requires careful review
+/routeros_mcp/domain/                   @grammy-jiang
+/routeros_mcp/security/                 @grammy-jiang
+
+# MCP protocol implementation
+/routeros_mcp/mcp/                      @grammy-jiang
+
+# Infrastructure and observability
+/routeros_mcp/infra/                    @grammy-jiang
+
+# Configuration and settings
+/routeros_mcp/config.py                 @grammy-jiang
+/routeros_mcp/cli.py                    @grammy-jiang
+
+# Database models and migrations
+/routeros_mcp/domain/models.py          @grammy-jiang
+/alembic/                               @grammy-jiang
+
+# GitHub workflows and CI
+/.github/workflows/                     @grammy-jiang
+/.github/copilot-instructions.md        @grammy-jiang
+
+# Documentation
+/docs/                                  @grammy-jiang
+/README.md                              @grammy-jiang
+/CONTRIBUTING.md                        @grammy-jiang
+
+# Test infrastructure
+/tests/conftest.py                      @grammy-jiang
+/tests/unit/conftest.py                 @grammy-jiang
+
+# Dependencies and project configuration
+/pyproject.toml                         @grammy-jiang
+/alembic.ini                            @grammy-jiang
