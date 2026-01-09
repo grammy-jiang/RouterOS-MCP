@@ -19,7 +19,7 @@ Design principles:
 - Follow patterns from existing E2E tests
 - Tests should be isolated and idempotent
 
-Test execution time: ~15-20 minutes (comprehensive suite)
+Test execution time: ~6 seconds (12 tests, 1 skipped; fast in-memory SQLite suite)
 
 Reference:
 - docs/10-testing-validation-and-sandbox-strategy-and-safety-nets.md
@@ -32,25 +32,21 @@ import asyncio
 import json
 import unittest
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock
 
-import httpx
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
-from routeros_mcp.config import Settings
 from routeros_mcp.domain.models import HealthStatus, PlanStatus
-from routeros_mcp.domain.services.device import DeviceService
 from routeros_mcp.domain.services.diagnostics import DiagnosticsService
 from routeros_mcp.domain.services.job import JobService
 from routeros_mcp.domain.services.plan import PlanService
 from routeros_mcp.infra.db.models import AuditEvent, Base, Device, Job, Plan
-from routeros_mcp.infra.observability import metrics
 from routeros_mcp.mcp.transport.sse_manager import SSEManager
 
 from .e2e_test_utils import TEST_ENCRYPTION_KEY, make_test_settings
-from .phase3_test_utils import MockRouterOSRestClient, create_mock_device
+from .phase3_test_utils import MockRouterOSRestClient
 
 
 # =============================================================================
@@ -58,7 +54,7 @@ from .phase3_test_utils import MockRouterOSRestClient, create_mock_device
 # =============================================================================
 
 
-async def setup_test_database() -> tuple[async_sessionmaker, Any]:
+async def setup_test_database() -> tuple[async_sessionmaker[AsyncSession], AsyncEngine]:
     """Create test database with schema."""
     engine = create_async_engine(
         "sqlite+aiosqlite:///:memory:",
@@ -126,13 +122,15 @@ class TestHTTPTransportE2E(unittest.TestCase):
     """Test HTTP/SSE transport end-to-end workflows."""
 
     def test_http_transport_full_workflow(self) -> None:
-        """Test complete HTTP transport workflow: request → processing → response.
+        """Test HTTP transport response structure validation.
+        
+        Note: This test validates JSON-RPC response structure only.
+        Actual HTTP server integration testing requires a running server.
         
         Validates:
-        - HTTP server receives and processes JSON-RPC requests
-        - Tool invocation through HTTP transport
-        - Response formatting and correlation ID propagation
-        - Metrics recorded for HTTP requests
+        - JSON-RPC 2.0 response format
+        - Result structure with content array
+        - Response data serialization
         """
         async def _run() -> None:
             async_session_maker, engine = await setup_test_database()
@@ -141,13 +139,6 @@ class TestHTTPTransportE2E(unittest.TestCase):
                 async with async_session_maker() as session:
                     # Create test device
                     await create_test_devices(session, count=1)
-                    
-                settings = make_test_settings(
-                    mcp_transport="http",
-                    mcp_http_host="127.0.0.1",
-                    mcp_http_port=18080,
-                    encryption_key=TEST_ENCRYPTION_KEY,
-                )
                 
                 # Mock HTTP client call
                 mock_response = {
@@ -171,8 +162,7 @@ class TestHTTPTransportE2E(unittest.TestCase):
                     },
                 }
                 
-                # In real scenario, would make actual HTTP request
-                # For now, validate structure
+                # Validate response structure
                 self.assertEqual(mock_response["jsonrpc"], "2.0")
                 self.assertIn("result", mock_response)
                 self.assertIn("content", mock_response["result"])
@@ -183,19 +173,22 @@ class TestHTTPTransportE2E(unittest.TestCase):
         asyncio.run(_run())
 
     def test_http_tool_invocation_with_parameters(self) -> None:
-        """Test HTTP tool invocation with complex parameters.
+        """Test HTTP tool request structure validation.
+        
+        Note: This test validates JSON-RPC request structure only.
+        Actual parameter passing through HTTP transport requires a running server.
         
         Validates:
-        - Parameter passing through HTTP transport
-        - Tool validation and execution
-        - Error handling and error response formatting
+        - JSON-RPC 2.0 request format
+        - Method and params structure
+        - Tool arguments formatting
         """
         async def _run() -> None:
             async_session_maker, engine = await setup_test_database()
             
             try:
                 async with async_session_maker() as session:
-                    devices = await create_test_devices(session, count=2)
+                    await create_test_devices(session, count=2)
                     
                 # Simulate tool call with parameters
                 request_payload = {
@@ -470,7 +463,12 @@ class TestDiagnosticsTools(unittest.TestCase):
         
         asyncio.run(_run())
 
-    @pytest.mark.skip(reason="Diagnostics service has import bug: NotFoundError should be DeviceNotFoundError")
+    @pytest.mark.skip(
+        reason=(
+            "diagnostics.py line 548 imports non-existent NotFoundError from "
+            "routeros_mcp.mcp.errors instead of DeviceNotFoundError"
+        )
+    )
     def test_diagnostics_bandwidth_test_tool(self) -> None:
         """Test bandwidth-test diagnostics tool end-to-end.
         
@@ -566,12 +564,6 @@ class TestMultiDeviceRollout(unittest.TestCase):
                     devices = await create_test_devices(session, count=6)
                     device_ids = [d.id for d in devices]
                     
-                    # Create mock REST clients (all healthy)
-                    mock_rest_clients = {
-                        device_id: MockRouterOSRestClient(device_id)
-                        for device_id in device_ids
-                    }
-                    
                     settings = make_test_settings(encryption_key=TEST_ENCRYPTION_KEY)
                     
                     plan_service = PlanService(session, settings)
@@ -664,17 +656,6 @@ class TestMultiDeviceRollout(unittest.TestCase):
                 async with async_session_maker() as session:
                     devices = await create_test_devices(session, count=6)
                     device_ids = [d.id for d in devices]
-                    
-                    # Create mock REST clients (dev-lab-03 will fail health check)
-                    mock_rest_clients = {}
-                    for device_id in device_ids:
-                        if device_id == "dev-lab-03":
-                            mock_rest_clients[device_id] = MockRouterOSRestClient(
-                                device_id,
-                                health_check_failure=True,
-                            )
-                        else:
-                            mock_rest_clients[device_id] = MockRouterOSRestClient(device_id)
                     
                     settings = make_test_settings(encryption_key=TEST_ENCRYPTION_KEY)
                     
@@ -810,17 +791,6 @@ class TestMultiDeviceRollout(unittest.TestCase):
                     devices = await create_test_devices(session, count=4)
                     device_ids = [d.id for d in devices]
                     
-                    # Create mock REST clients (dev-lab-02 will fail REST call)
-                    mock_rest_clients = {}
-                    for device_id in device_ids:
-                        if device_id == "dev-lab-02":
-                            mock_rest_clients[device_id] = MockRouterOSRestClient(
-                                device_id,
-                                rest_error="Connection timeout",
-                            )
-                        else:
-                            mock_rest_clients[device_id] = MockRouterOSRestClient(device_id)
-                    
                     settings = make_test_settings(encryption_key=TEST_ENCRYPTION_KEY)
                     
                     plan_service = PlanService(session, settings)
@@ -842,7 +812,6 @@ class TestMultiDeviceRollout(unittest.TestCase):
                         rollback_on_failure=False,  # Continue despite failures
                     )
                     
-                    plan_id = plan_result["plan_id"]
                     self.assertEqual(plan_result["device_count"], 4)
                     self.assertFalse(plan_result["rollback_on_failure"])
                 
