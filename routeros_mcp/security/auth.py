@@ -57,6 +57,32 @@ class User:
     name: str | None = None
 
 
+@dataclass
+class UserSession:
+    """User session from OAuth 2.1 Authorization Code flow with PKCE.
+
+    Created after successful callback from OIDC provider.
+    Contains user identity and token information.
+
+    Attributes:
+        sub: OIDC subject (unique user ID)
+        email: User's email address
+        display_name: User's display name (from 'name' claim)
+        access_token: OAuth access token for API requests
+        refresh_token: Optional refresh token for token renewal
+        expires_at: Unix timestamp when access token expires
+        id_token: Optional ID token (JWT) with user claims
+    """
+
+    sub: str
+    email: str | None
+    display_name: str | None
+    access_token: str
+    refresh_token: str | None = None
+    expires_at: float | None = None
+    id_token: str | None = None
+
+
 class OIDCTokenValidator:
     """OAuth/OIDC token validator (Phase 4).
 

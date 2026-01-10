@@ -8,6 +8,7 @@ detailed requirements.
 """
 
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from authlib.jose.errors import JoseError
 from routeros_mcp.config import Settings
 from routeros_mcp.infra.observability import get_metrics_text, record_auth_check
 from routeros_mcp.infra.observability.logging import get_correlation_id, set_correlation_id
+from routeros_mcp.security.auth import AuthenticationError
 
 logger = logging.getLogger(__name__)
 
@@ -348,6 +350,317 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
             "state": state,
             "message": "Redirect user to authorization_url to complete login",
         }
+
+    @app.get("/api/auth/callback")
+    async def callback(
+        code: str | None = None,
+        state: str | None = None,
+        error: str | None = None,
+        error_description: str | None = None,
+        settings: Settings = Depends(get_settings),
+    ) -> dict[str, Any]:
+        """Handle OAuth 2.1 Authorization Code callback.
+
+        This endpoint handles the callback from OIDC provider after user authorization.
+        It exchanges the authorization code for tokens and creates a user session.
+
+        Query Parameters:
+            code: Authorization code from OIDC provider
+            state: CSRF state token (should match the one from login)
+            error: Optional error code from provider
+            error_description: Optional error description from provider
+
+        Returns:
+            JSON with user session information and tokens
+
+        Raises:
+            HTTPException: If callback fails (invalid code, state mismatch, etc.)
+        """
+        from routeros_mcp.security.oidc import (
+            exchange_authorization_code,
+            parse_id_token_claims,
+        )
+        from routeros_mcp.security.auth import UserSession
+
+        # Verify OIDC is enabled
+        if not settings.oidc_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="OAuth authentication not enabled.",
+            )
+
+        # Check for error response from provider
+        if error:
+            logger.error(
+                "OAuth callback error",
+                extra={"error": error, "description": error_description},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"OAuth error: {error} - {error_description or 'No description'}",
+            )
+
+        # Verify required parameters
+        if not code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing authorization code in callback",
+            )
+
+        if not state:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing state parameter in callback",
+            )
+
+        # TODO: Verify state matches the one from login (CSRF protection)
+        # This requires session/cookie storage which will be implemented in a follow-up
+        # For now, we accept any state (not secure for production)
+
+        # Get OIDC config
+        issuer = settings.oidc_issuer or settings.oidc_provider_url
+        if not issuer or not settings.oidc_client_id or not settings.oidc_client_secret:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="OAuth not properly configured.",
+            )
+
+        # TODO: Retrieve PKCE verifier from session/cookie
+        # For now, we use a placeholder (will fail with real OIDC providers)
+        # This will be fixed when session storage is implemented
+        code_verifier = "placeholder-verifier-will-be-from-session"
+
+        try:
+            # Exchange authorization code for tokens
+            tokens = await exchange_authorization_code(
+                issuer=issuer,
+                client_id=settings.oidc_client_id,
+                client_secret=settings.oidc_client_secret,
+                redirect_uri=settings.oidc_redirect_uri or "",
+                code=code,
+                code_verifier=code_verifier,
+            )
+
+            # Parse ID token claims to get user info
+            id_token = tokens.get("id_token")
+            if not id_token:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="No ID token in response from provider",
+                )
+
+            claims = parse_id_token_claims(id_token)
+
+            # Extract user information
+            sub = claims.get("sub")
+            if not sub:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Missing 'sub' claim in ID token",
+                )
+
+            email = claims.get("email")
+            display_name = claims.get("name")
+
+            # Calculate token expiry
+            expires_in = tokens.get("expires_in")
+            expires_at = time.time() + expires_in if expires_in else None
+
+            # Create user session
+            user_session = UserSession(
+                sub=sub,
+                email=email,
+                display_name=display_name,
+                access_token=tokens["access_token"],
+                refresh_token=tokens.get("refresh_token"),
+                expires_at=expires_at,
+                id_token=id_token,
+            )
+
+            logger.info(
+                "OAuth callback successful",
+                extra={
+                    "sub": sub,
+                    "email": email,
+                    "has_refresh_token": user_session.refresh_token is not None,
+                },
+            )
+
+            return {
+                "success": True,
+                "user": {
+                    "sub": user_session.sub,
+                    "email": user_session.email,
+                    "display_name": user_session.display_name,
+                },
+                "access_token": user_session.access_token,
+                "refresh_token": user_session.refresh_token,
+                "expires_at": user_session.expires_at,
+                "message": "Login successful",
+            }
+
+        except AuthenticationError as e:
+            logger.error("Token exchange failed", extra={"error": str(e)})
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Token exchange failed: {str(e)}",
+            )
+        except Exception as e:
+            logger.error("Unexpected error in callback", extra={"error": str(e)}, exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Authentication failed",
+            )
+
+    @app.post("/api/auth/refresh")
+    async def refresh(
+        refresh_token: str,
+        settings: Settings = Depends(get_settings),
+    ) -> dict[str, Any]:
+        """Refresh access token using refresh token.
+
+        This endpoint exchanges a refresh token for a new access token.
+
+        Request Body (JSON):
+            refresh_token: Refresh token from login
+
+        Returns:
+            JSON with new access token and optional new refresh token
+
+        Raises:
+            HTTPException: If refresh fails (invalid token, expired, etc.)
+        """
+        from routeros_mcp.security.oidc import refresh_access_token
+
+        # Verify OIDC is enabled
+        if not settings.oidc_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="OAuth authentication not enabled.",
+            )
+
+        # Get OIDC config
+        issuer = settings.oidc_issuer or settings.oidc_provider_url
+        if not issuer or not settings.oidc_client_id or not settings.oidc_client_secret:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="OAuth not properly configured.",
+            )
+
+        try:
+            # Refresh the access token
+            tokens = await refresh_access_token(
+                issuer=issuer,
+                client_id=settings.oidc_client_id,
+                client_secret=settings.oidc_client_secret,
+                refresh_token=refresh_token,
+            )
+
+            # Calculate new expiry
+            expires_in = tokens.get("expires_in")
+            expires_at = time.time() + expires_in if expires_in else None
+
+            logger.info("Token refresh successful")
+
+            return {
+                "success": True,
+                "access_token": tokens["access_token"],
+                "refresh_token": tokens.get("refresh_token", refresh_token),
+                "expires_at": expires_at,
+                "message": "Token refreshed successfully",
+            }
+
+        except AuthenticationError as e:
+            logger.error("Token refresh failed", extra={"error": str(e)})
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Token refresh failed: {str(e)}",
+            )
+        except Exception as e:
+            logger.error("Unexpected error in refresh", extra={"error": str(e)}, exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Token refresh failed",
+            )
+
+    @app.post("/api/auth/logout")
+    async def logout(
+        access_token: str | None = None,
+        refresh_token: str | None = None,
+        settings: Settings = Depends(get_settings),
+    ) -> dict[str, Any]:
+        """Logout and revoke tokens.
+
+        This endpoint revokes access and refresh tokens at the OIDC provider.
+
+        Request Body (JSON):
+            access_token: Optional access token to revoke
+            refresh_token: Optional refresh token to revoke
+
+        Returns:
+            JSON with logout confirmation
+
+        Raises:
+            HTTPException: If logout fails
+        """
+        from routeros_mcp.security.oidc import revoke_tokens
+
+        # Verify OIDC is enabled
+        if not settings.oidc_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="OAuth authentication not enabled.",
+            )
+
+        # Get OIDC config
+        issuer = settings.oidc_issuer or settings.oidc_provider_url
+        if not issuer or not settings.oidc_client_id or not settings.oidc_client_secret:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="OAuth not properly configured.",
+            )
+
+        try:
+            # Revoke both tokens if provided
+            if access_token:
+                await revoke_tokens(
+                    issuer=issuer,
+                    client_id=settings.oidc_client_id,
+                    client_secret=settings.oidc_client_secret,
+                    token=access_token,
+                    token_type_hint="access_token",
+                )
+
+            if refresh_token:
+                await revoke_tokens(
+                    issuer=issuer,
+                    client_id=settings.oidc_client_id,
+                    client_secret=settings.oidc_client_secret,
+                    token=refresh_token,
+                    token_type_hint="refresh_token",
+                )
+
+            logger.info("Logout successful")
+
+            return {
+                "success": True,
+                "message": "Logout successful, tokens revoked",
+            }
+
+        except AuthenticationError as e:
+            # Token revocation failures are not critical for logout
+            # Some providers don't support revocation
+            logger.warning("Token revocation failed during logout", extra={"error": str(e)})
+            return {
+                "success": True,
+                "message": "Logout successful (token revocation not supported by provider)",
+            }
+        except Exception as e:
+            logger.error("Unexpected error in logout", extra={"error": str(e)}, exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Logout failed",
+            )
 
     return app
 
