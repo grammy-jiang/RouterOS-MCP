@@ -15,14 +15,14 @@ import logging
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, Optional, ParamSpec, Awaitable, cast
 
 from routeros_mcp.infra.observability import metrics
 
 logger = logging.getLogger(__name__)
 
-# Type variable for decorated function
-F = TypeVar("F", bound=Callable[..., Any])
+# ParamSpec for preserving decorated function signature
+P = ParamSpec("P")
 
 
 @dataclass
@@ -379,7 +379,7 @@ def initialize_cache(
     return _cache_instance
 
 
-def with_cache(resource_uri: str) -> Callable[[F], F]:
+def with_cache(resource_uri: str) -> Callable[[Callable[P, Awaitable[str]]], Callable[P, Awaitable[str]]]:
     """Decorator to add caching to resource providers.
 
     This decorator wraps resource provider functions to automatically cache
@@ -415,9 +415,9 @@ def with_cache(resource_uri: str) -> Callable[[F], F]:
     param_match = re.search(r'\{(\w+)\}', resource_uri)
     param_name = param_match.group(1) if param_match else None
 
-    def decorator(func: F) -> F:
+    def decorator(func: Callable[P, Awaitable[str]]) -> Callable[P, Awaitable[str]]:
         @wraps(func)
-        async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> str:
             # Try to get cache, but gracefully handle if not initialized
             try:
                 cache = get_cache()
@@ -452,7 +452,7 @@ def with_cache(resource_uri: str) -> Callable[[F], F]:
             # Try to get from cache
             start_time = time_module.time()
 
-            cached_value = await cache.get(actual_uri, resource_id)
+            cached_value = await cache.get(actual_uri, cast(Optional[str], resource_id))
             if cached_value is not None:
                 duration = time_module.time() - start_time
                 metrics.record_cache_fetch(actual_uri, duration, cache_hit=True)
@@ -462,16 +462,16 @@ def with_cache(resource_uri: str) -> Callable[[F], F]:
             result = await func(*args, **kwargs)
 
             # Store in cache
-            await cache.set(actual_uri, result, resource_id)
+            await cache.set(actual_uri, result, cast(Optional[str], resource_id))
 
             duration = time_module.time() - start_time
             metrics.record_cache_fetch(actual_uri, duration, cache_hit=False)
 
             return result
 
-        return wrapper  # type: ignore[return-value]
+        return wrapper
 
-    return decorator  # type: ignore[return-value]
+    return decorator
 
 
 __all__ = [

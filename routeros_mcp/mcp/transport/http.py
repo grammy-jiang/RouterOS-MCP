@@ -106,10 +106,10 @@ class MCPHTTPTransport:
         body: dict[str, Any] = {}
         try:
             # Parse JSON-RPC request
-            body = await request.json()
+            body_raw: Any = await request.json()
 
             # Validate basic JSON-RPC structure
-            if not isinstance(body, dict):
+            if not isinstance(body_raw, dict):
                 return JSONResponse(
                     {
                         "jsonrpc": "2.0",
@@ -122,6 +122,8 @@ class MCPHTTPTransport:
                     },
                     status_code=400,
                 )
+            
+            body = body_raw
 
             # Add user context from auth middleware (if available)
             user_context = getattr(request.state, "user", None)

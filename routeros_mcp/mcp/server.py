@@ -16,6 +16,7 @@ from routeros_mcp.config import Settings
 from routeros_mcp.domain.services.health import HealthService
 from routeros_mcp.domain.services.system import SystemService
 from routeros_mcp.infra.db.session import (
+    DatabaseSessionManager,
     get_session_factory,
     initialize_session_manager,
 )
@@ -75,8 +76,8 @@ class RouterOSMCPServer:
             settings: Application settings
         """
         self.settings = settings
-        self.session_factory = None  # Will be initialized in start()
-        self.scheduler = None  # Will be initialized in start()
+        self.session_factory: DatabaseSessionManager | None = None  # Will be initialized in start()
+        self.scheduler: Any = None  # Will be initialized in start() if snapshot_capture_enabled
 
         # Create FastMCP instance
         self.mcp = FastMCP(
@@ -178,6 +179,11 @@ require appropriate device capabilities and permissions.
                 Device health status with metrics
             """
             try:
+                if self.session_factory is None:
+                    return format_tool_result(
+                        content="Error: session factory not initialized",
+                        is_error=True,
+                    )
                 async with self.session_factory.session() as session:
                     health_service = HealthService(session, self.settings)
                     result = await health_service.run_health_check(device_id)
@@ -353,7 +359,8 @@ require appropriate device capabilities and permissions.
             logger.info("Job scheduler started")
 
             # Register periodic snapshot capture job
-            async def snapshot_capture_job():
+            async def snapshot_capture_job() -> None:
+                assert self.session_factory is not None
                 await run_snapshot_capture_job(self.session_factory, self.settings)
 
             self.scheduler.add_snapshot_capture_job(snapshot_capture_job)
@@ -365,7 +372,8 @@ require appropriate device capabilities and permissions.
             )
 
             # Register retention cleanup job (hourly)
-            async def retention_cleanup_job():
+            async def retention_cleanup_job() -> None:
+                assert self.session_factory is not None
                 await run_retention_cleanup_job(self.session_factory, self.settings)
 
             self.scheduler.add_retention_cleanup_job(retention_cleanup_job)

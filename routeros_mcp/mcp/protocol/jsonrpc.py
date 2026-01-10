@@ -95,7 +95,7 @@ def create_error_response(
     return response
 
 
-def validate_jsonrpc_request(request: dict[str, Any]) -> tuple[bool, str | None]:
+def validate_jsonrpc_request(request: Any) -> tuple[bool, str | None]:
     """Validate JSON-RPC 2.0 request structure.
 
     Args:
@@ -281,7 +281,7 @@ def create_progress_message(
     return progress
 
 
-def is_streaming_request(params: dict[str, Any]) -> bool:
+def is_streaming_request(params: Any) -> bool:
     """Check if a request should use streaming protocol.
 
     Streaming is enabled when the `stream_progress` parameter is set to True

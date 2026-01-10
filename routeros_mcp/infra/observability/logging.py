@@ -56,7 +56,8 @@ class CorrelationIDFilter(logging.Filter):
         Returns:
             True to allow record to pass through
         """
-        record.correlation_id = correlation_id_var.get() or "no-correlation-id"  # type: ignore
+        # Attach correlation_id dynamically to the log record
+        record.correlation_id = correlation_id_var.get() or "no-correlation-id"
         return True
 
 
@@ -86,35 +87,45 @@ class JSONFormatter(logging.Formatter):
         }
 
         # Add extra fields from record
-        if hasattr(record, "device_id"):
-            log_entry["device_id"] = record.device_id  # type: ignore
+        device_id = getattr(record, "device_id", None)
+        if device_id is not None:
+            log_entry["device_id"] = device_id
 
-        if hasattr(record, "device_environment"):
-            log_entry["device_environment"] = record.device_environment  # type: ignore
+        device_env = getattr(record, "device_environment", None)
+        if device_env is not None:
+            log_entry["device_environment"] = device_env
 
-        if hasattr(record, "user_sub"):
-            log_entry["user_sub"] = record.user_sub  # type: ignore
+        user_sub = getattr(record, "user_sub", None)
+        if user_sub is not None:
+            log_entry["user_sub"] = user_sub
 
-        if hasattr(record, "user_email"):
-            log_entry["user_email"] = record.user_email  # type: ignore
+        user_email = getattr(record, "user_email", None)
+        if user_email is not None:
+            log_entry["user_email"] = user_email
 
-        if hasattr(record, "user_role"):
-            log_entry["user_role"] = record.user_role  # type: ignore
+        user_role = getattr(record, "user_role", None)
+        if user_role is not None:
+            log_entry["user_role"] = user_role
 
-        if hasattr(record, "tool_name"):
-            log_entry["tool_name"] = record.tool_name  # type: ignore
+        tool_name = getattr(record, "tool_name", None)
+        if tool_name is not None:
+            log_entry["tool_name"] = tool_name
 
-        if hasattr(record, "tool_tier"):
-            log_entry["tool_tier"] = record.tool_tier  # type: ignore
+        tool_tier = getattr(record, "tool_tier", None)
+        if tool_tier is not None:
+            log_entry["tool_tier"] = tool_tier
 
-        if hasattr(record, "mcp_method"):
-            log_entry["mcp_method"] = record.mcp_method  # type: ignore
+        mcp_method = getattr(record, "mcp_method", None)
+        if mcp_method is not None:
+            log_entry["mcp_method"] = mcp_method
 
-        if hasattr(record, "plan_id"):
-            log_entry["plan_id"] = record.plan_id  # type: ignore
+        plan_id = getattr(record, "plan_id", None)
+        if plan_id is not None:
+            log_entry["plan_id"] = plan_id
 
-        if hasattr(record, "job_id"):
-            log_entry["job_id"] = record.job_id  # type: ignore
+        job_id = getattr(record, "job_id", None)
+        if job_id is not None:
+            log_entry["job_id"] = job_id
 
         # Add exception info if present
         if record.exc_info:

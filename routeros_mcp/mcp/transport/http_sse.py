@@ -593,7 +593,7 @@ class HTTPSSETransport:
         from routeros_mcp.mcp.errors import InvalidParamsError, MethodNotFoundError
 
         method = request.get("method")
-        request_id = request.get("id")
+        request_id: str | int | None = request.get("id")
         params = request.get("params", {})
 
         logger.info(
@@ -671,13 +671,14 @@ class HTTPSSETransport:
                     # Send final result
                     if final_result is not None:
                         result = self._format_tool_result(final_result)
-                        response = create_success_response(
-                            request_id=request_id, result=result
-                        )
-                        yield {
-                            "event": "result",
-                            "data": json.dumps(response),
-                        }
+                        if request_id is not None:
+                            response = create_success_response(
+                                request_id=request_id, result=result
+                            )
+                            yield {
+                                "event": "result",
+                                "data": json.dumps(response),
+                            }
                     else:
                         # Streaming tool must yield at least one non-progress result
                         error_response = create_error_response(
@@ -694,11 +695,12 @@ class HTTPSSETransport:
                 else:
                     # Non-streaming result - send as single result event
                     result = self._format_tool_result(tool_result)
-                    response = create_success_response(request_id=request_id, result=result)
-                    yield {
-                        "event": "result",
-                        "data": json.dumps(response),
-                    }
+                    if request_id is not None:
+                        response = create_success_response(request_id=request_id, result=result)
+                        yield {
+                            "event": "result",
+                            "data": json.dumps(response),
+                        }
 
             except (MethodNotFoundError, InvalidParamsError) as e:
                 logger.error(

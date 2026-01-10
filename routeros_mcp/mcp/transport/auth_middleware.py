@@ -10,6 +10,7 @@ See docs/02-security-oauth-integration-and-access-control.md for design.
 """
 
 import logging
+from typing import Any, Awaitable, Callable
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -38,7 +39,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         app.add_middleware(AuthMiddleware, validator=validator)
     """
 
-    def __init__(self, app, validator: OIDCValidator, exempt_paths: list[str] | None = None):
+    def __init__(self, app: Any, validator: OIDCValidator, exempt_paths: list[str] | None = None) -> None:
         """Initialize auth middleware.
 
         Args:
@@ -50,7 +51,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self.validator = validator
         self.exempt_paths = exempt_paths or ["/health", "/mcp/health"]
 
-    async def dispatch(self, request: Request, call_next) -> Response:
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         """Process request with authentication.
 
         Args:
