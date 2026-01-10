@@ -5,7 +5,7 @@ including filter rules, NAT rules, and address lists.
 """
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -180,13 +180,14 @@ class FirewallService:
                 planned_changes["comment"] = comment
                 planned_changes["timeout"] = timeout
             else:
-                planned_changes["entry_id"] = entry_id
+                # entry_id guaranteed non-None here since we checked for it above and returned early if None
+                planned_changes["entry_id"] = cast(str, entry_id)
 
-            return create_dry_run_response(
+            return cast(dict[str, Any], create_dry_run_response(
                 operation="firewall/update-address-list-entry",
                 device_id=device_id,
                 planned_changes=planned_changes,
-            )
+            ))
 
         # Apply change
         client = await self.device_service.get_rest_client(device_id)

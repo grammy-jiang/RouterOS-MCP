@@ -13,7 +13,7 @@ import json
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from routeros_mcp.infra.routeros.rest_client import RouterOSRestClient
 
@@ -722,7 +722,7 @@ class WirelessPlanService:
 
             if operation == "create_ssid":
                 # Create new wireless interface/SSID
-                ssid = changes.get("ssid")
+                ssid = cast(str, changes.get("ssid"))  # Required field validated in plan phase
                 security_profile = changes.get("security_profile", "default")
                 band = changes.get("band")
                 channel = changes.get("channel")

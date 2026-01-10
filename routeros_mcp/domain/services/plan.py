@@ -455,7 +455,7 @@ class PlanService:
             pre_check_results = await self._run_pre_checks(devices, tool_name, risk_level)
 
             # Calculate batches
-            batches = []
+            batches: list[dict[str, Any]] = []
             for i in range(0, len(device_ids), batch_size):
                 batch_devices = device_ids[i:i + batch_size]
                 batches.append({
@@ -1296,7 +1296,7 @@ class PlanService:
             # Define device application function outside the batch loop
             async def apply_to_device(device_id: str) -> dict[str, Any]:
                 """Apply changes to a single device."""
-                device_result = {
+                device_result: dict[str, Any] = {
                     "device_id": device_id,
                     "status": "applying",
                     "errors": [],

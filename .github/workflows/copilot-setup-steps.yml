@@ -85,7 +85,18 @@ jobs:
       - name: Type check with mypy (core modules)
         run: |
           # Run mypy on core modules; skip imports; warn-only in setup
-          uv run mypy --follow-imports=skip routeros_mcp/config.py routeros_mcp/main.py routeros_mcp/cli/base.py routeros_mcp/infra/observability routeros_mcp/mcp || echo "::warning::Mypy issues in core modules"
+          uv run mypy --follow-imports=skip \
+            routeros_mcp/config.py routeros_mcp/main.py routeros_mcp/cli/base.py \
+            routeros_mcp/infra/observability routeros_mcp/mcp \
+            routeros_mcp/domain/services/firewall.py \
+            routeros_mcp/domain/services/routing.py \
+            routeros_mcp/domain/services/firewall_plan.py \
+            routeros_mcp/domain/services/routing_plan.py \
+            routeros_mcp/domain/services/wireless_plan.py \
+            routeros_mcp/domain/services/device.py \
+            routeros_mcp/domain/services/job.py \
+            routeros_mcp/domain/services/plan.py \
+            || echo "::warning::Mypy issues in core modules"
         continue-on-error: true
 
       # Generate coverage report for reference (smoke-only)
