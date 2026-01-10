@@ -17,7 +17,7 @@ import logging
 import secrets
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlencode, urljoin
 
 import httpx
@@ -238,7 +238,7 @@ class OIDCValidator:
             padding = (4 - len(header_b64) % 4) % 4
             header_b64 += "=" * padding
             header_bytes = base64.urlsafe_b64decode(header_b64)
-            return json.loads(header_bytes)
+            return cast(dict[str, Any], json.loads(header_bytes))
         except Exception as e:
             raise InvalidTokenError(f"Failed to decode JWT header: {e}") from e
 
@@ -721,7 +721,7 @@ async def exchange_authorization_code(
             )
             raise AuthenticationError(f"Token exchange failed: {error_detail}")
 
-        tokens = token_response.json()
+        tokens: dict[str, Any] = cast(dict[str, Any], token_response.json())
 
         logger.info(
             "Token exchange successful",
@@ -826,7 +826,7 @@ async def refresh_access_token(
             )
             raise AuthenticationError(f"Token refresh failed: {error_detail}")
 
-        tokens = token_response.json()
+        tokens: dict[str, Any] = cast(dict[str, Any], token_response.json())
 
         logger.info(
             "Token refresh successful",
