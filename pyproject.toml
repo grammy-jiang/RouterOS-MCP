@@ -27,6 +27,7 @@ classifiers = [
 dependencies = [
     # Core MCP integration
     "fastmcp>=0.1.0",
+    "mcp>=1.23.0",  # Mitigates CVE-2025-66416 (DNS rebinding in <1.23.0)
     
     # Web framework and ASGI server
     "fastapi>=0.109.0",
