@@ -148,7 +148,7 @@ def main() -> int:  # pragma: no cover
             from routeros_mcp.mcp.server import create_mcp_server
 
             # Run async server
-            async def run_server():
+            async def run_server() -> None:
                 server = await create_mcp_server(settings)
                 await server.start()
 

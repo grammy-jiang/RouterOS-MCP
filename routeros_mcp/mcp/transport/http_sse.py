@@ -171,6 +171,8 @@ class HTTPSSETransport:
             from routeros_mcp.security.oidc import OIDCValidator
 
             # Create OIDC validator
+            assert self.settings.oidc_provider_url is not None
+            assert self.settings.oidc_client_id is not None
             validator = OIDCValidator(
                 provider_url=self.settings.oidc_provider_url,
                 client_id=self.settings.oidc_client_id,

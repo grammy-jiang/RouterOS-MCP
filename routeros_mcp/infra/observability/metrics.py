@@ -8,6 +8,7 @@ detailed requirements.
 """
 
 import logging
+from typing import cast
 
 from prometheus_client import (
     CollectorRegistry,
@@ -338,7 +339,7 @@ def get_metrics_text() -> str:
     Returns:
         Metrics in Prometheus exposition format
     """
-    return generate_latest(_registry).decode("utf-8")
+    return cast(str, generate_latest(_registry).decode("utf-8"))
 
 
 def record_tool_call(
