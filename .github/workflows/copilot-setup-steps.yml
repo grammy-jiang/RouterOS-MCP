@@ -82,11 +82,10 @@ jobs:
         continue-on-error: true
 
       # Type checking - helps Copilot understand type contracts
-      - name: Type check with mypy (baseline cleanup in progress)
+      - name: Type check with mypy (core modules)
         run: |
-          # TODO: Incrementally reduce mypy errors and restore strict checking
-          echo "Mypy: Baseline errors being cleaned up incrementally"
-          echo "See docs/13-python-coding-standards-and-conventions.md for type annotation guidelines"
+          # Run mypy on core modules; skip imports; warn-only in setup
+          uv run mypy --follow-imports=skip routeros_mcp/config.py routeros_mcp/main.py routeros_mcp/cli routeros_mcp/security || echo "::warning::Mypy issues in core modules"
         continue-on-error: true
 
       # Generate coverage report for reference (smoke-only)
