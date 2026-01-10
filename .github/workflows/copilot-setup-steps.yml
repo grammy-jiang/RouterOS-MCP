@@ -33,25 +33,22 @@ jobs:
           # Note: fetch-depth will be overridden by Copilot for rollback support
           fetch-depth: 0
 
-      # Set up Python with caching for faster dependency installation
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      # Install uv and set up Python with dependencies
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
         with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: pyproject.toml
+          version: "latest"
 
-      # Install project dependencies in editable mode with dev extras
-      - name: Install dependencies
+      - name: Set up Python with uv and sync deps
         run: |
-          python -m pip install --upgrade pip
-          pip install -e .[dev]
+          uv python install 3.11
+          uv sync --dev
 
       # Initialize database schema for tests (uses in-memory SQLite for unit tests)
       - name: Initialize database
         run: |
           # Unit tests use in-memory SQLite, but initialize for e2e tests if needed
-          alembic upgrade head || echo "Database migration skipped (in-memory SQLite)"
+          uv run alembic upgrade head || echo "Database migration skipped (in-memory SQLite)"
         env:
           # Use SQLite for testing - overrides any config file
           ROUTEROS_MCP_DATABASE_URL: "sqlite+aiosqlite:///:memory:"
@@ -66,7 +63,7 @@ jobs:
       # Run fast smoke tests to validate environment setup
       - name: Run smoke tests
         run: |
-          pytest tests/smoke -q --maxfail=5
+          uv run pytest tests/smoke -q --maxfail=5
         env:
           # Ensure test mode with minimal logging
           ROUTEROS_MCP_DEBUG: "false"
@@ -75,25 +72,25 @@ jobs:
       # Validate code quality - helps Copilot understand project standards
       - name: Check code formatting
         run: |
-          black --check routeros_mcp tests || echo "::warning::Code formatting issues detected - run 'black routeros_mcp tests' to fix"
+          uv run black --check routeros_mcp tests || echo "::warning::Code formatting issues detected - run 'uv run black routeros_mcp tests' to fix"
         continue-on-error: true
 
       # Check linting - non-blocking but provides feedback
       - name: Lint with ruff
         run: |
-          ruff check routeros_mcp tests || echo "::warning::Linting issues detected - run 'ruff check --fix routeros_mcp tests' to auto-fix"
+          uv run ruff check routeros_mcp tests || echo "::warning::Linting issues detected - run 'uv run ruff check --fix routeros_mcp tests' to auto-fix"
         continue-on-error: true
 
       # Type checking - helps Copilot understand type contracts
       - name: Type check with mypy
         run: |
-          mypy routeros_mcp || echo "::warning::Type checking issues detected - see mypy output for details"
+          uv run mypy routeros_mcp || echo "::warning::Type checking issues detected - see mypy output for details"
         continue-on-error: true
 
       # Generate coverage report for reference (smoke-only)
       - name: Generate smoke coverage report
         run: |
-          pytest tests/smoke --cov=routeros_mcp --cov-report=term-missing:skip-covered -q
+          uv run pytest tests/smoke --cov=routeros_mcp --cov-report=term-missing:skip-covered -q
         continue-on-error: true
 
       # Display environment information for debugging
