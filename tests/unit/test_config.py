@@ -146,7 +146,8 @@ class TestSettings:
         """Test oidc_issuer HTTPS validation in prod."""
         # HTTP issuer in prod should fail
         with pytest.raises(
-            ValidationError, match="oidc_issuer/oidc_provider_url must use HTTPS in prod environment"
+            ValidationError,
+            match="oidc_issuer/oidc_provider_url must use HTTPS in prod environment",
         ):
             Settings(
                 environment="prod",
