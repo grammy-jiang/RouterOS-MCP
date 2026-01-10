@@ -93,12 +93,14 @@ class OIDCValidator:
                 jwks,
                 claims_options={
                     "iss": {"essential": True, "value": self.settings.oidc_issuer},
-                    "aud": {
-                        "essential": True,
-                        "value": self.settings.oidc_audience,
-                    }
-                    if self.settings.oidc_audience
-                    else {},
+                    "aud": (
+                        {
+                            "essential": True,
+                            "value": self.settings.oidc_audience,
+                        }
+                        if self.settings.oidc_audience
+                        else {}
+                    ),
                 },
             )
 
@@ -214,6 +216,7 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
 
     # Mount admin routes
     from routeros_mcp.api.admin import router as admin_router
+
     app.include_router(admin_router)
 
     # Mount static files
@@ -223,9 +226,7 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
 
     # Middleware for correlation ID
     @app.middleware("http")
-    async def correlation_id_middleware(
-        request: Request, call_next: Any
-    ) -> Any:
+    async def correlation_id_middleware(request: Request, call_next: Any) -> Any:
         """Add correlation ID to request context."""
         correlation_id = request.headers.get("X-Correlation-ID", get_correlation_id())
         set_correlation_id(correlation_id)

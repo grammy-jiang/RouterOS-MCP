@@ -322,7 +322,7 @@ class Settings(BaseSettings):
         if self.oidc_enabled:
             # Support both oidc_issuer (new) and oidc_provider_url (legacy)
             issuer = self.oidc_issuer or self.oidc_provider_url
-            
+
             required_fields = {
                 "oidc_issuer or oidc_provider_url": issuer,
                 "oidc_client_id": self.oidc_client_id,
@@ -332,22 +332,27 @@ class Settings(BaseSettings):
                 raise ValueError(f"OIDC enabled but missing required fields: {', '.join(missing)}")
 
             # Validate HTTPS in production/staging
-            if issuer and self.environment in ["staging", "prod"]:
-                if not issuer.startswith("https://"):
-                    raise ValueError(
-                        f"oidc_issuer/oidc_provider_url must use HTTPS in {self.environment} environment"
-                    )
+            if (
+                issuer
+                and self.environment in ["staging", "prod"]
+                and not issuer.startswith("https://")
+            ):
+                raise ValueError(
+                    f"oidc_issuer/oidc_provider_url must use HTTPS in {self.environment} environment"
+                )
 
             # Validate redirect_uri format if provided
             if self.oidc_redirect_uri:
                 if not self.oidc_redirect_uri.startswith(("http://", "https://")):
                     raise ValueError("oidc_redirect_uri must be a valid HTTP/HTTPS URL")
                 # Require HTTPS in production/staging
-                if self.environment in ["staging", "prod"]:
-                    if not self.oidc_redirect_uri.startswith("https://"):
-                        raise ValueError(
-                            f"oidc_redirect_uri must use HTTPS in {self.environment} environment"
-                        )
+                if self.environment in [
+                    "staging",
+                    "prod",
+                ] and not self.oidc_redirect_uri.startswith("https://"):
+                    raise ValueError(
+                        f"oidc_redirect_uri must use HTTPS in {self.environment} environment"
+                    )
 
             # Warn if skip_verification enabled
             if self.oidc_skip_verification and self.environment in ["staging", "prod"]:

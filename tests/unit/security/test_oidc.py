@@ -605,7 +605,10 @@ class TestPKCEGeneration:
         # Should be 43 characters (minimum per RFC 7636)
         assert len(verifier) == 43
         # Should contain only unreserved characters (base64url without padding)
-        assert all(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_" for c in verifier)
+        assert all(
+            c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+            for c in verifier
+        )
         # Should not contain padding
         assert "=" not in verifier
 
@@ -616,7 +619,10 @@ class TestPKCEGeneration:
         for length in [43, 64, 96, 128]:
             verifier = generate_pkce_verifier(length)
             assert len(verifier) == length
-            assert all(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_" for c in verifier)
+            assert all(
+                c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+                for c in verifier
+            )
 
     def test_generate_pkce_verifier_invalid_length(self):
         """Test PKCE verifier generation rejects invalid lengths."""
