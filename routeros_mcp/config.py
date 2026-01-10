@@ -15,7 +15,7 @@ Configuration priority (later overrides earlier):
 
 import warnings
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, cast
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -426,9 +426,10 @@ class Settings(BaseSettings):
         else:
             return "unknown"
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert settings to dictionary, masking secrets."""
-        data = self.model_dump()
+        # Pydantic's model_dump() returns a plain dict; annotate for clarity
+        data: dict[str, Any] = self.model_dump()
         # Mask sensitive fields
         if data.get("encryption_key"):
             data["encryption_key"] = "***REDACTED***"
@@ -497,13 +498,15 @@ def load_settings_from_file(config_file: Path | str) -> Settings:
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
     # Determine format from extension
+    config_data: dict[str, Any] = {}
     suffix = config_path.suffix.lower()
 
     if suffix in [".yaml", ".yml"]:
         import yaml
 
         with open(config_path) as f:
-            config_data = yaml.safe_load(f) or {}
+            loaded: Any = yaml.safe_load(f)
+            config_data = loaded or {}
     elif suffix == ".toml":
         import tomllib
 
