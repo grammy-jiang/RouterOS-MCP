@@ -322,7 +322,7 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
         pkce = generate_pkce_params()
 
         # Build authorization URL
-        auth_url = build_authorization_url(
+        auth_url, state = build_authorization_url(
             issuer=issuer,
             client_id=settings.oidc_client_id,
             redirect_uri=settings.oidc_redirect_uri,
@@ -345,6 +345,7 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
 
         return {
             "authorization_url": auth_url,
+            "state": state,
             "message": "Redirect user to authorization_url to complete login",
         }
 

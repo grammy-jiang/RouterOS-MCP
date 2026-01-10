@@ -706,7 +706,7 @@ class TestAuthorizationURLBuilder:
         from routeros_mcp.security.oidc import build_authorization_url
         from urllib.parse import urlparse, parse_qs
 
-        url = build_authorization_url(
+        url, state = build_authorization_url(
             issuer="https://auth.example.com",
             client_id="test-client-id",
             redirect_uri="http://localhost:8080/callback",
@@ -732,9 +732,10 @@ class TestAuthorizationURLBuilder:
         assert params["code_challenge_method"][0] == "S256"
         assert len(params["code_challenge"][0]) == 43  # SHA256 base64url
 
-        # Verify state auto-generated
+        # Verify state auto-generated and returned
         assert "state" in params
         assert len(params["state"][0]) >= 32  # Should be random string
+        assert state == params["state"][0]  # Returned state should match URL state
 
     def test_build_authorization_url_with_pkce(self):
         """Test authorization URL with explicit PKCE challenge."""
@@ -743,7 +744,7 @@ class TestAuthorizationURLBuilder:
 
         pkce = generate_pkce_params()
 
-        url = build_authorization_url(
+        url, state = build_authorization_url(
             issuer="https://auth.example.com",
             client_id="test-client-id",
             redirect_uri="http://localhost:8080/callback",
@@ -757,13 +758,15 @@ class TestAuthorizationURLBuilder:
         # Should use provided PKCE challenge
         assert params["code_challenge"][0] == pkce.challenge
         assert params["code_challenge_method"][0] == "S256"
+        # State should still be auto-generated
+        assert state == params["state"][0]
 
     def test_build_authorization_url_with_state(self):
         """Test authorization URL with explicit state."""
         from routeros_mcp.security.oidc import build_authorization_url
         from urllib.parse import urlparse, parse_qs
 
-        url = build_authorization_url(
+        url, state = build_authorization_url(
             issuer="https://auth.example.com",
             client_id="test-client-id",
             redirect_uri="http://localhost:8080/callback",
@@ -775,13 +778,14 @@ class TestAuthorizationURLBuilder:
 
         # Should use provided state
         assert params["state"][0] == "my-custom-state-123"
+        assert state == "my-custom-state-123"
 
     def test_build_authorization_url_custom_scope(self):
         """Test authorization URL with custom scope."""
         from routeros_mcp.security.oidc import build_authorization_url
         from urllib.parse import urlparse, parse_qs
 
-        url = build_authorization_url(
+        url, state = build_authorization_url(
             issuer="https://auth.example.com",
             client_id="test-client-id",
             redirect_uri="http://localhost:8080/callback",
@@ -798,7 +802,7 @@ class TestAuthorizationURLBuilder:
         from routeros_mcp.security.oidc import build_authorization_url
         from urllib.parse import urlparse, parse_qs
 
-        url = build_authorization_url(
+        url, state = build_authorization_url(
             issuer="https://auth.example.com",
             client_id="test-client-id",
             redirect_uri="http://localhost:8080/callback",
@@ -818,7 +822,7 @@ class TestAuthorizationURLBuilder:
         from routeros_mcp.security.oidc import build_authorization_url
         from urllib.parse import urlparse
 
-        url = build_authorization_url(
+        url, state = build_authorization_url(
             issuer="https://auth.example.com/",
             client_id="test-client-id",
             redirect_uri="http://localhost:8080/callback",

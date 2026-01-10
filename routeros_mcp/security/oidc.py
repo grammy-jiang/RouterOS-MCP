@@ -14,9 +14,11 @@ import base64
 import hashlib
 import json
 import logging
+import secrets
 import time
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlencode, urljoin
 
 import httpx
 from authlib.jose import JsonWebKey, jwt
@@ -504,8 +506,6 @@ def generate_pkce_verifier(length: int = 43) -> str:
         raise ValueError("PKCE verifier length must be between 43 and 128 characters")
 
     # Use cryptographically secure random bytes (per RFC 7636)
-    import secrets
-
     random_bytes = secrets.token_bytes(length)
 
     # Base64url encode and remove padding
@@ -574,7 +574,7 @@ def build_authorization_url(
     pkce_challenge: str | None = None,
     pkce_challenge_method: str = "S256",
     **extra_params: Any,
-) -> str:
+) -> tuple[str, str]:
     """Build OAuth 2.1 authorization URL with PKCE support.
 
     Constructs the authorization endpoint URL per OAuth 2.1 spec with PKCE.
@@ -590,23 +590,19 @@ def build_authorization_url(
         **extra_params: Additional query parameters to include
 
     Returns:
-        Complete authorization URL with all parameters
+        Tuple of (authorization_url, state) where state is the CSRF token to verify on callback
 
     Example:
-        url = build_authorization_url(
+        url, state = build_authorization_url(
             issuer="https://auth.example.com",
             client_id="my-client-id",
             redirect_uri="http://localhost:8080/callback",
             scope="openid profile email",
         )
-        # Returns: "https://auth.example.com/authorize?response_type=code&..."
+        # Returns: ("https://auth.example.com/authorize?response_type=code&...", "random-state-token")
     """
-    from urllib.parse import urlencode, urljoin
-
     # Generate state if not provided (CSRF protection)
     if state is None:
-        import secrets
-
         state = secrets.token_urlsafe(32)
 
     # Generate PKCE challenge if not provided
@@ -634,4 +630,4 @@ def build_authorization_url(
 
     # Build full URL with query parameters
     query_string = urlencode(params)
-    return f"{authorization_endpoint}?{query_string}"
+    return f"{authorization_endpoint}?{query_string}", state
