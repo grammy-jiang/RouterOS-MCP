@@ -737,6 +737,9 @@ async def exchange_authorization_code(
     except httpx.HTTPError as e:
         logger.error("HTTP error during token exchange", extra={"error": str(e)})
         raise AuthenticationError(f"Token exchange failed: {e}") from e
+    except AuthenticationError:
+        # Preserve specific AuthenticationError messages raised earlier in this function
+        raise
     except Exception as e:
         logger.error("Unexpected error during token exchange", extra={"error": str(e)})
         raise AuthenticationError(f"Token exchange failed: {e}") from e
@@ -838,6 +841,9 @@ async def refresh_access_token(
     except httpx.HTTPError as e:
         logger.error("HTTP error during token refresh", extra={"error": str(e)})
         raise AuthenticationError(f"Token refresh failed: {e}") from e
+    except AuthenticationError:
+        # Preserve specific AuthenticationError messages raised earlier in this function
+        raise
     except Exception as e:
         logger.error("Unexpected error during token refresh", extra={"error": str(e)})
         raise AuthenticationError(f"Token refresh failed: {e}") from e
@@ -868,7 +874,9 @@ async def revoke_tokens(
         http_client: Optional HTTP client for testing
 
     Raises:
-        AuthenticationError: If revocation fails (network error, unsupported by provider)
+        AuthenticationError: If revocation fails due to network errors, non-200 responses,
+            or other unexpected errors from the provider. Providers that do not advertise
+            a revocation endpoint are handled gracefully (no exception is raised).
 
     Example:
         await revoke_tokens(
@@ -935,6 +943,9 @@ async def revoke_tokens(
     except httpx.HTTPError as e:
         logger.error("HTTP error during token revocation", extra={"error": str(e)})
         raise AuthenticationError(f"Token revocation failed: {e}") from e
+    except AuthenticationError:
+        # Preserve specific AuthenticationError messages raised earlier in this function
+        raise
     except Exception as e:
         logger.error("Unexpected error during token revocation", extra={"error": str(e)})
         raise AuthenticationError(f"Token revocation failed: {e}") from e

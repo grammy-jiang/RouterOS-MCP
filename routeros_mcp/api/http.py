@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Body, Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -376,12 +376,6 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
         Raises:
             HTTPException: If callback fails (invalid code, state mismatch, etc.)
         """
-        from routeros_mcp.security.oidc import (
-            exchange_authorization_code,
-            parse_id_token_claims,
-        )
-        from routeros_mcp.security.auth import UserSession
-
         # Verify OIDC is enabled
         if not settings.oidc_enabled:
             raise HTTPException(
@@ -413,108 +407,26 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
                 detail="Missing state parameter in callback",
             )
 
-        # TODO: Verify state matches the one from login (CSRF protection)
-        # This requires session/cookie storage which will be implemented in a follow-up
-        # For now, we accept any state (not secure for production)
-
-        # Get OIDC config
-        issuer = settings.oidc_issuer or settings.oidc_provider_url
-        if not issuer or not settings.oidc_client_id or not settings.oidc_client_secret:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="OAuth not properly configured.",
-            )
-
-        # TODO: Retrieve PKCE verifier from session/cookie
-        # For now, we use a placeholder (will fail with real OIDC providers)
-        # This will be fixed when session storage is implemented
-        code_verifier = "placeholder-verifier-will-be-from-session"
-
-        try:
-            # Exchange authorization code for tokens
-            tokens = await exchange_authorization_code(
-                issuer=issuer,
-                client_id=settings.oidc_client_id,
-                client_secret=settings.oidc_client_secret,
-                redirect_uri=settings.oidc_redirect_uri or "",
-                code=code,
-                code_verifier=code_verifier,
-            )
-
-            # Parse ID token claims to get user info
-            id_token = tokens.get("id_token")
-            if not id_token:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="No ID token in response from provider",
-                )
-
-            claims = parse_id_token_claims(id_token)
-
-            # Extract user information
-            sub = claims.get("sub")
-            if not sub:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Missing 'sub' claim in ID token",
-                )
-
-            email = claims.get("email")
-            display_name = claims.get("name")
-
-            # Calculate token expiry
-            expires_in = tokens.get("expires_in")
-            expires_at = time.time() + expires_in if expires_in else None
-
-            # Create user session
-            user_session = UserSession(
-                sub=sub,
-                email=email,
-                display_name=display_name,
-                access_token=tokens["access_token"],
-                refresh_token=tokens.get("refresh_token"),
-                expires_at=expires_at,
-                id_token=id_token,
-            )
-
-            logger.info(
-                "OAuth callback successful",
-                extra={
-                    "sub": sub,
-                    "email": email,
-                    "has_refresh_token": user_session.refresh_token is not None,
-                },
-            )
-
-            return {
-                "success": True,
-                "user": {
-                    "sub": user_session.sub,
-                    "email": user_session.email,
-                    "display_name": user_session.display_name,
-                },
-                "access_token": user_session.access_token,
-                "refresh_token": user_session.refresh_token,
-                "expires_at": user_session.expires_at,
-                "message": "Login successful",
-            }
-
-        except AuthenticationError as e:
-            logger.error("Token exchange failed", extra={"error": str(e)})
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Token exchange failed: {str(e)}",
-            ) from e
-        except Exception as e:
-            logger.error("Unexpected error in callback", extra={"error": str(e)}, exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Authentication failed",
-            ) from e
+        # CSRF protection: we currently do not have server-side storage to
+        # validate the `state` parameter generated during the login flow.
+        # To avoid a false sense of security and prevent CSRF vulnerabilities,
+        # we reject all callbacks until proper state validation is implemented.
+        logger.error(
+            "OAuth callback received but state validation is not implemented",
+            extra={"state": state[:16] if state else None},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=(
+                "OAuth callback state validation not implemented. "
+                "Session-backed state storage is required to prevent CSRF attacks. "
+                "Login is temporarily disabled until this is implemented."
+            ),
+        )
 
     @app.post("/api/auth/refresh")
     async def refresh(
-        refresh_token: str,
+        refresh_token: str = Body(..., embed=True),
         settings: Settings = Depends(get_settings),
     ) -> dict[str, Any]:
         """Refresh access token using refresh token.
@@ -585,8 +497,8 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
 
     @app.post("/api/auth/logout")
     async def logout(
-        access_token: str | None = None,
-        refresh_token: str | None = None,
+        access_token: str | None = Body(None),
+        refresh_token: str | None = Body(None),
         settings: Settings = Depends(get_settings),
     ) -> dict[str, Any]:
         """Logout and revoke tokens.
