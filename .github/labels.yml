@@ -1,0 +1,61 @@
+labels:
+  # Existing labels kept with current colors to avoid churn
+  - name: auth
+    color: aaaaaa
+    description: Authentication and OIDC-related work
+  - name: high-priority
+    color: aaaaaa
+    description: Urgent / prioritized work
+  - name: backend
+    color: c2bb57
+    description: Backend/server-side changes
+  - name: audit
+    color: ededed
+    description: Audit trails and logging
+  - name: frontend
+    color: ededed
+    description: Frontend/UI changes
+
+  # New Phase 5 labels (to be created)
+  - name: phase5
+    color: 5319e7
+    description: Phase 5 – Multi-User RBAC & Governance
+  - name: infra
+    color: 0e8a16
+    description: Infrastructure and platform changes
+  - name: redis
+    color: d73a4a
+    description: Redis-related work (sessions, cache, locks)
+  - name: rbac
+    color: e99695
+    description: Role-based access control
+  - name: db
+    color: 0e8a16
+    description: Database schema/migration work
+  - name: api
+    color: 1d76db
+    description: Public/internal API endpoints
+  - name: approval
+    color: c2e0c6
+    description: Approval workflow engine and logic
+  - name: notifications
+    color: fbca04
+    description: Email/Slack/in-app notifications
+  - name: compliance
+    color: 94d3a2
+    description: Compliance reporting and dashboards
+  - name: policy
+    color: cfd3d7
+    description: Policy engine and enforcement
+  - name: rate-limit
+    color: f9d0c4
+    description: Rate limiting and quotas
+  - name: ha
+    color: b60205
+    description: High availability and load balancing
+  - name: ui
+    color: a2eeef
+    description: User interface components
+  - name: admin
+    color: 555555
+    description: Admin operations and tooling
