@@ -123,7 +123,7 @@ class OIDCValidator:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=f"Invalid token: {str(e)}",
-            )
+            ) from e
 
         except Exception as e:
             logger.error(f"Error validating token: {e}", exc_info=True)
@@ -131,7 +131,7 @@ class OIDCValidator:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Token validation error",
-            )
+            ) from e
 
 
 def get_validator(settings: Settings = Depends(get_settings)) -> OIDCValidator:  # pragma: no cover
@@ -504,13 +504,13 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=f"Token exchange failed: {str(e)}",
-            )
+            ) from e
         except Exception as e:
             logger.error("Unexpected error in callback", extra={"error": str(e)}, exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Authentication failed",
-            )
+            ) from e
 
     @app.post("/api/auth/refresh")
     async def refresh(
@@ -575,13 +575,13 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=f"Token refresh failed: {str(e)}",
-            )
+            ) from e
         except Exception as e:
             logger.error("Unexpected error in refresh", extra={"error": str(e)}, exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Token refresh failed",
-            )
+            ) from e
 
     @app.post("/api/auth/logout")
     async def logout(
@@ -660,7 +660,7 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Logout failed",
-            )
+            ) from e
 
     return app
 

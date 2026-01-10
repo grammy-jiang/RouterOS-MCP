@@ -700,7 +700,9 @@ async def exchange_authorization_code(
         }
 
         # Exchange code for tokens
-        logger.debug("Exchanging authorization code for tokens", extra={"token_endpoint": token_endpoint})
+        logger.debug(
+            "Exchanging authorization code for tokens", extra={"token_endpoint": token_endpoint}
+        )
         token_response = await client.post(
             token_endpoint,
             data=token_data,
