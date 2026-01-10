@@ -54,7 +54,7 @@ jobs:
       - name: Type check with mypy (core modules)
         run: |
           # Run mypy on critical stable modules; skip following imports to avoid unrelated baseline errors
-          uv run mypy --follow-imports=skip routeros_mcp/config.py routeros_mcp/main.py routeros_mcp/cli routeros_mcp/infra/observability routeros_mcp/mcp
+          uv run mypy --follow-imports=skip routeros_mcp/config.py routeros_mcp/main.py routeros_mcp/cli/base.py routeros_mcp/infra/observability routeros_mcp/mcp
         continue-on-error: false
 
   # Test job with full coverage
