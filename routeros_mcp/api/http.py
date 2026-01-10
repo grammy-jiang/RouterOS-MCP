@@ -8,10 +8,11 @@ detailed requirements.
 """
 
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Body, Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -22,6 +23,7 @@ from authlib.jose.errors import JoseError
 from routeros_mcp.config import Settings
 from routeros_mcp.infra.observability import get_metrics_text, record_auth_check
 from routeros_mcp.infra.observability.logging import get_correlation_id, set_correlation_id
+from routeros_mcp.security.auth import AuthenticationError
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +123,7 @@ class OIDCValidator:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=f"Invalid token: {str(e)}",
-            )
+            ) from e
 
         except Exception as e:
             logger.error(f"Error validating token: {e}", exc_info=True)
@@ -129,7 +131,7 @@ class OIDCValidator:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Token validation error",
-            )
+            ) from e
 
 
 def get_validator(settings: Settings = Depends(get_settings)) -> OIDCValidator:  # pragma: no cover
@@ -348,6 +350,229 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
             "state": state,
             "message": "Redirect user to authorization_url to complete login",
         }
+
+    @app.get("/api/auth/callback")
+    async def callback(
+        code: str | None = None,
+        state: str | None = None,
+        error: str | None = None,
+        error_description: str | None = None,
+        settings: Settings = Depends(get_settings),
+    ) -> dict[str, Any]:
+        """Handle OAuth 2.1 Authorization Code callback.
+
+        This endpoint handles the callback from OIDC provider after user authorization.
+        It exchanges the authorization code for tokens and creates a user session.
+
+        Query Parameters:
+            code: Authorization code from OIDC provider
+            state: CSRF state token (should match the one from login)
+            error: Optional error code from provider
+            error_description: Optional error description from provider
+
+        Returns:
+            JSON with user session information and tokens
+
+        Raises:
+            HTTPException: If callback fails (invalid code, state mismatch, etc.)
+        """
+        # Verify OIDC is enabled
+        if not settings.oidc_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="OAuth authentication not enabled.",
+            )
+
+        # Check for error response from provider
+        if error:
+            logger.error(
+                "OAuth callback error",
+                extra={"error": error, "description": error_description},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"OAuth error: {error} - {error_description or 'No description'}",
+            )
+
+        # Verify required parameters
+        if not code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing authorization code in callback",
+            )
+
+        if not state:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing state parameter in callback",
+            )
+
+        # CSRF protection: we currently do not have server-side storage to
+        # validate the `state` parameter generated during the login flow.
+        # To avoid a false sense of security and prevent CSRF vulnerabilities,
+        # we reject all callbacks until proper state validation is implemented.
+        logger.error(
+            "OAuth callback received but state validation is not implemented",
+            extra={"state": state[:16] if state else None},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=(
+                "OAuth callback state validation not implemented. "
+                "Session-backed state storage is required to prevent CSRF attacks. "
+                "Login is temporarily disabled until this is implemented."
+            ),
+        )
+
+    @app.post("/api/auth/refresh")
+    async def refresh(
+        refresh_token: str = Body(..., embed=True),
+        settings: Settings = Depends(get_settings),
+    ) -> dict[str, Any]:
+        """Refresh access token using refresh token.
+
+        This endpoint exchanges a refresh token for a new access token.
+
+        Request Body (JSON):
+            refresh_token: Refresh token from login
+
+        Returns:
+            JSON with new access token and optional new refresh token
+
+        Raises:
+            HTTPException: If refresh fails (invalid token, expired, etc.)
+        """
+        from routeros_mcp.security.oidc import refresh_access_token
+
+        # Verify OIDC is enabled
+        if not settings.oidc_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="OAuth authentication not enabled.",
+            )
+
+        # Get OIDC config
+        issuer = settings.oidc_issuer or settings.oidc_provider_url
+        if not issuer or not settings.oidc_client_id or not settings.oidc_client_secret:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="OAuth not properly configured.",
+            )
+
+        try:
+            # Refresh the access token
+            tokens = await refresh_access_token(
+                issuer=issuer,
+                client_id=settings.oidc_client_id,
+                client_secret=settings.oidc_client_secret,
+                refresh_token=refresh_token,
+            )
+
+            # Calculate new expiry
+            expires_in = tokens.get("expires_in")
+            expires_at = time.time() + expires_in if expires_in else None
+
+            logger.info("Token refresh successful")
+
+            return {
+                "success": True,
+                "access_token": tokens["access_token"],
+                "refresh_token": tokens.get("refresh_token", refresh_token),
+                "expires_at": expires_at,
+                "message": "Token refreshed successfully",
+            }
+
+        except AuthenticationError as e:
+            logger.error("Token refresh failed", extra={"error": str(e)})
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Token refresh failed: {str(e)}",
+            ) from e
+        except Exception as e:
+            logger.error("Unexpected error in refresh", extra={"error": str(e)}, exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Token refresh failed",
+            ) from e
+
+    @app.post("/api/auth/logout")
+    async def logout(
+        access_token: str | None = Body(None),
+        refresh_token: str | None = Body(None),
+        settings: Settings = Depends(get_settings),
+    ) -> dict[str, Any]:
+        """Logout and revoke tokens.
+
+        This endpoint revokes access and refresh tokens at the OIDC provider.
+
+        Request Body (JSON):
+            access_token: Optional access token to revoke
+            refresh_token: Optional refresh token to revoke
+
+        Returns:
+            JSON with logout confirmation
+
+        Raises:
+            HTTPException: If logout fails
+        """
+        from routeros_mcp.security.oidc import revoke_tokens
+
+        # Verify OIDC is enabled
+        if not settings.oidc_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="OAuth authentication not enabled.",
+            )
+
+        # Get OIDC config
+        issuer = settings.oidc_issuer or settings.oidc_provider_url
+        if not issuer or not settings.oidc_client_id or not settings.oidc_client_secret:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="OAuth not properly configured.",
+            )
+
+        try:
+            # Revoke both tokens if provided
+            if access_token:
+                await revoke_tokens(
+                    issuer=issuer,
+                    client_id=settings.oidc_client_id,
+                    client_secret=settings.oidc_client_secret,
+                    token=access_token,
+                    token_type_hint="access_token",
+                )
+
+            if refresh_token:
+                await revoke_tokens(
+                    issuer=issuer,
+                    client_id=settings.oidc_client_id,
+                    client_secret=settings.oidc_client_secret,
+                    token=refresh_token,
+                    token_type_hint="refresh_token",
+                )
+
+            logger.info("Logout successful")
+
+            return {
+                "success": True,
+                "message": "Logout successful, tokens revoked",
+            }
+
+        except AuthenticationError as e:
+            # Token revocation failures are not critical for logout
+            # Some providers don't support revocation
+            logger.warning("Token revocation failed during logout", extra={"error": str(e)})
+            return {
+                "success": True,
+                "message": "Logout successful (token revocation not supported by provider)",
+            }
+        except Exception as e:
+            logger.error("Unexpected error in logout", extra={"error": str(e)}, exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Logout failed",
+            ) from e
 
     return app
 

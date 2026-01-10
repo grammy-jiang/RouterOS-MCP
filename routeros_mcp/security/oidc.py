@@ -631,3 +631,362 @@ def build_authorization_url(
     # Build full URL with query parameters
     query_string = urlencode(params)
     return f"{authorization_endpoint}?{query_string}", state
+
+
+async def exchange_authorization_code(
+    issuer: str,
+    client_id: str,
+    client_secret: str,
+    redirect_uri: str,
+    code: str,
+    code_verifier: str,
+    http_client: httpx.AsyncClient | None = None,
+) -> dict[str, Any]:
+    """Exchange authorization code for tokens using OAuth 2.1 token endpoint.
+
+    Implements OAuth 2.1 Authorization Code flow with PKCE.
+    Exchanges the authorization code received from the callback for access/refresh/ID tokens.
+
+    Args:
+        issuer: OIDC issuer URL (e.g., "https://auth0.example.com")
+        client_id: OAuth client ID
+        client_secret: OAuth client secret
+        redirect_uri: OAuth callback URL (must match the one used in authorization request)
+        code: Authorization code from callback
+        code_verifier: PKCE code verifier (random string generated before authorization)
+        http_client: Optional HTTP client for testing
+
+    Returns:
+        Token response dict with keys: access_token, refresh_token (optional), id_token (optional),
+        expires_in, token_type, scope
+
+    Raises:
+        AuthenticationError: If token exchange fails (invalid code, expired, network error)
+
+    Example:
+        tokens = await exchange_authorization_code(
+            issuer="https://auth.example.com",
+            client_id="my-client-id",
+            client_secret="my-client-secret",
+            redirect_uri="http://localhost:8080/callback",
+            code="auth-code-from-callback",
+            code_verifier="random-verifier-from-pkce",
+        )
+        # tokens = {"access_token": "...", "refresh_token": "...", "id_token": "...", ...}
+    """
+    # Get token endpoint from OIDC discovery
+    discovery_url = f"{issuer.rstrip('/')}/.well-known/openid-configuration"
+
+    client = http_client or httpx.AsyncClient()
+    try:
+        # Fetch OIDC discovery document
+        logger.debug("Fetching OIDC discovery for token exchange", extra={"url": discovery_url})
+        discovery_response = await client.get(discovery_url, timeout=10.0)
+        discovery_response.raise_for_status()
+        discovery = discovery_response.json()
+
+        token_endpoint = discovery.get("token_endpoint")
+        if not token_endpoint:
+            raise AuthenticationError("OIDC discovery missing token_endpoint")
+
+        # Build token request per OAuth 2.1 spec
+        token_data = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "code_verifier": code_verifier,
+        }
+
+        # Exchange code for tokens
+        logger.debug(
+            "Exchanging authorization code for tokens", extra={"token_endpoint": token_endpoint}
+        )
+        token_response = await client.post(
+            token_endpoint,
+            data=token_data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=10.0,
+        )
+
+        if token_response.status_code != 200:
+            error_detail = token_response.text
+            logger.error(
+                "Token exchange failed",
+                extra={
+                    "status_code": token_response.status_code,
+                    "error": error_detail,
+                },
+            )
+            raise AuthenticationError(f"Token exchange failed: {error_detail}")
+
+        tokens = token_response.json()
+
+        logger.info(
+            "Token exchange successful",
+            extra={
+                "has_access_token": "access_token" in tokens,
+                "has_refresh_token": "refresh_token" in tokens,
+                "has_id_token": "id_token" in tokens,
+            },
+        )
+
+        return tokens
+
+    except httpx.HTTPError as e:
+        logger.error("HTTP error during token exchange", extra={"error": str(e)})
+        raise AuthenticationError(f"Token exchange failed: {e}") from e
+    except AuthenticationError:
+        # Preserve specific AuthenticationError messages raised earlier in this function
+        raise
+    except Exception as e:
+        logger.error("Unexpected error during token exchange", extra={"error": str(e)})
+        raise AuthenticationError(f"Token exchange failed: {e}") from e
+    finally:
+        if not http_client:
+            await client.aclose()
+
+
+async def refresh_access_token(
+    issuer: str,
+    client_id: str,
+    client_secret: str,
+    refresh_token: str,
+    http_client: httpx.AsyncClient | None = None,
+) -> dict[str, Any]:
+    """Refresh access token using refresh token.
+
+    Implements OAuth 2.1 refresh token flow.
+    Exchanges refresh token for a new access token (and optionally a new refresh token).
+
+    Args:
+        issuer: OIDC issuer URL (e.g., "https://auth0.example.com")
+        client_id: OAuth client ID
+        client_secret: OAuth client secret
+        refresh_token: Refresh token from previous token exchange
+        http_client: Optional HTTP client for testing
+
+    Returns:
+        Token response dict with keys: access_token, refresh_token (optional), expires_in,
+        token_type, scope
+
+    Raises:
+        AuthenticationError: If token refresh fails (invalid refresh token, expired, network error)
+
+    Example:
+        tokens = await refresh_access_token(
+            issuer="https://auth.example.com",
+            client_id="my-client-id",
+            client_secret="my-client-secret",
+            refresh_token="refresh-token-from-login",
+        )
+        # tokens = {"access_token": "new-access-token", "refresh_token": "new-refresh-token", ...}
+    """
+    # Get token endpoint from OIDC discovery
+    discovery_url = f"{issuer.rstrip('/')}/.well-known/openid-configuration"
+
+    client = http_client or httpx.AsyncClient()
+    try:
+        # Fetch OIDC discovery document
+        logger.debug("Fetching OIDC discovery for token refresh", extra={"url": discovery_url})
+        discovery_response = await client.get(discovery_url, timeout=10.0)
+        discovery_response.raise_for_status()
+        discovery = discovery_response.json()
+
+        token_endpoint = discovery.get("token_endpoint")
+        if not token_endpoint:
+            raise AuthenticationError("OIDC discovery missing token_endpoint")
+
+        # Build refresh request per OAuth 2.1 spec
+        token_data = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": client_id,
+            "client_secret": client_secret,
+        }
+
+        # Request new tokens
+        logger.debug("Refreshing access token", extra={"token_endpoint": token_endpoint})
+        token_response = await client.post(
+            token_endpoint,
+            data=token_data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=10.0,
+        )
+
+        if token_response.status_code != 200:
+            error_detail = token_response.text
+            logger.error(
+                "Token refresh failed",
+                extra={
+                    "status_code": token_response.status_code,
+                    "error": error_detail,
+                },
+            )
+            raise AuthenticationError(f"Token refresh failed: {error_detail}")
+
+        tokens = token_response.json()
+
+        logger.info(
+            "Token refresh successful",
+            extra={
+                "has_access_token": "access_token" in tokens,
+                "has_refresh_token": "refresh_token" in tokens,
+            },
+        )
+
+        return tokens
+
+    except httpx.HTTPError as e:
+        logger.error("HTTP error during token refresh", extra={"error": str(e)})
+        raise AuthenticationError(f"Token refresh failed: {e}") from e
+    except AuthenticationError:
+        # Preserve specific AuthenticationError messages raised earlier in this function
+        raise
+    except Exception as e:
+        logger.error("Unexpected error during token refresh", extra={"error": str(e)})
+        raise AuthenticationError(f"Token refresh failed: {e}") from e
+    finally:
+        if not http_client:
+            await client.aclose()
+
+
+async def revoke_tokens(
+    issuer: str,
+    client_id: str,
+    client_secret: str,
+    token: str,
+    token_type_hint: str = "access_token",
+    http_client: httpx.AsyncClient | None = None,
+) -> None:
+    """Revoke access or refresh token at OIDC provider.
+
+    Implements OAuth 2.1 token revocation (RFC 7009).
+    Revokes the specified token at the provider's revocation endpoint.
+
+    Args:
+        issuer: OIDC issuer URL (e.g., "https://auth0.example.com")
+        client_id: OAuth client ID
+        client_secret: OAuth client secret
+        token: Token to revoke (access_token or refresh_token)
+        token_type_hint: Hint for token type ("access_token" or "refresh_token")
+        http_client: Optional HTTP client for testing
+
+    Raises:
+        AuthenticationError: If revocation fails due to network errors, non-200 responses,
+            or other unexpected errors from the provider. Providers that do not advertise
+            a revocation endpoint are handled gracefully (no exception is raised).
+
+    Example:
+        await revoke_tokens(
+            issuer="https://auth.example.com",
+            client_id="my-client-id",
+            client_secret="my-client-secret",
+            token="access-token-to-revoke",
+            token_type_hint="access_token",
+        )
+    """
+    # Get revocation endpoint from OIDC discovery
+    discovery_url = f"{issuer.rstrip('/')}/.well-known/openid-configuration"
+
+    client = http_client or httpx.AsyncClient()
+    try:
+        # Fetch OIDC discovery document
+        logger.debug("Fetching OIDC discovery for token revocation", extra={"url": discovery_url})
+        discovery_response = await client.get(discovery_url, timeout=10.0)
+        discovery_response.raise_for_status()
+        discovery = discovery_response.json()
+
+        revocation_endpoint = discovery.get("revocation_endpoint")
+        if not revocation_endpoint:
+            # Token revocation is optional per OIDC spec
+            # Some providers don't support it
+            logger.warning(
+                "OIDC provider does not support token revocation",
+                extra={"issuer": issuer},
+            )
+            return
+
+        # Build revocation request per RFC 7009
+        revocation_data = {
+            "token": token,
+            "token_type_hint": token_type_hint,
+            "client_id": client_id,
+            "client_secret": client_secret,
+        }
+
+        # Revoke token
+        logger.debug("Revoking token", extra={"revocation_endpoint": revocation_endpoint})
+        revocation_response = await client.post(
+            revocation_endpoint,
+            data=revocation_data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=10.0,
+        )
+
+        # RFC 7009: Successful revocation returns 200 OK
+        # Invalid tokens also return 200 (idempotent)
+        if revocation_response.status_code != 200:
+            error_detail = revocation_response.text
+            logger.error(
+                "Token revocation failed",
+                extra={
+                    "status_code": revocation_response.status_code,
+                    "error": error_detail,
+                },
+            )
+            raise AuthenticationError(f"Token revocation failed: {error_detail}")
+
+        logger.info("Token revocation successful")
+
+    except httpx.HTTPError as e:
+        logger.error("HTTP error during token revocation", extra={"error": str(e)})
+        raise AuthenticationError(f"Token revocation failed: {e}") from e
+    except AuthenticationError:
+        # Preserve specific AuthenticationError messages raised earlier in this function
+        raise
+    except Exception as e:
+        logger.error("Unexpected error during token revocation", extra={"error": str(e)})
+        raise AuthenticationError(f"Token revocation failed: {e}") from e
+    finally:
+        if not http_client:
+            await client.aclose()
+
+
+def parse_id_token_claims(id_token: str, validate_signature: bool = False) -> dict[str, Any]:
+    """Parse and optionally validate ID token (JWT) claims.
+
+    Extracts user claims from OIDC ID token without full signature verification.
+    Used for extracting user info after successful token exchange.
+
+    Args:
+        id_token: JWT ID token from OIDC provider
+        validate_signature: Whether to validate signature (requires JWKS, use OIDCValidator for that)
+
+    Returns:
+        Dict of ID token claims (sub, email, name, etc.)
+
+    Raises:
+        InvalidTokenError: If ID token is malformed or invalid
+
+    Example:
+        claims = parse_id_token_claims(tokens["id_token"])
+        # claims = {"sub": "user-123", "email": "user@example.com", "name": "John Doe", ...}
+    """
+    try:
+        if validate_signature:
+            # For signature validation, use OIDCValidator.validate_token instead
+            raise InvalidTokenError("Signature validation requires OIDCValidator with JWKS")
+
+        # Decode without verification (already validated via token endpoint over HTTPS)
+        # This is safe because:
+        # 1. We received the token from the provider's token endpoint over HTTPS
+        # 2. We validated the authorization code with PKCE
+        # 3. Client secret was used in the exchange
+        claims = jwt.decode(id_token, None, claims_options={"verify_signature": False})
+        return dict(claims)
+
+    except JoseError as e:
+        logger.warning("Failed to parse ID token claims", extra={"error": str(e)})
+        raise InvalidTokenError(f"Invalid ID token: {e}") from e
