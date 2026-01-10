@@ -591,3 +591,246 @@ class TestOIDCValidator:
         # Should fail signature verification
         with pytest.raises(InvalidTokenError, match="Invalid JWT token"):
             await validator.validate_token(token)
+
+
+class TestPKCEGeneration:
+    """Tests for PKCE (Proof Key for Code Exchange) utilities."""
+
+    def test_generate_pkce_verifier_default_length(self):
+        """Test PKCE verifier generation with default length."""
+        from routeros_mcp.security.oidc import generate_pkce_verifier
+
+        verifier = generate_pkce_verifier()
+
+        # Should be 43 characters (minimum per RFC 7636)
+        assert len(verifier) == 43
+        # Should contain only unreserved characters (base64url without padding)
+        assert all(
+            c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+            for c in verifier
+        )
+        # Should not contain padding
+        assert "=" not in verifier
+
+    def test_generate_pkce_verifier_custom_length(self):
+        """Test PKCE verifier generation with custom length."""
+        from routeros_mcp.security.oidc import generate_pkce_verifier
+
+        for length in [43, 64, 96, 128]:
+            verifier = generate_pkce_verifier(length)
+            assert len(verifier) == length
+            assert all(
+                c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+                for c in verifier
+            )
+
+    def test_generate_pkce_verifier_invalid_length(self):
+        """Test PKCE verifier generation rejects invalid lengths."""
+        from routeros_mcp.security.oidc import generate_pkce_verifier
+
+        # Too short
+        with pytest.raises(ValueError, match="between 43 and 128"):
+            generate_pkce_verifier(42)
+
+        # Too long
+        with pytest.raises(ValueError, match="between 43 and 128"):
+            generate_pkce_verifier(129)
+
+    def test_generate_pkce_verifier_uniqueness(self):
+        """Test PKCE verifier generates unique values."""
+        from routeros_mcp.security.oidc import generate_pkce_verifier
+
+        verifiers = [generate_pkce_verifier() for _ in range(100)]
+        # All should be unique (cryptographically random)
+        assert len(set(verifiers)) == 100
+
+    def test_generate_pkce_challenge(self):
+        """Test PKCE challenge generation from verifier."""
+        from routeros_mcp.security.oidc import generate_pkce_challenge
+
+        # Known test vector from RFC 7636 Appendix B
+        verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+        challenge = generate_pkce_challenge(verifier)
+
+        # Should match expected SHA256 hash
+        assert challenge == "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        # Should be 43 characters (SHA256 = 32 bytes = 43 base64url chars without padding)
+        assert len(challenge) == 43
+        # Should not contain padding
+        assert "=" not in challenge
+
+    def test_generate_pkce_challenge_consistency(self):
+        """Test PKCE challenge is deterministic for same verifier."""
+        from routeros_mcp.security.oidc import generate_pkce_challenge
+
+        verifier = "test-verifier-123"
+        challenge1 = generate_pkce_challenge(verifier)
+        challenge2 = generate_pkce_challenge(verifier)
+
+        # Same verifier should produce same challenge
+        assert challenge1 == challenge2
+
+    def test_generate_pkce_params(self):
+        """Test complete PKCE parameter generation."""
+        from routeros_mcp.security.oidc import generate_pkce_params, generate_pkce_challenge
+
+        pkce = generate_pkce_params()
+
+        # Should have all required fields
+        assert pkce.verifier
+        assert pkce.challenge
+        assert pkce.challenge_method == "S256"
+
+        # Verifier should be 43 characters by default
+        assert len(pkce.verifier) == 43
+
+        # Challenge should match verifier
+        expected_challenge = generate_pkce_challenge(pkce.verifier)
+        assert pkce.challenge == expected_challenge
+
+    def test_generate_pkce_params_custom_length(self):
+        """Test PKCE params with custom verifier length."""
+        from routeros_mcp.security.oidc import generate_pkce_params
+
+        pkce = generate_pkce_params(verifier_length=96)
+
+        assert len(pkce.verifier) == 96
+        assert pkce.challenge_method == "S256"
+
+
+class TestAuthorizationURLBuilder:
+    """Tests for OAuth 2.1 authorization URL builder."""
+
+    def test_build_authorization_url_minimal(self):
+        """Test authorization URL with minimal parameters."""
+        from routeros_mcp.security.oidc import build_authorization_url
+        from urllib.parse import urlparse, parse_qs
+
+        url, state = build_authorization_url(
+            issuer="https://auth.example.com",
+            client_id="test-client-id",
+            redirect_uri="http://localhost:8080/callback",
+        )
+
+        # Parse URL
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+
+        # Verify base URL
+        assert parsed.scheme == "https"
+        assert parsed.netloc == "auth.example.com"
+        assert parsed.path == "/authorize"
+
+        # Verify required OAuth parameters
+        assert params["response_type"][0] == "code"
+        assert params["client_id"][0] == "test-client-id"
+        assert params["redirect_uri"][0] == "http://localhost:8080/callback"
+        assert params["scope"][0] == "openid profile email"
+
+        # Verify PKCE parameters auto-generated
+        assert "code_challenge" in params
+        assert params["code_challenge_method"][0] == "S256"
+        assert len(params["code_challenge"][0]) == 43  # SHA256 base64url
+
+        # Verify state auto-generated and returned
+        assert "state" in params
+        assert len(params["state"][0]) >= 32  # Should be random string
+        assert state == params["state"][0]  # Returned state should match URL state
+
+    def test_build_authorization_url_with_pkce(self):
+        """Test authorization URL with explicit PKCE challenge."""
+        from routeros_mcp.security.oidc import build_authorization_url, generate_pkce_params
+        from urllib.parse import urlparse, parse_qs
+
+        pkce = generate_pkce_params()
+
+        url, state = build_authorization_url(
+            issuer="https://auth.example.com",
+            client_id="test-client-id",
+            redirect_uri="http://localhost:8080/callback",
+            pkce_challenge=pkce.challenge,
+            pkce_challenge_method="S256",
+        )
+
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+
+        # Should use provided PKCE challenge
+        assert params["code_challenge"][0] == pkce.challenge
+        assert params["code_challenge_method"][0] == "S256"
+        # State should still be auto-generated
+        assert state == params["state"][0]
+
+    def test_build_authorization_url_with_state(self):
+        """Test authorization URL with explicit state."""
+        from routeros_mcp.security.oidc import build_authorization_url
+        from urllib.parse import urlparse, parse_qs
+
+        url, state = build_authorization_url(
+            issuer="https://auth.example.com",
+            client_id="test-client-id",
+            redirect_uri="http://localhost:8080/callback",
+            state="my-custom-state-123",
+        )
+
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+
+        # Should use provided state
+        assert params["state"][0] == "my-custom-state-123"
+        assert state == "my-custom-state-123"
+
+    def test_build_authorization_url_custom_scope(self):
+        """Test authorization URL with custom scope."""
+        from routeros_mcp.security.oidc import build_authorization_url
+        from urllib.parse import urlparse, parse_qs
+
+        url, state = build_authorization_url(
+            issuer="https://auth.example.com",
+            client_id="test-client-id",
+            redirect_uri="http://localhost:8080/callback",
+            scope="openid profile email offline_access",
+        )
+
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+
+        assert params["scope"][0] == "openid profile email offline_access"
+
+    def test_build_authorization_url_extra_params(self):
+        """Test authorization URL with extra parameters."""
+        from routeros_mcp.security.oidc import build_authorization_url
+        from urllib.parse import urlparse, parse_qs
+
+        url, state = build_authorization_url(
+            issuer="https://auth.example.com",
+            client_id="test-client-id",
+            redirect_uri="http://localhost:8080/callback",
+            prompt="consent",
+            access_type="offline",
+        )
+
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+
+        # Should include extra params
+        assert params["prompt"][0] == "consent"
+        assert params["access_type"][0] == "offline"
+
+    def test_build_authorization_url_trailing_slash(self):
+        """Test authorization URL handles issuer with trailing slash."""
+        from routeros_mcp.security.oidc import build_authorization_url
+        from urllib.parse import urlparse
+
+        url, state = build_authorization_url(
+            issuer="https://auth.example.com/",
+            client_id="test-client-id",
+            redirect_uri="http://localhost:8080/callback",
+        )
+
+        parsed = urlparse(url)
+
+        # Should normalize to single /authorize path
+        assert parsed.path == "/authorize"
+        # Should not have double slashes
+        assert "//" not in parsed.path

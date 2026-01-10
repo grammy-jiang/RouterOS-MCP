@@ -79,6 +79,84 @@ class TestSettings:
         )
         assert settings.oidc_enabled is True
 
+    def test_oidc_issuer_field(self) -> None:
+        """Test new oidc_issuer field."""
+        # oidc_issuer should work instead of oidc_provider_url
+        settings = Settings(
+            oidc_enabled=True,
+            oidc_issuer="https://auth.example.com",
+            oidc_client_id="test-client",
+        )
+        assert settings.oidc_enabled is True
+        assert settings.oidc_issuer == "https://auth.example.com"
+
+    def test_oidc_redirect_uri_field(self) -> None:
+        """Test oidc_redirect_uri field."""
+        settings = Settings(
+            oidc_enabled=True,
+            oidc_issuer="https://auth.example.com",
+            oidc_client_id="test-client",
+            oidc_redirect_uri="http://localhost:8080/api/auth/callback",
+        )
+        assert settings.oidc_redirect_uri == "http://localhost:8080/api/auth/callback"
+
+    def test_oidc_redirect_uri_validation(self) -> None:
+        """Test oidc_redirect_uri validation."""
+        # Invalid redirect_uri (not HTTP/HTTPS)
+        with pytest.raises(ValidationError, match="must be a valid HTTP/HTTPS URL"):
+            Settings(
+                oidc_enabled=True,
+                oidc_issuer="https://auth.example.com",
+                oidc_client_id="test-client",
+                oidc_redirect_uri="ftp://example.com/callback",
+            )
+
+        # HTTP redirect_uri in prod should fail
+        with pytest.raises(
+            ValidationError, match="oidc_redirect_uri must use HTTPS in prod environment"
+        ):
+            Settings(
+                environment="prod",
+                oidc_enabled=True,
+                oidc_issuer="https://auth.example.com",
+                oidc_client_id="test-client",
+                oidc_redirect_uri="http://localhost:8080/callback",
+                encryption_key="test-key",
+            )
+
+    def test_oidc_scopes_field(self) -> None:
+        """Test oidc_scopes field."""
+        settings = Settings(
+            oidc_enabled=True,
+            oidc_issuer="https://auth.example.com",
+            oidc_client_id="test-client",
+            oidc_scopes="openid profile email offline_access",
+        )
+        assert settings.oidc_scopes == "openid profile email offline_access"
+
+        # Default scope
+        settings_default = Settings(
+            oidc_enabled=True,
+            oidc_issuer="https://auth.example.com",
+            oidc_client_id="test-client",
+        )
+        assert settings_default.oidc_scopes == "openid profile email"
+
+    def test_oidc_issuer_https_validation(self) -> None:
+        """Test oidc_issuer HTTPS validation in prod."""
+        # HTTP issuer in prod should fail
+        with pytest.raises(
+            ValidationError,
+            match="oidc_issuer/oidc_provider_url must use HTTPS in prod environment",
+        ):
+            Settings(
+                environment="prod",
+                oidc_enabled=True,
+                oidc_issuer="http://auth.example.com",
+                oidc_client_id="test-client",
+                encryption_key="test-key",
+            )
+
     def test_encryption_key_validation_lab(self) -> None:
         """Test encryption key validation in lab environment."""
         # Lab environment without key should work with warning
