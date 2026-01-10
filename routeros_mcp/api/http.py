@@ -278,6 +278,75 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
             "role": user.get("role"),
         }
 
+    # OAuth 2.1 Authorization Code Flow endpoints
+    @app.get("/api/auth/login")
+    async def login(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+        """Initiate OAuth 2.1 Authorization Code flow with PKCE.
+
+        This endpoint starts the OAuth login flow by:
+        1. Generating PKCE parameters (verifier + challenge)
+        2. Building authorization URL with PKCE challenge
+        3. Returning the URL for client to redirect to
+
+        Note: This is a stub implementation for Phase 5.1.
+        Full implementation will include:
+        - Session/cookie storage for PKCE verifier and state
+        - Callback endpoint for authorization code exchange
+        - Token exchange with PKCE verifier
+
+        Returns:
+            JSON with authorization URL and state parameter
+
+        Raises:
+            HTTPException: If OIDC is not configured
+        """
+        from routeros_mcp.security.oidc import build_authorization_url, generate_pkce_params
+
+        # Verify OIDC is enabled
+        if not settings.oidc_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="OAuth authentication not enabled. Set oidc_enabled=true in configuration.",
+            )
+
+        # Verify required OIDC config
+        issuer = settings.oidc_issuer or settings.oidc_provider_url
+        if not issuer or not settings.oidc_client_id or not settings.oidc_redirect_uri:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="OAuth not properly configured. Missing issuer, client_id, or redirect_uri.",
+            )
+
+        # Generate PKCE parameters
+        pkce = generate_pkce_params()
+
+        # Build authorization URL
+        auth_url = build_authorization_url(
+            issuer=issuer,
+            client_id=settings.oidc_client_id,
+            redirect_uri=settings.oidc_redirect_uri,
+            scope=settings.oidc_scopes,
+            pkce_challenge=pkce.challenge,
+            pkce_challenge_method=pkce.challenge_method,
+        )
+
+        # TODO: Store PKCE verifier and state in session for later verification
+        # This will be implemented in Phase 5.2 (callback endpoint)
+
+        logger.info(
+            "OAuth login initiated",
+            extra={
+                "issuer": issuer,
+                "client_id": settings.oidc_client_id,
+                "redirect_uri": settings.oidc_redirect_uri,
+            },
+        )
+
+        return {
+            "authorization_url": auth_url,
+            "message": "Redirect user to authorization_url to complete login",
+        }
+
     return app
 
 

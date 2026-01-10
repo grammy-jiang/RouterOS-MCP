@@ -142,10 +142,25 @@ class Settings(BaseSettings):
         default=None, description="OIDC provider URL (e.g., https://auth0.example.com)"
     )
 
+    oidc_issuer: str | None = Field(
+        default=None,
+        description="OIDC issuer URL for Authorization Code flow (e.g., https://auth0.example.com)",
+    )
+
     oidc_client_id: str | None = Field(default=None, description="OIDC client ID")
 
     oidc_client_secret: str | None = Field(
         default=None, description="OIDC client secret (for service account token validation)"
+    )
+
+    oidc_redirect_uri: str | None = Field(
+        default=None,
+        description="OAuth redirect URI for Authorization Code flow (e.g., http://localhost:8080/api/auth/callback)",
+    )
+
+    oidc_scopes: str = Field(
+        default="openid profile email",
+        description="Space-separated OAuth scopes to request",
     )
 
     oidc_audience: str | None = Field(default=None, description="Expected token audience")
@@ -305,8 +320,11 @@ class Settings(BaseSettings):
     def validate_oidc_config(self) -> "Settings":
         """Validate OIDC configuration if enabled."""
         if self.oidc_enabled:
+            # Support both oidc_issuer (new) and oidc_provider_url (legacy)
+            issuer = self.oidc_issuer or self.oidc_provider_url
+            
             required_fields = {
-                "oidc_provider_url": self.oidc_provider_url,
+                "oidc_issuer or oidc_provider_url": issuer,
                 "oidc_client_id": self.oidc_client_id,
             }
             missing = [k for k, v in required_fields.items() if not v]
@@ -314,11 +332,22 @@ class Settings(BaseSettings):
                 raise ValueError(f"OIDC enabled but missing required fields: {', '.join(missing)}")
 
             # Validate HTTPS in production/staging
-            if self.oidc_provider_url and self.environment in ["staging", "prod"]:
-                if not self.oidc_provider_url.startswith("https://"):
+            if issuer and self.environment in ["staging", "prod"]:
+                if not issuer.startswith("https://"):
                     raise ValueError(
-                        f"oidc_provider_url must use HTTPS in {self.environment} environment"
+                        f"oidc_issuer/oidc_provider_url must use HTTPS in {self.environment} environment"
                     )
+
+            # Validate redirect_uri format if provided
+            if self.oidc_redirect_uri:
+                if not self.oidc_redirect_uri.startswith(("http://", "https://")):
+                    raise ValueError("oidc_redirect_uri must be a valid HTTP/HTTPS URL")
+                # Require HTTPS in production/staging
+                if self.environment in ["staging", "prod"]:
+                    if not self.oidc_redirect_uri.startswith("https://"):
+                        raise ValueError(
+                            f"oidc_redirect_uri must use HTTPS in {self.environment} environment"
+                        )
 
             # Warn if skip_verification enabled
             if self.oidc_skip_verification and self.environment in ["staging", "prod"]:

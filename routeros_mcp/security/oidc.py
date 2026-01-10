@@ -460,3 +460,195 @@ class OIDCValidator:
         expired = [k for k, v in self._token_cache.items() if now >= v.expires_at]
         for k in expired:
             del self._token_cache[k]
+
+
+# ========================================
+# OAuth 2.1 Authorization Code Flow (PKCE)
+# ========================================
+
+
+@dataclass
+class PKCEParams:
+    """PKCE (Proof Key for Code Exchange) parameters for OAuth 2.1 Authorization Code flow.
+    
+    Attributes:
+        verifier: Random code verifier (43-128 characters, base64url-encoded)
+        challenge: SHA256 hash of verifier, base64url-encoded
+        challenge_method: Always "S256" for SHA256 hashing
+    """
+
+    verifier: str
+    challenge: str
+    challenge_method: str = "S256"
+
+
+def generate_pkce_verifier(length: int = 43) -> str:
+    """Generate a cryptographically secure PKCE code verifier.
+    
+    Per RFC 7636 Section 4.1:
+    - Length must be 43-128 characters
+    - Characters must be unreserved: [A-Z] / [a-z] / [0-9] / "-" / "." / "_" / "~"
+    - Uses base64url encoding without padding
+    
+    Args:
+        length: Length of verifier (43-128 characters). Default is 43 (minimum).
+    
+    Returns:
+        Cryptographically secure random code verifier string
+    
+    Raises:
+        ValueError: If length is not in range [43, 128]
+    
+    Example:
+        verifier = generate_pkce_verifier()
+        # Returns something like: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+    """
+    if not 43 <= length <= 128:
+        raise ValueError("PKCE verifier length must be between 43 and 128 characters")
+    
+    # Generate random bytes (length * 6/8 to account for base64 encoding overhead)
+    # For 43 chars, we need ~32 bytes; for 128 chars, we need ~96 bytes
+    num_bytes = (length * 3) // 4 + 1  # Ensure enough bytes after encoding
+    random_bytes = base64.urlsafe_b64encode(hashlib.sha256(
+        int(time.time() * 1000000).to_bytes(8, 'big') + 
+        base64.urlsafe_b64encode(hashlib.sha256(
+            str(time.time()).encode()
+        ).digest()).rstrip(b'=')
+    ).digest()).rstrip(b'=')
+    
+    # Use cryptographically secure random bytes
+    random_bytes = base64.urlsafe_b64encode(
+        base64.urlsafe_b64decode(random_bytes + b'=' * (4 - len(random_bytes) % 4)) +
+        int.from_bytes(hashlib.sha256(str(time.time()).encode()).digest()[:8], 'big').to_bytes(8, 'big')
+    ).rstrip(b'=')
+    
+    # Actually, let's use a simpler, more secure approach
+    import secrets
+    random_bytes = secrets.token_bytes(length)
+    
+    # Base64url encode and remove padding
+    verifier = base64.urlsafe_b64encode(random_bytes).rstrip(b'=').decode('ascii')
+    
+    # Truncate to requested length
+    return verifier[:length]
+
+
+def generate_pkce_challenge(verifier: str) -> str:
+    """Generate PKCE code challenge from verifier using SHA256.
+    
+    Per RFC 7636 Section 4.2:
+    - challenge = BASE64URL(SHA256(ASCII(verifier)))
+    - No padding (trailing '=' removed)
+    
+    Args:
+        verifier: PKCE code verifier string
+    
+    Returns:
+        Base64url-encoded SHA256 hash of verifier (no padding)
+    
+    Example:
+        verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+        challenge = generate_pkce_challenge(verifier)
+        # Returns: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+    """
+    # Hash the verifier with SHA256
+    verifier_bytes = verifier.encode('ascii')
+    challenge_bytes = hashlib.sha256(verifier_bytes).digest()
+    
+    # Base64url encode and remove padding
+    challenge = base64.urlsafe_b64encode(challenge_bytes).rstrip(b'=').decode('ascii')
+    
+    return challenge
+
+
+def generate_pkce_params(verifier_length: int = 43) -> PKCEParams:
+    """Generate complete PKCE parameter set (verifier + challenge).
+    
+    Convenience function that generates both verifier and challenge.
+    
+    Args:
+        verifier_length: Length of code verifier (43-128). Default is 43.
+    
+    Returns:
+        PKCEParams with verifier, challenge, and challenge_method
+    
+    Example:
+        pkce = generate_pkce_params()
+        print(pkce.verifier)   # Random 43-char string
+        print(pkce.challenge)  # SHA256 hash of verifier
+        print(pkce.challenge_method)  # "S256"
+    """
+    verifier = generate_pkce_verifier(verifier_length)
+    challenge = generate_pkce_challenge(verifier)
+    return PKCEParams(verifier=verifier, challenge=challenge, challenge_method="S256")
+
+
+def build_authorization_url(
+    issuer: str,
+    client_id: str,
+    redirect_uri: str,
+    scope: str = "openid profile email",
+    state: str | None = None,
+    pkce_challenge: str | None = None,
+    pkce_challenge_method: str = "S256",
+    **extra_params: Any,
+) -> str:
+    """Build OAuth 2.1 authorization URL with PKCE support.
+    
+    Constructs the authorization endpoint URL per OAuth 2.1 spec with PKCE.
+    
+    Args:
+        issuer: OIDC issuer URL (e.g., "https://auth0.example.com")
+        client_id: OAuth client ID
+        redirect_uri: OAuth callback URL (e.g., "http://localhost:8080/api/auth/callback")
+        scope: Space-separated OAuth scopes (default: "openid profile email")
+        state: CSRF protection state parameter (randomly generated if not provided)
+        pkce_challenge: PKCE code challenge (auto-generated if not provided)
+        pkce_challenge_method: PKCE challenge method (default: "S256")
+        **extra_params: Additional query parameters to include
+    
+    Returns:
+        Complete authorization URL with all parameters
+    
+    Example:
+        url = build_authorization_url(
+            issuer="https://auth.example.com",
+            client_id="my-client-id",
+            redirect_uri="http://localhost:8080/callback",
+            scope="openid profile email",
+        )
+        # Returns: "https://auth.example.com/authorize?response_type=code&..."
+    """
+    from urllib.parse import urlencode, urljoin
+    
+    # Generate state if not provided (CSRF protection)
+    if state is None:
+        import secrets
+        state = secrets.token_urlsafe(32)
+    
+    # Generate PKCE challenge if not provided
+    if pkce_challenge is None:
+        pkce_params = generate_pkce_params()
+        pkce_challenge = pkce_params.challenge
+        # Store verifier in session/cookie for later use in token exchange
+        # (caller is responsible for this)
+    
+    # Build query parameters per OAuth 2.1 spec
+    params = {
+        "response_type": "code",
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "scope": scope,
+        "state": state,
+        "code_challenge": pkce_challenge,
+        "code_challenge_method": pkce_challenge_method,
+        **extra_params,
+    }
+    
+    # Construct authorization endpoint URL
+    # Per OIDC discovery spec, authorization endpoint is at /authorize
+    authorization_endpoint = urljoin(issuer.rstrip('/') + '/', 'authorize')
+    
+    # Build full URL with query parameters
+    query_string = urlencode(params)
+    return f"{authorization_endpoint}?{query_string}"
