@@ -385,3 +385,85 @@ def test_email_notification_without_html() -> None:
     assert notification.subject == "Test"
     assert notification.body_text == "Plain text"
     assert notification.body_html is None
+
+
+# ==================== Test: Base URL in Templates ====================
+
+
+@pytest.mark.asyncio
+async def test_email_templates_include_base_url() -> None:
+    """Test that email templates include base URL links when provided."""
+    backend = MockNotificationBackend()
+    service = NotificationService(
+        backend=backend,
+        from_address="test@example.com",
+        base_url="https://routeros-mcp.example.com",
+    )
+
+    # Test approval requested
+    await service.send_approval_requested(
+        to_address="approver@example.com",
+        plan_id="plan-123",
+        requested_by="user-requester",
+        plan_summary="Test plan",
+    )
+
+    assert len(backend.sent_notifications) == 1
+    assert (
+        "https://routeros-mcp.example.com/plans/plan-123" in backend.sent_notifications[0].body_text
+    )
+    backend.clear()
+
+    # Test approval approved
+    await service.send_approval_approved(
+        to_address="requester@example.com",
+        plan_id="plan-123",
+        approved_by="user-approver",
+        plan_summary="Test plan",
+    )
+
+    assert len(backend.sent_notifications) == 1
+    assert (
+        "https://routeros-mcp.example.com/plans/plan-123" in backend.sent_notifications[0].body_text
+    )
+    backend.clear()
+
+    # Test job executed
+    await service.send_job_executed(
+        to_address="operator@example.com",
+        job_id="job-456",
+        plan_id="plan-123",
+        job_type="apply_plan",
+        status="completed",
+        result_summary="Success",
+    )
+
+    assert len(backend.sent_notifications) == 1
+    assert (
+        "https://routeros-mcp.example.com/jobs/job-456" in backend.sent_notifications[0].body_text
+    )
+    assert (
+        "https://routeros-mcp.example.com/plans/plan-123" in backend.sent_notifications[0].body_text
+    )
+
+
+@pytest.mark.asyncio
+async def test_email_templates_without_base_url() -> None:
+    """Test that email templates work without base URL."""
+    backend = MockNotificationBackend()
+    service = NotificationService(
+        backend=backend,
+        from_address="test@example.com",
+        base_url=None,
+    )
+
+    # Test approval requested
+    await service.send_approval_requested(
+        to_address="approver@example.com",
+        plan_id="plan-123",
+        requested_by="user-requester",
+        plan_summary="Test plan",
+    )
+
+    assert len(backend.sent_notifications) == 1
+    assert "https://routeros-mcp.example.com" not in backend.sent_notifications[0].body_text

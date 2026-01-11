@@ -393,6 +393,11 @@ class Settings(BaseSettings):
         description="SMTP connection timeout in seconds",
     )
 
+    notification_base_url: str | None = Field(
+        default=None,
+        description="Base URL for web UI links in notification emails (e.g., https://routeros-mcp.example.com)",
+    )
+
     # ========================================
     # Validators
     # ========================================
@@ -527,7 +532,7 @@ class Settings(BaseSettings):
             and (not self.notification_smtp_username or not self.notification_smtp_password)
         ):
             warnings.warn(
-                "SMTP authentication credentials not set in " f"{self.environment} environment",
+                f"SMTP authentication credentials not set in {self.environment} environment",
                 UserWarning,
                 stacklevel=2,
             )

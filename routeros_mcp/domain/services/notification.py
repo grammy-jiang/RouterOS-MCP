@@ -170,13 +170,14 @@ class SMTPNotificationBackend(NotificationBackend):
         """
         import smtplib
 
-        if self.use_tls:
-            smtp = smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=self.timeout)
-            smtp.starttls()
-        else:
-            smtp = smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=self.timeout)
-
+        smtp = None
         try:
+            if self.use_tls:
+                smtp = smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=self.timeout)
+                smtp.starttls()
+            else:
+                smtp = smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=self.timeout)
+
             if self.username and self.password:
                 smtp.login(self.username, self.password)
 
@@ -184,7 +185,12 @@ class SMTPNotificationBackend(NotificationBackend):
             from_addr = msg["From"]
             smtp.sendmail(from_addr, to_address, msg.as_string())
         finally:
-            smtp.quit()
+            if smtp is not None:
+                try:
+                    smtp.quit()
+                except Exception:
+                    # Ignore errors when closing the connection
+                    pass
 
 
 class NotificationService:
@@ -201,15 +207,18 @@ class NotificationService:
         self,
         backend: NotificationBackend,
         from_address: str = "routeros-mcp@example.com",
+        base_url: str | None = None,
     ) -> None:
         """Initialize notification service.
 
         Args:
             backend: Notification backend to use
             from_address: Email address to use as sender
+            base_url: Base URL for web UI links (e.g., https://routeros-mcp.example.com)
         """
         self.backend = backend
         self.from_address = from_address
+        self.base_url = base_url
 
     async def send_approval_requested(
         self,
@@ -243,10 +252,12 @@ Summary: {plan_summary}
         if notes:
             body_text += f"\nNotes: {notes}"
 
-        body_text += """
+        body_text += (
+            "\n\nPlease review and approve or reject this plan at your earliest convenience."
+        )
 
-Please review and approve or reject this plan at your earliest convenience.
-"""
+        if self.base_url:
+            body_text += f"\n\nView plan details: {self.base_url}/plans/{plan_id}"
 
         notification = EmailNotification(
             to_address=to_address,
@@ -288,10 +299,10 @@ Summary: {plan_summary}
         if notes:
             body_text += f"\nApprover notes: {notes}"
 
-        body_text += """
+        body_text += "\n\nYour plan has been approved and is ready for execution."
 
-Your plan has been approved and is ready for execution.
-"""
+        if self.base_url:
+            body_text += f"\n\nView plan details: {self.base_url}/plans/{plan_id}"
 
         notification = EmailNotification(
             to_address=to_address,
@@ -333,10 +344,12 @@ Summary: {plan_summary}
         if notes:
             body_text += f"\nRejection reason: {notes}"
 
-        body_text += """
+        body_text += (
+            "\n\nYour plan has been rejected. Please review the feedback and submit a revised plan."
+        )
 
-Your plan has been rejected. Please review the feedback and submit a revised plan.
-"""
+        if self.base_url:
+            body_text += f"\n\nView plan details: {self.base_url}/plans/{plan_id}"
 
         notification = EmailNotification(
             to_address=to_address,
@@ -381,11 +394,14 @@ Status: {status}
         if plan_id:
             body_text += f"Plan ID: {plan_id}\n"
 
-        body_text += f"""
-Result: {result_summary}
+        body_text += f"\nResult: {result_summary}"
 
-This is an automated notification from RouterOS MCP Service.
-"""
+        if self.base_url:
+            body_text += f"\n\nView job details: {self.base_url}/jobs/{job_id}"
+            if plan_id:
+                body_text += f"\nView plan details: {self.base_url}/plans/{plan_id}"
+
+        body_text += "\n\nThis is an automated notification from RouterOS MCP Service."
 
         notification = EmailNotification(
             to_address=to_address,
@@ -400,6 +416,7 @@ def create_notification_service(
     enabled: bool = False,
     backend_type: str = "mock",
     from_address: str = "routeros-mcp@example.com",
+    base_url: str | None = None,
     smtp_host: str = "localhost",
     smtp_port: int = 587,
     smtp_use_tls: bool = True,
@@ -413,6 +430,7 @@ def create_notification_service(
         enabled: Whether notifications are enabled
         backend_type: Backend type ("smtp" or "mock")
         from_address: Sender email address
+        base_url: Base URL for web UI links (e.g., https://routeros-mcp.example.com)
         smtp_host: SMTP server hostname (for SMTP backend)
         smtp_port: SMTP server port (for SMTP backend)
         smtp_use_tls: Use STARTTLS (for SMTP backend)
@@ -442,4 +460,4 @@ def create_notification_service(
         backend = MockNotificationBackend()
         logger.info("Notification service initialized with mock backend")
 
-    return NotificationService(backend=backend, from_address=from_address)
+    return NotificationService(backend=backend, from_address=from_address, base_url=base_url)

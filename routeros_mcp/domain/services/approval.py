@@ -105,12 +105,13 @@ class ApprovalService:
             },
         )
 
-        # Send notification if service is available
+        # Notification service is available, but we intentionally do NOT send an email at
+        # request creation time. Approvers are notified through other workflows, and emails
+        # are only sent for state changes such as approval/rejection.
         if self.notification_service:
-            # Note: In production, we would look up approver email addresses from a user service
-            # For now, we log that notification would be sent
             logger.info(
-                f"Notification service available - would send approval request email for {plan_id}",
+                "Notification service available - no email sent on approval request creation "
+                "(by design)",
                 extra={"plan_id": plan_id},
             )
 
