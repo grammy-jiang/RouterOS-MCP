@@ -141,7 +141,12 @@ jobs:
       - name: Combine coverage data
         if: matrix.python-version == '3.11'
         run: |
-          uv run coverage combine
+          # Only combine if there are parallel coverage files
+          if ls .coverage.* 1> /dev/null 2>&1; then
+            uv run coverage combine
+          else
+            echo "No parallel coverage files found, skipping combine"
+          fi
 
       - name: Check coverage threshold
         if: matrix.python-version == '3.11'
