@@ -1500,4 +1500,317 @@ async def reject_approval_request(
         )
 
 
+async def get_compliance_service():
+    """Dependency to get ComplianceService."""
+    # Import here to avoid namespace pollution
+    from routeros_mcp.domain.services.compliance import ComplianceService
+    from routeros_mcp.infra.db.session import get_session
+
+    async for session in get_session():
+        yield ComplianceService(session)
+
+
+# ==================== Compliance Reporting Endpoints (Phase 5 #11) ====================
+
+
+@router.get("/api/compliance/audit-export")
+async def compliance_audit_export(
+    date_from: str | None = None,
+    date_to: str | None = None,
+    device_id: str | None = None,
+    tool_name: str | None = None,
+    user_id: str | None = None,
+    format: str = "json",
+    limit: int = 10000,
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    compliance_service: Any = Depends(get_compliance_service),
+) -> Any:
+    """Export audit events for compliance reporting.
+
+    Supports both JSON and CSV formats for audit log exports.
+
+    Args:
+        date_from: Start date for filtering (ISO format)
+        date_to: End date for filtering (ISO format)
+        device_id: Filter by device ID
+        tool_name: Filter by tool name
+        user_id: Filter by user ID
+        format: Export format ('json' or 'csv')
+        limit: Maximum number of events to export (default: 10000)
+        user: Current authenticated user (must have admin or auditor role)
+        compliance_service: Compliance service dependency
+
+    Returns:
+        JSON object with audit events or CSV file download
+
+    Raises:
+        HTTPException: If unauthorized or date parsing fails
+    """
+    # Check user role - compliance reports require admin or auditor role
+    user_role = user.get("role", "read_only")
+    if user_role not in ["admin", "auditor", "approver"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Compliance reports require admin, auditor, or approver role",
+        )
+
+    try:
+        # Parse date filters
+        date_from_dt = _parse_iso_date(date_from, "date_from")
+        date_to_dt = _parse_iso_date(date_to, "date_to")
+
+        # Validate format parameter
+        if format not in ["json", "csv"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid format. Must be 'json' or 'csv'",
+            )
+
+        # Get audit events
+        result = await compliance_service.export_audit_events(
+            date_from=date_from_dt,
+            date_to=date_to_dt,
+            device_id=device_id,
+            tool_name=tool_name,
+            user_id=user_id,
+            format=format,
+            limit=limit,
+        )
+
+        # Return appropriate response based on format
+        if format == "csv":
+            from fastapi.responses import StreamingResponse
+
+            return StreamingResponse(
+                iter([result]),
+                media_type="text/csv",
+                headers={
+                    "Content-Disposition": f"attachment; filename=compliance_audit_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}.csv"
+                },
+            )
+        else:
+            return JSONResponse(content=result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error exporting compliance audit: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to export compliance audit. Correlation ID: {correlation_id}",
+        )
+
+
+@router.get("/api/compliance/approvals")
+async def compliance_approvals_summary(
+    status: str | None = None,
+    date_from: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    compliance_service: Any = Depends(get_compliance_service),
+) -> JSONResponse:
+    """Get summary of approval decisions for compliance reporting.
+
+    Args:
+        status: Filter by approval status ('approved' or 'rejected')
+        date_from: Start date for filtering (ISO format)
+        limit: Maximum number of decisions to return (default: 100)
+        offset: Number of decisions to skip for pagination (default: 0)
+        user: Current authenticated user (must have admin or auditor role)
+        compliance_service: Compliance service dependency
+
+    Returns:
+        JSON with approval decisions and summary statistics
+
+    Raises:
+        HTTPException: If unauthorized, invalid status, or date parsing fails
+    """
+    # Check user role
+    user_role = user.get("role", "read_only")
+    if user_role not in ["admin", "auditor", "approver"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Compliance reports require admin, auditor, or approver role",
+        )
+
+    try:
+        # Validate status parameter
+        if status and status not in ["approved", "rejected"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid status. Must be 'approved' or 'rejected'",
+            )
+
+        # Parse date filter
+        date_from_dt = _parse_iso_date(date_from, "date_from")
+
+        # Get approval decisions
+        result = await compliance_service.get_approval_decisions(
+            status=status,
+            date_from=date_from_dt,
+            limit=limit,
+            offset=offset,
+        )
+
+        return JSONResponse(content=result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error getting approval decisions: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get approval decisions. Correlation ID: {correlation_id}",
+        )
+
+
+@router.get("/api/compliance/policy-violations")
+async def compliance_policy_violations(
+    device_id: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    limit: int = 100,
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    compliance_service: Any = Depends(get_compliance_service),
+) -> JSONResponse:
+    """Get policy violations (authorization failures) for compliance reporting.
+
+    Policy violations are identified as audit events with action='AUTHZ_DENIED'.
+
+    Args:
+        device_id: Filter by device ID
+        date_from: Start date for filtering (ISO format)
+        date_to: End date for filtering (ISO format)
+        limit: Maximum number of violations to return (default: 100)
+        user: Current authenticated user (must have admin or auditor role)
+        compliance_service: Compliance service dependency
+
+    Returns:
+        JSON with policy violations and summary statistics
+
+    Raises:
+        HTTPException: If unauthorized or date parsing fails
+    """
+    # Check user role
+    user_role = user.get("role", "read_only")
+    if user_role not in ["admin", "auditor", "approver"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Compliance reports require admin, auditor, or approver role",
+        )
+
+    try:
+        # Parse date filters
+        date_from_dt = _parse_iso_date(date_from, "date_from")
+        date_to_dt = _parse_iso_date(date_to, "date_to")
+
+        # Get policy violations
+        result = await compliance_service.get_policy_violations(
+            device_id=device_id,
+            date_from=date_from_dt,
+            date_to=date_to_dt,
+            limit=limit,
+        )
+
+        return JSONResponse(content=result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error getting policy violations: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get policy violations. Correlation ID: {correlation_id}",
+        )
+
+
+@router.get("/api/compliance/role-audit")
+async def compliance_role_audit(
+    user_id: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    limit: int = 100,
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    compliance_service: Any = Depends(get_compliance_service),
+) -> JSONResponse:
+    """Get role assignment audit trail for compliance reporting.
+
+    Tracks role assignment history from audit events.
+
+    Args:
+        user_id: Filter by user ID
+        date_from: Start date for filtering (ISO format)
+        date_to: End date for filtering (ISO format)
+        limit: Maximum number of role changes to return (default: 100)
+        user: Current authenticated user (must have admin or auditor role)
+        compliance_service: Compliance service dependency
+
+    Returns:
+        JSON with role assignment history
+
+    Raises:
+        HTTPException: If unauthorized or date parsing fails
+    """
+    # Check user role
+    user_role = user.get("role", "read_only")
+    if user_role not in ["admin", "auditor"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Role audit reports require admin or auditor role",
+        )
+
+    try:
+        # Parse date filters
+        date_from_dt = _parse_iso_date(date_from, "date_from")
+        date_to_dt = _parse_iso_date(date_to, "date_to")
+
+        # Get role audit trail
+        result = await compliance_service.get_role_audit(
+            user_id=user_id,
+            date_from=date_from_dt,
+            date_to=date_to_dt,
+            limit=limit,
+        )
+
+        return JSONResponse(content=result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error getting role audit: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get role audit. Correlation ID: {correlation_id}",
+        )
+
+
 __all__ = ["router"]
