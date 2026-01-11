@@ -54,6 +54,9 @@ class AuditService:
         date_from: datetime | None = None,
         date_to: datetime | None = None,
         search: str | None = None,
+        user_id: str | None = None,
+        approver_id: str | None = None,
+        approval_request_id: str | None = None,
     ) -> dict[str, Any]:
         """List audit events with filters and pagination.
 
@@ -66,6 +69,9 @@ class AuditService:
             date_from: Filter events from this date
             date_to: Filter events to this date
             search: Search in event details (result_summary, error_message, parameters)
+            user_id: Filter by user ID who performed the action (Phase 5)
+            approver_id: Filter by approver ID (Phase 5)
+            approval_request_id: Filter by approval request ID (Phase 5)
 
         Returns:
             Dictionary with events, pagination info
@@ -87,6 +93,16 @@ class AuditService:
 
         if date_to:
             conditions.append(AuditEventORM.timestamp <= date_to)
+
+        # Phase 5: Per-user filters
+        if user_id:
+            conditions.append(AuditEventORM.user_id == user_id)
+
+        if approver_id:
+            conditions.append(AuditEventORM.approver_id == approver_id)
+
+        if approval_request_id:
+            conditions.append(AuditEventORM.approval_request_id == approval_request_id)
 
         if search:
             # Search in error_message and meta (as JSON string)
@@ -130,6 +146,9 @@ class AuditService:
                 "user_sub": event.user_sub,
                 "user_email": event.user_email,
                 "user_role": event.user_role,
+                "user_id": event.user_id,
+                "approver_id": event.approver_id,
+                "approval_request_id": event.approval_request_id,
                 "device_id": event.device_id,
                 "environment": event.environment,
                 "action": event.action,
@@ -175,12 +194,220 @@ class AuditService:
         Returns:
             List of tool names
         """
-        stmt = (
-            select(AuditEventORM.tool_name)
-            .distinct()
-            .order_by(AuditEventORM.tool_name)
-        )
+        stmt = select(AuditEventORM.tool_name).distinct().order_by(AuditEventORM.tool_name)
 
         result = await self.session.execute(stmt)
         tools = result.scalars().all()
         return list(tools)
+
+    async def log_approval_request_created(
+        self,
+        event_id: str,
+        user_id: str,
+        user_sub: str,
+        user_email: str | None,
+        user_role: str,
+        approval_request_id: str,
+        plan_id: str,
+        tool_name: str,
+        meta: dict[str, Any] | None = None,
+    ) -> None:
+        """Log an approval request creation event (Phase 5).
+
+        Args:
+            event_id: Unique event identifier
+            user_id: User ID who created the approval request
+            user_sub: User subject from OIDC token
+            user_email: User email
+            user_role: User role
+            approval_request_id: ID of the created approval request
+            plan_id: ID of the plan requiring approval
+            tool_name: Tool that generated the plan
+            meta: Additional metadata
+        """
+        from datetime import UTC, datetime
+
+        event = AuditEventORM(
+            id=event_id,
+            timestamp=datetime.now(UTC),
+            user_sub=user_sub,
+            user_email=user_email,
+            user_role=user_role,
+            user_id=user_id,
+            approver_id=None,
+            approval_request_id=approval_request_id,
+            device_id=None,
+            environment=None,
+            action="APPROVAL_REQUEST_CREATED",
+            tool_name=tool_name,
+            tool_tier="professional",
+            plan_id=plan_id,
+            job_id=None,
+            result="SUCCESS",
+            meta=meta or {},
+            error_message=None,
+        )
+        self.session.add(event)
+        await self.session.commit()
+
+    async def log_approval_granted(
+        self,
+        event_id: str,
+        user_id: str,
+        approver_id: str,
+        user_sub: str,
+        user_email: str | None,
+        user_role: str,
+        approval_request_id: str,
+        plan_id: str,
+        tool_name: str,
+        meta: dict[str, Any] | None = None,
+    ) -> None:
+        """Log an approval granted event (Phase 5).
+
+        Args:
+            event_id: Unique event identifier
+            user_id: Original user ID who requested approval
+            approver_id: User ID who approved the request
+            user_sub: Approver's subject from OIDC token
+            user_email: Approver's email
+            user_role: Approver's role
+            approval_request_id: ID of the approval request
+            plan_id: ID of the approved plan
+            tool_name: Tool associated with the plan
+            meta: Additional metadata
+        """
+        from datetime import UTC, datetime
+
+        event = AuditEventORM(
+            id=event_id,
+            timestamp=datetime.now(UTC),
+            user_sub=user_sub,
+            user_email=user_email,
+            user_role=user_role,
+            user_id=user_id,
+            approver_id=approver_id,
+            approval_request_id=approval_request_id,
+            device_id=None,
+            environment=None,
+            action="APPROVAL_GRANTED",
+            tool_name=tool_name,
+            tool_tier="professional",
+            plan_id=plan_id,
+            job_id=None,
+            result="SUCCESS",
+            meta=meta or {},
+            error_message=None,
+        )
+        self.session.add(event)
+        await self.session.commit()
+
+    async def log_approval_rejected(
+        self,
+        event_id: str,
+        user_id: str,
+        approver_id: str,
+        user_sub: str,
+        user_email: str | None,
+        user_role: str,
+        approval_request_id: str,
+        plan_id: str,
+        tool_name: str,
+        meta: dict[str, Any] | None = None,
+    ) -> None:
+        """Log an approval rejected event (Phase 5).
+
+        Args:
+            event_id: Unique event identifier
+            user_id: Original user ID who requested approval
+            approver_id: User ID who rejected the request
+            user_sub: Rejecter's subject from OIDC token
+            user_email: Rejecter's email
+            user_role: Rejecter's role
+            approval_request_id: ID of the approval request
+            plan_id: ID of the rejected plan
+            tool_name: Tool associated with the plan
+            meta: Additional metadata (should include rejection reason)
+        """
+        from datetime import UTC, datetime
+
+        event = AuditEventORM(
+            id=event_id,
+            timestamp=datetime.now(UTC),
+            user_sub=user_sub,
+            user_email=user_email,
+            user_role=user_role,
+            user_id=user_id,
+            approver_id=approver_id,
+            approval_request_id=approval_request_id,
+            device_id=None,
+            environment=None,
+            action="APPROVAL_REJECTED",
+            tool_name=tool_name,
+            tool_tier="professional",
+            plan_id=plan_id,
+            job_id=None,
+            result="SUCCESS",
+            meta=meta or {},
+            error_message=None,
+        )
+        self.session.add(event)
+        await self.session.commit()
+
+    async def log_plan_execution_started(
+        self,
+        event_id: str,
+        user_id: str,
+        approver_id: str | None,
+        user_sub: str,
+        user_email: str | None,
+        user_role: str,
+        approval_request_id: str | None,
+        plan_id: str,
+        job_id: str,
+        tool_name: str,
+        device_id: str | None = None,
+        environment: str | None = None,
+        meta: dict[str, Any] | None = None,
+    ) -> None:
+        """Log a plan execution started event (Phase 5).
+
+        Args:
+            event_id: Unique event identifier
+            user_id: User ID who initiated execution
+            approver_id: User ID who approved (if applicable)
+            user_sub: Executor's subject from OIDC token
+            user_email: Executor's email
+            user_role: Executor's role
+            approval_request_id: Associated approval request (if applicable)
+            plan_id: ID of the plan being executed
+            job_id: ID of the execution job
+            tool_name: Tool associated with the plan
+            device_id: Target device (if single-device plan)
+            environment: Target environment
+            meta: Additional metadata
+        """
+        from datetime import UTC, datetime
+
+        event = AuditEventORM(
+            id=event_id,
+            timestamp=datetime.now(UTC),
+            user_sub=user_sub,
+            user_email=user_email,
+            user_role=user_role,
+            user_id=user_id,
+            approver_id=approver_id,
+            approval_request_id=approval_request_id,
+            device_id=device_id,
+            environment=environment,
+            action="PLAN_EXECUTION_STARTED",
+            tool_name=tool_name,
+            tool_tier="professional",
+            plan_id=plan_id,
+            job_id=job_id,
+            result="SUCCESS",
+            meta=meta or {},
+            error_message=None,
+        )
+        self.session.add(event)
+        await self.session.commit()
