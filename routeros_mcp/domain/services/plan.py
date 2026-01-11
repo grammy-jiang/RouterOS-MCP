@@ -45,7 +45,12 @@ class PlanService:
     VALID_TRANSITIONS = {
         PlanStatus.PENDING: {PlanStatus.APPROVED, PlanStatus.CANCELLED},
         PlanStatus.APPROVED: {PlanStatus.EXECUTING, PlanStatus.CANCELLED},
-        PlanStatus.EXECUTING: {PlanStatus.COMPLETED, PlanStatus.FAILED, PlanStatus.CANCELLED, PlanStatus.ROLLING_BACK},
+        PlanStatus.EXECUTING: {
+            PlanStatus.COMPLETED,
+            PlanStatus.FAILED,
+            PlanStatus.CANCELLED,
+            PlanStatus.ROLLING_BACK,
+        },
         PlanStatus.ROLLING_BACK: {PlanStatus.ROLLED_BACK},  # Phase 4: Rollback in progress
         PlanStatus.COMPLETED: set(),  # Terminal state
         PlanStatus.FAILED: set(),  # Terminal state
@@ -84,11 +89,9 @@ class PlanService:
         secret_key = self.settings.encryption_key or "INSECURE_LAB_KEY_DO_NOT_USE_IN_PRODUCTION"
 
         # Generate HMAC signature
-        signature = hmac.new(
-            secret_key.encode(),
-            message.encode(),
-            hashlib.sha256
-        ).hexdigest()[:16]  # Take first 16 chars for brevity
+        signature = hmac.new(secret_key.encode(), message.encode(), hashlib.sha256).hexdigest()[
+            :16
+        ]  # Take first 16 chars for brevity
 
         # Return token with random suffix for uniqueness
         random_suffix = secrets.token_urlsafe(8)
@@ -117,9 +120,7 @@ class PlanService:
         message = f"{plan_id}:{created_by}:{token_timestamp}"
         secret_key = self.settings.encryption_key or "INSECURE_LAB_KEY_DO_NOT_USE_IN_PRODUCTION"
         expected_signature = hmac.new(
-            secret_key.encode(),
-            message.encode(),
-            hashlib.sha256
+            secret_key.encode(), message.encode(), hashlib.sha256
         ).hexdigest()[:16]
 
         # Extract signature from token
@@ -218,19 +219,23 @@ class PlanService:
             # Check 1: Professional workflows capability
             if not device.allow_professional_workflows:
                 device_result["status"] = "failed"
-                device_result["checks"].append({
-                    "check": "professional_workflows_enabled",
-                    "status": "failed",
-                    "message": f"Device {device.id} does not allow professional workflows",
-                })
+                device_result["checks"].append(
+                    {
+                        "check": "professional_workflows_enabled",
+                        "status": "failed",
+                        "message": f"Device {device.id} does not allow professional workflows",
+                    }
+                )
                 pre_check_results["status"] = "failed"
 
             # Check 2: Environment restrictions for high-risk operations
             if risk_level == "high" and device.environment == "prod":
-                device_result["warnings"].append({
-                    "check": "environment_restriction",
-                    "message": f"High-risk operation on production device {device.id} - proceed with extreme caution",
-                })
+                device_result["warnings"].append(
+                    {
+                        "check": "environment_restriction",
+                        "message": f"High-risk operation on production device {device.id} - proceed with extreme caution",
+                    }
+                )
                 pre_check_results["warnings"].append(
                     f"High-risk operation on production device {device.id}"
                 )
@@ -238,19 +243,23 @@ class PlanService:
             # Check 3: Device reachability
             if device.status in ["unreachable", "decommissioned"]:
                 device_result["status"] = "failed"
-                device_result["checks"].append({
-                    "check": "device_reachable",
-                    "status": "failed",
-                    "message": f"Device {device.id} is {device.status}",
-                })
+                device_result["checks"].append(
+                    {
+                        "check": "device_reachable",
+                        "status": "failed",
+                        "message": f"Device {device.id} is {device.status}",
+                    }
+                )
                 pre_check_results["status"] = "failed"
 
             # Check 4: Device health status
             if device.status == "degraded":
-                device_result["warnings"].append({
-                    "check": "device_health",
-                    "message": f"Device {device.id} is in degraded state",
-                })
+                device_result["warnings"].append(
+                    {
+                        "check": "device_health",
+                        "message": f"Device {device.id} is in degraded state",
+                    }
+                )
                 pre_check_results["warnings"].append(f"Device {device.id} is degraded")
 
             pre_check_results["device_checks"][device.id] = device_result
@@ -258,12 +267,11 @@ class PlanService:
         # Fail if any critical checks failed
         if pre_check_results["status"] == "failed":
             failed_devices = [
-                dev_id for dev_id, result in pre_check_results["device_checks"].items()
+                dev_id
+                for dev_id, result in pre_check_results["device_checks"].items()
                 if result["status"] == "failed"
             ]
-            raise ValueError(
-                f"Pre-checks failed for devices: {', '.join(failed_devices)}."
-            )
+            raise ValueError(f"Pre-checks failed for devices: {', '.join(failed_devices)}.")
 
         return pre_check_results
 
@@ -382,7 +390,9 @@ class PlanService:
                 )
                 await self.session.commit()
             except Exception as audit_error:
-                logger.warning(f"Failed to log audit event for plan creation failure: {audit_error}")
+                logger.warning(
+                    f"Failed to log audit event for plan creation failure: {audit_error}"
+                )
             raise
 
     async def create_multi_device_plan(
@@ -433,9 +443,7 @@ class PlanService:
             # Enforce a reasonable maximum batch size relative to the plan size
             max_batch_size = min(50, len(device_ids))
             if batch_size > max_batch_size:
-                raise ValueError(
-                    f"batch_size must not exceed {max_batch_size} for this plan"
-                )
+                raise ValueError(f"batch_size must not exceed {max_batch_size} for this plan")
 
             # Validate pause between batches is non-negative
             if pause_seconds_between_batches < 0:
@@ -457,12 +465,14 @@ class PlanService:
             # Calculate batches
             batches: list[dict[str, Any]] = []
             for i in range(0, len(device_ids), batch_size):
-                batch_devices = device_ids[i:i + batch_size]
-                batches.append({
-                    "batch_number": len(batches) + 1,
-                    "device_ids": batch_devices,
-                    "device_count": len(batch_devices),
-                })
+                batch_devices = device_ids[i : i + batch_size]
+                batches.append(
+                    {
+                        "batch_number": len(batches) + 1,
+                        "device_ids": batch_devices,
+                        "device_count": len(batch_devices),
+                    }
+                )
 
             # Generate plan ID and approval token
             plan_id = f"plan-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
@@ -572,7 +582,9 @@ class PlanService:
                 )
                 await self.session.commit()
             except Exception as audit_error:
-                logger.warning(f"Failed to log audit event for plan creation failure: {audit_error}")
+                logger.warning(
+                    f"Failed to log audit event for plan creation failure: {audit_error}"
+                )
             raise
 
     async def _validate_devices(self, device_ids: list[str]) -> list[DeviceModel]:
@@ -657,7 +669,12 @@ class PlanService:
         }
 
     def validate_approval_token(
-        self, plan_id: str, created_by: str, approval_token: str, expires_at: datetime, token_timestamp: str
+        self,
+        plan_id: str,
+        created_by: str,
+        approval_token: str,
+        expires_at: datetime,
+        token_timestamp: str,
     ) -> None:
         """Validate approval token signature and expiration (public interface).
 
@@ -671,7 +688,9 @@ class PlanService:
         Raises:
             ValueError: If token is invalid or expired
         """
-        self._validate_approval_token(plan_id, created_by, approval_token, expires_at, token_timestamp)
+        self._validate_approval_token(
+            plan_id, created_by, approval_token, expires_at, token_timestamp
+        )
 
     async def approve_plan(
         self, plan_id: str, approval_token: str, approved_by: str
@@ -704,9 +723,7 @@ class PlanService:
 
             # Validate state transition
             if PlanStatus.APPROVED not in self.VALID_TRANSITIONS.get(current_status, set()):
-                raise ValueError(
-                    f"Plan {plan_id} cannot be approved from status {plan.status}"
-                )
+                raise ValueError(f"Plan {plan_id} cannot be approved from status {plan.status}")
 
             # Validate approval token signature and expiration
             # We rely solely on HMAC validation rather than exact token comparison
@@ -762,7 +779,9 @@ class PlanService:
                 )
                 await self.session.commit()
             except Exception as audit_error:
-                logger.warning(f"Failed to log audit event for plan approval failure: {audit_error}")
+                logger.warning(
+                    f"Failed to log audit event for plan approval failure: {audit_error}"
+                )
             raise
 
     async def update_plan_status(
@@ -779,6 +798,7 @@ class PlanService:
             ValueError: If plan not found or invalid status transition
         """
         try:
+
             def normalize_status(status_value: str) -> PlanStatus:
                 """Normalize legacy statuses to current enum values."""
                 legacy_aliases = {
@@ -850,7 +870,9 @@ class PlanService:
                 )
                 await self.session.commit()
             except Exception as audit_error:
-                logger.warning(f"Failed to log audit event for plan status update failure: {audit_error}")
+                logger.warning(
+                    f"Failed to log audit event for plan status update failure: {audit_error}"
+                )
             raise
 
     async def rollback_plan(
@@ -901,9 +923,7 @@ class PlanService:
             # Validate state transition
             current_status = PlanStatus(plan.status)
             if PlanStatus.ROLLING_BACK not in self.VALID_TRANSITIONS.get(current_status, set()):
-                raise ValueError(
-                    f"Plan {plan_id} cannot be rolled back from status {plan.status}"
-                )
+                raise ValueError(f"Plan {plan_id} cannot be rolled back from status {plan.status}")
 
             # Update plan status to rolling_back
             plan.status = PlanStatus.ROLLING_BACK.value
@@ -1042,7 +1062,11 @@ class PlanService:
 
                             logger.info(
                                 f"Successfully rolled back device {device_id}",
-                                extra={"plan_id": plan_id, "device_id": device_id, "attempt": attempt},
+                                extra={
+                                    "plan_id": plan_id,
+                                    "device_id": device_id,
+                                    "attempt": attempt,
+                                },
                             )
                             break
 
@@ -1084,7 +1108,8 @@ class PlanService:
                             else:
                                 # Exponential backoff: wait 2^attempt seconds before retry
                                 import asyncio
-                                backoff_delay = 2 ** attempt
+
+                                backoff_delay = 2**attempt
                                 logger.info(
                                     f"Waiting {backoff_delay}s before retry {attempt + 1}",
                                     extra={"plan_id": plan_id, "device_id": device_id},
@@ -1171,7 +1196,7 @@ class PlanService:
                 await self.session.rollback()
             except Exception as rollback_error:
                 logger.warning(f"Failed to rollback session: {rollback_error}")
-            
+
             # Log failed rollback audit event (best effort - don't mask original error)
             try:
                 self._log_audit_event(

@@ -215,9 +215,7 @@ class TestDeviceServiceScoping:
 
         # User has access to both lab and staging, but filter by lab
         allowed_ids = ["dev-lab-001", "dev-lab-002", "dev-staging-001"]
-        devices = await service.list_devices(
-            environment="lab", allowed_device_ids=allowed_ids
-        )
+        devices = await service.list_devices(environment="lab", allowed_device_ids=allowed_ids)
 
         assert len(devices) == 2
         device_ids = [d.id for d in devices]
@@ -500,9 +498,7 @@ class TestCrossUserIsolation:
         assert devices[0].id == "dev-lab-001"
 
     @pytest.mark.asyncio
-    async def test_admin_can_access_all_devices(
-        self, db_session, test_devices, test_users
-    ) -> None:
+    async def test_admin_can_access_all_devices(self, db_session, test_devices, test_users) -> None:
         """Test that admin with empty scope can access all devices."""
         settings = Settings(environment="lab")
         service = DeviceService(db_session, settings)
