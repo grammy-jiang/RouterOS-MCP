@@ -341,6 +341,64 @@ class Settings(BaseSettings):
     )
 
     # ========================================
+    # Notification Configuration (Phase 5 #9)
+    # ========================================
+
+    notification_enabled: bool = Field(
+        default=False,
+        description="Enable email notifications for approval requests and job execution",
+    )
+
+    notification_backend: Literal["smtp", "mock"] = Field(
+        default="mock",
+        description="Notification backend: smtp (production) or mock (development/testing)",
+    )
+
+    notification_from_address: str = Field(
+        default="routeros-mcp@example.com",
+        description="Email address used as sender for notifications",
+    )
+
+    notification_smtp_host: str = Field(
+        default="localhost",
+        description="SMTP server hostname",
+    )
+
+    notification_smtp_port: int = Field(
+        default=587,
+        ge=1,
+        le=65535,
+        description="SMTP server port (587 for STARTTLS, 465 for SSL)",
+    )
+
+    notification_smtp_use_tls: bool = Field(
+        default=True,
+        description="Use STARTTLS for SMTP connection",
+    )
+
+    notification_smtp_username: str | None = Field(
+        default=None,
+        description="SMTP authentication username",
+    )
+
+    notification_smtp_password: str | None = Field(
+        default=None,
+        description="SMTP authentication password",
+    )
+
+    notification_smtp_timeout: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=60.0,
+        description="SMTP connection timeout in seconds",
+    )
+
+    notification_base_url: str | None = Field(
+        default=None,
+        description="Base URL for web UI links in notification emails (e.g., https://routeros-mcp.example.com)",
+    )
+
+    # ========================================
     # Validators
     # ========================================
 
@@ -464,6 +522,22 @@ class Settings(BaseSettings):
 
         return self
 
+    @model_validator(mode="after")
+    def validate_notification_config(self) -> "Settings":
+        """Validate notification configuration if enabled."""
+        if (
+            self.notification_enabled
+            and self.notification_backend == "smtp"
+            and self.environment in ["staging", "prod"]
+            and (not self.notification_smtp_username or not self.notification_smtp_password)
+        ):
+            warnings.warn(
+                f"SMTP authentication credentials not set in {self.environment} environment",
+                UserWarning,
+                stacklevel=2,
+            )
+        return self
+
     # ========================================
     # Helper Methods
     # ========================================
@@ -506,6 +580,8 @@ class Settings(BaseSettings):
             data["encryption_key"] = "***REDACTED***"
         if data.get("oidc_client_secret"):
             data["oidc_client_secret"] = "***REDACTED***"
+        if data.get("notification_smtp_password"):
+            data["notification_smtp_password"] = "***REDACTED***"
         return data
 
 

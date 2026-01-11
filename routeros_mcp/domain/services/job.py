@@ -12,13 +12,16 @@ import logging
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from routeros_mcp.infra.db.models import Job as JobModel
 from routeros_mcp.infra.db.models import Plan as PlanModel
+
+if TYPE_CHECKING:
+    from routeros_mcp.domain.services.notification import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -36,13 +39,19 @@ class JobService:
     operations.
     """
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        notification_service: "NotificationService | None" = None,
+    ) -> None:
         """Initialize job service.
 
         Args:
             session: Database session
+            notification_service: Optional notification service for sending emails
         """
         self.session = session
+        self.notification_service = notification_service
 
     async def _handle_cancellation(
         self,
@@ -54,7 +63,7 @@ class JobService:
         batches_completed: int,
     ) -> dict[str, Any] | None:
         """Handle job cancellation if requested.
-        
+
         Args:
             job: Job model instance
             batch_idx: Current batch index (0-based, indicates batch about to be processed)
@@ -62,7 +71,7 @@ class JobService:
             device_ids: All device IDs for the job
             results: Current results dictionary
             batches_completed: Number of batches actually completed so far
-            
+
         Returns:
             Results dictionary if cancelled, None otherwise
         """
@@ -74,7 +83,7 @@ class JobService:
             )
             job.status = "cancelled"
             devices_processed = sum(len(batches[i]) for i in range(batches_completed))
-            
+
             # Distinguish between "cancelled before starting" vs "cancelled after partial completion"
             if batches_completed == 0 and not results.get("device_results"):
                 job.result_summary = (
@@ -86,9 +95,9 @@ class JobService:
                     f"Cancelled after processing {devices_processed}/{len(device_ids)} devices "
                     f"in {batches_completed}/{len(batches)} batches"
                 )
-            
+
             await self.session.commit()
-            
+
             results["status"] = "cancelled"
             results["devices_processed"] = devices_processed
             return results
@@ -213,9 +222,7 @@ class JobService:
 
         # Execute in batches
         device_ids = job.device_ids
-        batches = [
-            device_ids[i : i + batch_size] for i in range(0, len(device_ids), batch_size)
-        ]
+        batches = [device_ids[i : i + batch_size] for i in range(0, len(device_ids), batch_size)]
 
         results: dict[str, Any] = {
             "job_id": job_id,
@@ -247,9 +254,7 @@ class JobService:
 
                 # Execute batch
                 try:
-                    batch_results = await executor(
-                        job_id, batch_device_ids, executor_context or {}
-                    )
+                    batch_results = await executor(job_id, batch_device_ids, executor_context or {})
                     results["device_results"].update(batch_results.get("devices", {}))
                 except Exception as e:
                     error_msg = f"Batch {batch_idx + 1} failed: {str(e)}"
@@ -269,8 +274,12 @@ class JobService:
                 # Check for cancellation after batch completion
                 # Pass batch_idx + 1 and the updated batches_completed count
                 cancellation_result = await self._handle_cancellation(
-                    job, batch_idx + 1, batches, device_ids, results, 
-                    batches_completed=results["batches_completed"]
+                    job,
+                    batch_idx + 1,
+                    batches,
+                    device_ids,
+                    results,
+                    batches_completed=results["batches_completed"],
                 )
                 if cancellation_result:
                     return cancellation_result
@@ -297,6 +306,23 @@ class JobService:
                 },
             )
 
+            # Send notification if service is available
+            if self.notification_service and job.created_by:
+                logger.info(
+                    f"Sending job completion notification for {job_id}",
+                    extra={"job_id": job_id, "user": job.created_by},
+                )
+                # Note: In production, we would look up user email from user service
+                # Using @placeholder.invalid to ensure no accidental email delivery
+                await self.notification_service.send_job_executed(
+                    to_address=f"{job.created_by}@placeholder.invalid",
+                    job_id=job_id,
+                    plan_id=job.plan_id,
+                    job_type=job.job_type,
+                    status="completed",
+                    result_summary=job.result_summary or "No summary available",
+                )
+
         except Exception as e:
             # Job failed
             job.status = "failed"
@@ -308,6 +334,23 @@ class JobService:
                 extra={"job_id": job_id},
                 exc_info=True,
             )
+
+            # Send notification if service is available
+            if self.notification_service and job.created_by:
+                logger.info(
+                    f"Sending job failure notification for {job_id}",
+                    extra={"job_id": job_id, "user": job.created_by},
+                )
+                # Note: In production, we would look up user email from user service
+                # Using @placeholder.invalid to ensure no accidental email delivery
+                await self.notification_service.send_job_executed(
+                    to_address=f"{job.created_by}@placeholder.invalid",
+                    job_id=job_id,
+                    plan_id=job.plan_id,
+                    job_type=job.job_type,
+                    status="failed",
+                    result_summary=str(e),
+                )
 
             results["status"] = "failed"
             results["error"] = str(e)
@@ -351,53 +394,51 @@ class JobService:
 
     async def request_cancellation(self, job_id: str) -> dict[str, Any]:
         """Request cancellation of a running job.
-        
+
         Sets the cancellation_requested flag to True. The job execution
         loop will check this flag after each batch and gracefully stop,
         finishing the current batch before transitioning to cancelled state.
-        
+
         Args:
             job_id: Job identifier
-            
+
         Returns:
             Updated job details
-            
+
         Raises:
             ValueError: If job not found or not in a cancellable state
         """
         stmt = select(JobModel).where(JobModel.id == job_id)
         result = await self.session.execute(stmt)
         job = result.scalar_one_or_none()
-        
+
         if not job:
             raise ValueError(f"Job not found: {job_id}")
-        
+
         if job.status not in ["pending", "running"]:
             raise ValueError(
                 f"Job {job_id} cannot be cancelled (status: {job.status}). "
                 "Only pending or running jobs can be cancelled."
             )
-        
+
         if job.cancellation_requested:
             logger.info(
                 f"Cancellation already requested for job {job_id}",
                 extra={"job_id": job_id},
             )
             return await self.get_job(job_id)
-        
+
         job.cancellation_requested = True
         await self.session.commit()
-        
+
         logger.info(
             f"Cancellation requested for job {job_id}",
             extra={"job_id": job_id, "status": job.status},
         )
-        
+
         return await self.get_job(job_id)
 
-    async def schedule_retry(
-        self, job_id: str, delay_seconds: int = 60
-    ) -> dict[str, Any]:
+    async def schedule_retry(self, job_id: str, delay_seconds: int = 60) -> dict[str, Any]:
         """Schedule a job for retry.
 
         Args:
