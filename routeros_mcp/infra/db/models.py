@@ -787,7 +787,6 @@ class Role(Base):
         String(64),
         nullable=False,
         unique=True,
-        index=True,
         comment="Role name (read_only, ops_rw, admin, approver)",
     )
 
@@ -836,21 +835,18 @@ class Permission(Base):
     resource_type: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        index=True,
         comment="Resource type (device, plan, tool, etc.)",
     )
 
     resource_id: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
-        index=True,
         comment="Resource ID or wildcard (*)",
     )
 
     action: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        index=True,
         comment="Allowed action (read, write, execute, approve, etc.)",
     )
 
