@@ -9,6 +9,7 @@ See issue grammy-jiang/RouterOS-MCP#3 (Phase 5).
 
 from routeros_mcp.infra.session.store import (
     RedisSessionStore,
+    SessionData,
     SessionStore,
     SessionStoreError,
 )
@@ -17,4 +18,5 @@ __all__ = [
     "SessionStore",
     "RedisSessionStore",
     "SessionStoreError",
+    "SessionData",
 ]

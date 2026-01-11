@@ -52,6 +52,9 @@ class TestRedisSessionStore:
             timeout_seconds=3.0,
             key_prefix="test:",
         )
+            timeout_seconds=3.0,
+            key_prefix="test:",
+        )
 
     @pytest.mark.asyncio
     async def test_init_creates_connection(self, store: RedisSessionStore) -> None:
@@ -120,21 +123,18 @@ class TestRedisSessionStore:
     async def test_get_session_success(
         self, store: RedisSessionStore, mock_redis_client: AsyncMock
     ) -> None:
-        """get() should retrieve session data and refresh TTL atomically using GETEX."""
+        """get() should retrieve session data and refresh TTL."""
         store._client = mock_redis_client
 
-        session_data: SessionData = {
-            "user_id": "123",
-            "email": "user@example.com",
-            "role": "admin",
-        }
-        mock_redis_client.getex.return_value = json.dumps(session_data)
+        session_data = {"user_id": "123", "email": "user@example.com"}
+        mock_redis_client.get.return_value = json.dumps(session_data)
+        mock_redis_client.expire.return_value = 1
 
         result = await store.get("session-abc")
 
         assert result == session_data
-        # Verify GETEX was called with EX parameter for atomic TTL refresh
-        mock_redis_client.getex.assert_called_once_with("test:session-abc", ex=SESSION_TTL_SECONDS)
+        mock_redis_client.get.assert_called_once_with("test:session-abc")
+        mock_redis_client.expire.assert_called_once_with("test:session-abc", SESSION_TTL_SECONDS)
 
     @pytest.mark.asyncio
     async def test_get_session_not_found(
@@ -142,12 +142,14 @@ class TestRedisSessionStore:
     ) -> None:
         """get() should return None if session not found."""
         store._client = mock_redis_client
-        mock_redis_client.getex.return_value = None
+        mock_redis_client.get.return_value = None
 
         result = await store.get("nonexistent")
 
         assert result is None
-        mock_redis_client.getex.assert_called_once()
+        mock_redis_client.get.assert_called_once_with("test:nonexistent")
+        # TTL should not be refreshed for non-existent session
+        mock_redis_client.expire.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_get_session_redis_error(
@@ -155,7 +157,7 @@ class TestRedisSessionStore:
     ) -> None:
         """get() should raise SessionStoreError on Redis error."""
         store._client = mock_redis_client
-        mock_redis_client.getex.side_effect = RedisError("Connection timeout")
+        mock_redis_client.get.side_effect = RedisError("Connection timeout")
 
         with pytest.raises(SessionStoreError, match="Failed to retrieve session"):
             await store.get("session-abc")
@@ -173,7 +175,7 @@ class TestRedisSessionStore:
         """set() should store session data with TTL."""
         store._client = mock_redis_client
 
-        session_data: SessionData = {"user_id": "456", "role": "admin"}  # type: ignore[typeddict-item]
+        session_data = {"user_id": "456", "role": "admin"}
         await store.set("session-xyz", session_data)
 
         mock_redis_client.setex.assert_called_once_with(
@@ -187,7 +189,7 @@ class TestRedisSessionStore:
         """set() should support custom TTL override."""
         store._client = mock_redis_client
 
-        session_data: SessionData = {"user_id": "temp"}  # type: ignore[typeddict-item]
+        session_data = {"temp": "data"}
         custom_ttl = 3600  # 1 hour
 
         await store.set("session-temp", session_data, ttl_seconds=custom_ttl)
@@ -205,7 +207,7 @@ class TestRedisSessionStore:
         mock_redis_client.setex.side_effect = RedisError("Write failed")
 
         with pytest.raises(SessionStoreError, match="Failed to store session"):
-            await store.set("session-abc", {"user_id": "123"})  # type: ignore[typeddict-item]
+            await store.set("session-abc", {"data": "value"})
 
     @pytest.mark.asyncio
     async def test_delete_session_success(
@@ -326,22 +328,22 @@ class TestRedisSessionStore:
         """Simulate concurrent access to same session (sliding window)."""
         store._client = mock_redis_client
 
-        session_data: SessionData = {"user_id": "789", "email": "test@example.com", "role": "user"}
-        mock_redis_client.getex.return_value = json.dumps(session_data)
+        session_data = {"user_id": "789", "count": 0}
+        mock_redis_client.get.return_value = json.dumps(session_data)
+        mock_redis_client.expire.return_value = 1
 
-        # Simulate 5 concurrent reads (each should refresh TTL atomically via GETEX)
+        # Simulate 5 concurrent reads (each should refresh TTL)
         tasks = [store.get("session-concurrent") for _ in range(5)]
         results = await asyncio.gather(*tasks)
 
         # All reads should succeed
         assert all(r == session_data for r in results)
 
-        # getex() should be called 5 times (atomic get + TTL refresh)
-        assert mock_redis_client.getex.call_count == 5
+        # get() should be called 5 times
+        assert mock_redis_client.get.call_count == 5
 
-        # Verify all calls used atomic GETEX with TTL refresh
-        for call in mock_redis_client.getex.call_args_list:
-            assert call[1]["ex"] == SESSION_TTL_SECONDS
+        # TTL should be refreshed 5 times (sliding window)
+        assert mock_redis_client.expire.call_count == 5
 
     @pytest.mark.asyncio
     async def test_ttl_expiration_behavior(
@@ -351,14 +353,15 @@ class TestRedisSessionStore:
         store._client = mock_redis_client
 
         # First get: session exists
-        session_data: SessionData = {"user_id": "expired", "role": "user"}
-        mock_redis_client.getex.return_value = json.dumps(session_data)
+        session_data = {"user_id": "expired"}
+        mock_redis_client.get.return_value = json.dumps(session_data)
+        mock_redis_client.expire.return_value = 1
 
         result1 = await store.get("session-expire")
         assert result1 == session_data
 
         # Simulate expiration: subsequent get returns None
-        mock_redis_client.getex.return_value = None
+        mock_redis_client.get.return_value = None
 
         result2 = await store.get("session-expire")
         assert result2 is None
@@ -370,7 +373,7 @@ class TestRedisSessionStore:
         """Test that key prefix properly isolates sessions."""
         store._client = mock_redis_client
 
-        session_data: SessionData = {"user_id": "test"}  # type: ignore[typeddict-item]
+        session_data = {"data": "value"}
         await store.set("my-session", session_data)
 
         # Verify the Redis key includes the prefix
@@ -386,12 +389,12 @@ class TestRedisSessionStore:
         store._client = mock_redis_client
 
         # Complex session data with various types
-        complex_data: SessionData = {
+        complex_data: dict[str, Any] = {
             "user_id": "complex-123",
-            "email": "user@example.com",
-            "role": "admin",
-            "device_scope": ["device1", "device2"],
-        }  # type: ignore[typeddict-item]
+            "roles": ["admin", "user"],
+            "metadata": {"login_time": "2025-01-11T00:00:00Z", "ip": "192.168.1.1"},
+            "permissions": {"read": True, "write": False},
+        }
 
         await store.set("session-complex", complex_data)
 
@@ -410,153 +413,10 @@ class TestRedisSessionStore:
     ) -> None:
         """Test handling of corrupted JSON data in Redis."""
         store._client = mock_redis_client
-        mock_redis_client.getex.return_value = "{ invalid json"
+        mock_redis_client.get.return_value = "{ invalid json"
 
         with pytest.raises(SessionStoreError, match="Failed to retrieve session"):
             await store.get("session-corrupt")
-
-    @pytest.mark.asyncio
-    async def test_session_id_validation_empty(self, store: RedisSessionStore) -> None:
-        """Test that empty session IDs are rejected."""
-        with pytest.raises(SessionStoreError, match="Session ID must be non-empty"):
-            store._get_redis_key("")
-
-    @pytest.mark.asyncio
-    async def test_session_id_validation_invalid_chars(self, store: RedisSessionStore) -> None:
-        """Test that session IDs with invalid characters are rejected."""
-        invalid_ids = [
-            "session with spaces",
-            "session:with:colons",
-            "session@with@at",
-            "session/with/slash",
-            "session\\with\\backslash",
-        ]
-
-        for invalid_id in invalid_ids:
-            with pytest.raises(SessionStoreError, match="contains invalid characters"):
-                store._get_redis_key(invalid_id)
-
-    @pytest.mark.asyncio
-    async def test_session_id_validation_valid_chars(self, store: RedisSessionStore) -> None:
-        """Test that session IDs with valid characters are accepted."""
-        valid_ids = [
-            "session-123",
-            "session_456",
-            "SESSION-ABC",
-            "session123ABC",
-            "a1-b2_c3",
-        ]
-
-        for valid_id in valid_ids:
-            # Should not raise
-            key = store._get_redis_key(valid_id)
-            assert key == f"test:{valid_id}"
-
-    @pytest.mark.asyncio
-    async def test_set_not_initialized(self, store: RedisSessionStore) -> None:
-        """Test that set() raises error if store not initialized."""
-        with pytest.raises(SessionStoreError, match="not initialized"):
-            await store.set("session-abc", {"user_id": "123"})
-
-    @pytest.mark.asyncio
-    async def test_delete_not_initialized(self, store: RedisSessionStore) -> None:
-        """Test that delete() raises error if store not initialized."""
-        with pytest.raises(SessionStoreError, match="not initialized"):
-            await store.delete("session-abc")
-
-    @pytest.mark.asyncio
-    async def test_exists_not_initialized(self, store: RedisSessionStore) -> None:
-        """Test that exists() raises error if store not initialized."""
-        with pytest.raises(SessionStoreError, match="not initialized"):
-            await store.exists("session-abc")
-
-    @pytest.mark.asyncio
-    async def test_refresh_ttl_not_initialized(self, store: RedisSessionStore) -> None:
-        """Test that refresh_ttl() raises error if store not initialized."""
-        with pytest.raises(SessionStoreError, match="not initialized"):
-            await store.refresh_ttl("session-abc")
-
-    @pytest.mark.asyncio
-    async def test_concurrent_access_with_writes(
-        self, store: RedisSessionStore, mock_redis_client: AsyncMock
-    ) -> None:
-        """Test concurrent set() and get() operations maintain data consistency."""
-        store._client = mock_redis_client
-
-        # Simulate concurrent writes and reads
-        session_data_1: SessionData = {
-            "user_id": "user1",
-            "email": "user1@example.com",
-            "role": "admin",
-        }
-        session_data_2: SessionData = {
-            "user_id": "user2",
-            "email": "user2@example.com",
-            "role": "user",
-        }
-
-        mock_redis_client.setex = AsyncMock()
-        mock_redis_client.getex = AsyncMock(
-            side_effect=[
-                json.dumps(session_data_1),
-                json.dumps(session_data_2),
-                json.dumps(session_data_1),
-            ]
-        )
-
-        # Execute concurrent operations
-        tasks = [
-            store.set("session-1", session_data_1),
-            store.set("session-2", session_data_2),
-            store.get("session-1"),
-            store.get("session-2"),
-            store.get("session-1"),
-        ]
-
-        await asyncio.gather(*tasks)
-
-        # Verify operations completed
-        assert mock_redis_client.setex.call_count == 2
-        assert mock_redis_client.getex.call_count == 3
-
-    @pytest.mark.asyncio
-    async def test_close_with_client_error(
-        self, store: RedisSessionStore, mock_redis_client: AsyncMock
-    ) -> None:
-        """Test that close() handles client errors gracefully."""
-        mock_pool = MagicMock()
-        mock_pool.aclose = AsyncMock()
-
-        # Make client close raise an error
-        mock_redis_client.aclose = AsyncMock(side_effect=RedisError("Close failed"))
-
-        store._client = mock_redis_client
-        store._pool = mock_pool
-
-        # Should not raise, but should log error
-        await store.close()
-
-        # Both should still be set to None
-        assert store._client is None
-        assert store._pool is None  # type: ignore[unreachable]
-
-    @pytest.mark.asyncio
-    async def test_close_with_pool_error(
-        self, store: RedisSessionStore, mock_redis_client: AsyncMock
-    ) -> None:
-        """Test that close() handles pool errors gracefully."""
-        mock_pool = MagicMock()
-        mock_pool.aclose = AsyncMock(side_effect=RedisError("Pool close failed"))
-
-        store._client = mock_redis_client
-        store._pool = mock_pool
-
-        # Should not raise, but should log error
-        await store.close()
-
-        # Both should still be set to None
-        assert store._client is None
-        assert store._pool is None  # type: ignore[unreachable]
 
 
 class TestSessionStoreIntegration:
@@ -582,17 +442,18 @@ class TestSessionStoreIntegration:
 
             # 1. Create session
             mock_client.setex = AsyncMock()
-            initial_data: SessionData = {"user_id": "alice", "role": "user"}  # type: ignore[typeddict-item]
+            initial_data = {"user": "alice", "step": 1}
             await store.set("session-lifecycle", initial_data)
             assert mock_client.setex.called
 
             # 2. Read session
-            mock_client.getex = AsyncMock(return_value=json.dumps(initial_data))
+            mock_client.get = AsyncMock(return_value=json.dumps(initial_data))
+            mock_client.expire = AsyncMock(return_value=1)
             data = await store.get("session-lifecycle")
             assert data == initial_data
 
             # 3. Update session
-            updated_data: SessionData = {"user_id": "alice", "role": "admin"}  # type: ignore[typeddict-item]
+            updated_data = {"user": "alice", "step": 2}
             await store.set("session-lifecycle", updated_data)
 
             # 4. Delete session
@@ -601,7 +462,7 @@ class TestSessionStoreIntegration:
             assert deleted is True
 
             # 5. Verify deletion
-            mock_client.getex = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(return_value=None)
             data = await store.get("session-lifecycle")
             assert data is None
 
