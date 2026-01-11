@@ -48,6 +48,7 @@ class TestAuthorizationMiddleware:
     def lab_device(self):
         """Create test device in lab environment."""
         from datetime import datetime
+
         return Device(
             id="dev-lab-01",
             name="Lab Device 01",
@@ -66,6 +67,7 @@ class TestAuthorizationMiddleware:
     def prod_device(self):
         """Create test device in prod environment."""
         from datetime import datetime
+
         return Device(
             id="dev-prod-01",
             name="Prod Device 01",
@@ -138,6 +140,7 @@ class TestAuthorizationMiddleware:
 
         # Mock device service creation
         from routeros_mcp.domain.services.device import DeviceService
+
         original_init = DeviceService.__init__
 
         def mock_init(self, session):
@@ -170,6 +173,7 @@ class TestAuthorizationMiddleware:
 
         # Mock device service creation
         from routeros_mcp.domain.services.device import DeviceService
+
         original_init = DeviceService.__init__
 
         def mock_init(self, session):
@@ -203,6 +207,7 @@ class TestAuthorizationMiddleware:
 
         # Mock device service creation
         from routeros_mcp.domain.services.device import DeviceService
+
         original_init = DeviceService.__init__
 
         def mock_init(self, session):
@@ -235,6 +240,7 @@ class TestAuthorizationMiddleware:
 
         # Mock device service creation
         from routeros_mcp.domain.services.device import DeviceService
+
         original_init = DeviceService.__init__
 
         def mock_init(self, session):
@@ -268,6 +274,7 @@ class TestAuthorizationMiddleware:
 
         # Mock device service creation
         from routeros_mcp.domain.services.device import DeviceService
+
         original_init = DeviceService.__init__
 
         def mock_init(self, session):
@@ -316,6 +323,7 @@ class TestAuthorizationMiddleware:
 
         # Mock device service creation
         from routeros_mcp.domain.services.device import DeviceService
+
         original_init = DeviceService.__init__
 
         def mock_init(self, session):
@@ -342,6 +350,7 @@ class TestAuthorizationMiddleware:
         """Test device scope restriction blocks unauthorized devices."""
         # Mock device service with device NOT in scope
         from datetime import datetime
+
         out_of_scope_device = Device(
             id="dev-lab-99",
             name="Lab Device 99",
@@ -363,6 +372,7 @@ class TestAuthorizationMiddleware:
 
         # Mock device service creation
         from routeros_mcp.domain.services.device import DeviceService
+
         original_init = DeviceService.__init__
 
         def mock_init(self, session):
@@ -397,6 +407,7 @@ class TestAuthorizationMiddleware:
 
         # Mock device service creation
         from routeros_mcp.domain.services.device import DeviceService
+
         original_init = DeviceService.__init__
 
         def mock_init(self, session):
@@ -423,6 +434,7 @@ class TestAuthorizationMiddleware:
         """Test device capability flags block tool execution."""
         # Device with professional workflows disabled
         from datetime import datetime
+
         restricted_device = Device(
             id="dev-lab-restricted",
             name="Restricted Lab Device",
@@ -444,6 +456,7 @@ class TestAuthorizationMiddleware:
 
         # Mock device service creation
         from routeros_mcp.domain.services.device import DeviceService
+
         original_init = DeviceService.__init__
 
         def mock_init(self, session):
@@ -470,6 +483,7 @@ class TestAuthorizationMiddleware:
         """Test batch authorization for multiple devices."""
         # Mock device service
         from datetime import datetime
+
         async def get_device_by_id(device_id):
             if device_id in ["dev-lab-01", "dev-lab-02"]:
                 return Device(
@@ -508,6 +522,7 @@ class TestAuthorizationMiddleware:
 
         # Mock device service creation
         from routeros_mcp.domain.services.device import DeviceService
+
         original_init = DeviceService.__init__
 
         def mock_init(self, session):

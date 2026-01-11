@@ -12,7 +12,6 @@ See docs/02-security-oauth-integration-and-access-control.md for design.
 """
 
 import logging
-from typing import Any
 
 from routeros_mcp.config import Settings
 from routeros_mcp.domain.services.device import DeviceService
@@ -99,7 +98,7 @@ class AuthorizationMiddleware:
         # Convert user role string to enum
         try:
             user_role = UserRole(user.role)
-        except ValueError:
+        except ValueError as e:
             logger.error(
                 "Invalid user role",
                 extra={
@@ -112,7 +111,7 @@ class AuthorizationMiddleware:
             raise AuthorizationError(
                 f"Invalid user role '{user.role}'. "
                 f"Valid roles: {', '.join([r.value for r in UserRole])}"
-            )
+            ) from e
 
         # Fetch device from database
         async with self.session_factory.session() as session:

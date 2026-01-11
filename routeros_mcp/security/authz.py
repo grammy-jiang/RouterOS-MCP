@@ -238,20 +238,20 @@ class DeviceScopeError(AuthorizationError):
     pass
 
 
-def get_allowed_tool_tier(user_role: UserRole) -> ToolTier:
+def get_allowed_tool_tier(user_role: UserRole) -> ToolTier | None:
     """Get the maximum allowed tool tier for a user role.
 
     Args:
         user_role: User's role
 
     Returns:
-        Maximum tool tier allowed for the role
+        Maximum tool tier allowed for the role, or None for approver
 
     Example:
         tier = get_allowed_tool_tier(UserRole.OPS_RW)
         # Returns ToolTier.ADVANCED
     """
-    role_tier_map = {
+    role_tier_map: dict[UserRole, ToolTier | None] = {
         UserRole.READ_ONLY: ToolTier.FUNDAMENTAL,
         UserRole.OPS_RW: ToolTier.ADVANCED,
         UserRole.ADMIN: ToolTier.PROFESSIONAL,
@@ -293,7 +293,7 @@ def check_user_role(
         tool_info = f" '{tool_name}'" if tool_name else ""
         raise RoleInsufficientError(
             f"Role 'approver'{user_info} cannot execute tools{tool_info}. "
-            f"Approvers can only approve plans but not execute operations."
+            "Approvers can only approve plans but not execute operations."
         )
 
     # Check if tool tier exceeds user's allowed tier
@@ -348,7 +348,7 @@ def check_device_scope(
     # None or empty list means full access (typically for admins)
     if device_scopes is None or len(device_scopes) == 0:
         logger.debug(
-            f"Device scope check passed: user has full access",
+            "Device scope check passed: user has full access",
             extra={"user_sub": user_sub, "device_id": device_id},
         )
         return
@@ -364,7 +364,7 @@ def check_device_scope(
         )
 
     logger.debug(
-        f"Device scope check passed: device in user's scope",
+        "Device scope check passed: device in user's scope",
         extra={
             "user_sub": user_sub,
             "device_id": device_id,
@@ -444,7 +444,7 @@ def check_comprehensive_authorization(
     )
 
     logger.info(
-        f"Comprehensive authorization check passed",
+        "Comprehensive authorization check passed",
         extra={
             "user_sub": user_sub,
             "user_role": user_role.value,
