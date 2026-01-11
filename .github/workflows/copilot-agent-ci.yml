@@ -39,7 +39,7 @@ jobs:
       - name: Set up Python 3.11 with uv
         run: |
           uv python install 3.11
-          uv sync --dev
+          uv sync --extra dev
 
       - name: Check code formatting with black
         run: |
@@ -92,11 +92,13 @@ jobs:
       - name: Set up Python ${{ matrix.python-version }} with uv
         run: |
           uv python install ${{ matrix.python-version }}
-          uv sync --dev
+          uv sync --extra dev
 
       - name: Initialize database
         run: |
-          uv run alembic upgrade head || echo "Database migration skipped (in-memory SQLite)"
+          # Unit tests use in-memory SQLite and create schema via ORM
+          # Skip migrations as they expect a persistent database
+          echo "Database migrations skipped for in-memory SQLite (tests use ORM to create schema)"
         env:
           ROUTEROS_MCP_DATABASE_URL: "sqlite+aiosqlite:///:memory:"
 
@@ -166,7 +168,7 @@ jobs:
       - name: Set up Python 3.11 with uv
         run: |
           uv python install 3.11
-          uv sync --dev
+          uv sync --extra dev
           uv pip install bandit[toml] safety
 
       - name: Run bandit security scan

@@ -42,13 +42,14 @@ jobs:
       - name: Set up Python with uv and sync deps
         run: |
           uv python install 3.11
-          uv sync --dev
+          uv sync --extra dev
 
       # Initialize database schema for tests (uses in-memory SQLite for unit tests)
       - name: Initialize database
         run: |
-          # Unit tests use in-memory SQLite, but initialize for e2e tests if needed
-          uv run alembic upgrade head || echo "Database migration skipped (in-memory SQLite)"
+          # Unit tests use in-memory SQLite and create schema via ORM
+          # Skip migrations as they expect a persistent database
+          echo "Database migrations skipped for in-memory SQLite (tests use ORM to create schema)"
         env:
           # Use SQLite for testing - overrides any config file
           ROUTEROS_MCP_DATABASE_URL: "sqlite+aiosqlite:///:memory:"

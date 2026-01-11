@@ -42,7 +42,7 @@ jobs:
       - name: Set up Python with uv and sync deps
         run: |
           uv python install 3.11
-          uv sync --dev
+          uv sync --extra dev
       
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
