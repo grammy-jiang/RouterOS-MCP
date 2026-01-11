@@ -20,6 +20,14 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+# Module-level constant for tool tier hierarchy
+# Used for comparing tool tier levels in authorization checks
+_TIER_HIERARCHY = {
+    "fundamental": 1,
+    "advanced": 2,
+    "professional": 3,
+}
+
 
 class ToolTier(str, Enum):
     """MCP tool tier classification.
@@ -247,6 +255,9 @@ def get_allowed_tool_tier(user_role: UserRole) -> ToolTier | None:
     Returns:
         Maximum tool tier allowed for the role, or None for approver
 
+    Raises:
+        ValueError: If user_role is not a valid UserRole enum value
+
     Example:
         tier = get_allowed_tool_tier(UserRole.OPS_RW)
         # Returns ToolTier.ADVANCED
@@ -257,7 +268,15 @@ def get_allowed_tool_tier(user_role: UserRole) -> ToolTier | None:
         UserRole.ADMIN: ToolTier.PROFESSIONAL,
         UserRole.APPROVER: None,  # Approvers cannot execute tools
     }
-    return role_tier_map.get(user_role)
+
+    # Explicitly handle unknown roles with a clear error
+    if user_role not in role_tier_map:
+        raise ValueError(
+            f"Unknown user role: {user_role}. "
+            f"Valid roles: {', '.join([r.value for r in UserRole])}"
+        )
+
+    return role_tier_map[user_role]
 
 
 def check_user_role(
@@ -296,20 +315,14 @@ def check_user_role(
             "Approvers can only approve plans but not execute operations."
         )
 
-    # Check if tool tier exceeds user's allowed tier
-    tier_hierarchy = {
-        ToolTier.FUNDAMENTAL: 1,
-        ToolTier.ADVANCED: 2,
-        ToolTier.PROFESSIONAL: 3,
-    }
-
-    if tier_hierarchy[tool_tier] > tier_hierarchy[allowed_tier]:
+    # Check if tool tier exceeds user's allowed tier using module-level constant
+    if _TIER_HIERARCHY[tool_tier.value] > _TIER_HIERARCHY[allowed_tier.value]:
         user_info = f" (user: {user_sub})" if user_sub else ""
         tool_info = f" '{tool_name}'" if tool_name else ""
         raise RoleInsufficientError(
             f"Role '{user_role.value}'{user_info} cannot execute {tool_tier.value} tier tools{tool_info}. "
             f"Maximum allowed tier is {allowed_tier.value}. "
-            f"Contact an administrator to request elevated privileges."
+            "Contact an administrator to request elevated privileges."
         )
 
     logger.debug(

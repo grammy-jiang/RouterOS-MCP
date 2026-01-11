@@ -8,12 +8,9 @@ from routeros_mcp.config import Settings
 from routeros_mcp.domain.models import Device
 from routeros_mcp.infra.db.session import DatabaseSessionManager
 from routeros_mcp.mcp.middleware.auth import AuthorizationMiddleware
+from routeros_mcp.mcp.errors import AuthorizationError as MCPAuthorizationError
 from routeros_mcp.security.auth import User
 from routeros_mcp.security.authz import (
-    CapabilityDeniedError,
-    DeviceScopeError,
-    EnvironmentMismatchError,
-    RoleInsufficientError,
     ToolTier,
 )
 
@@ -80,6 +77,29 @@ class TestAuthorizationMiddleware:
     def middleware(self, mock_session_factory, settings):
         """Create authorization middleware instance."""
         return AuthorizationMiddleware(mock_session_factory, settings)
+
+    def setup_device_service_mock(self, mock_session_factory, device):
+        """Helper to set up device service mock with proper session handling.
+
+        Args:
+            mock_session_factory: Mock session factory fixture
+            device: Device instance to return from get_device
+
+        Returns:
+            Context manager for patching DeviceService
+        """
+        mock_session = MagicMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock()
+        mock_session_factory.session.return_value = mock_session
+
+        mock_device_service = MagicMock()
+        mock_device_service.get_device = AsyncMock(return_value=device)
+
+        return patch(
+            "routeros_mcp.mcp.middleware.auth.DeviceService",
+            return_value=mock_device_service,
+        )
 
     @pytest.fixture
     def lab_device(self):
@@ -191,14 +211,14 @@ class TestAuthorizationMiddleware:
 
         original_init = DeviceService.__init__
 
-        def mock_init(self, session):
+        def mock_init(self, session, settings=None):
             self.get_device = mock_device_service.get_device
 
         DeviceService.__init__ = mock_init
 
         try:
             # Should raise RoleInsufficientError
-            with pytest.raises(RoleInsufficientError, match="read_only.*cannot execute advanced"):
+            with pytest.raises(MCPAuthorizationError, match="read_only.*cannot execute advanced"):
                 await middleware.check_authorization(
                     user=read_only_user,
                     tool_name="dns/update-servers",
@@ -225,7 +245,7 @@ class TestAuthorizationMiddleware:
 
         original_init = DeviceService.__init__
 
-        def mock_init(self, session):
+        def mock_init(self, session, settings=None):
             self.get_device = mock_device_service.get_device
 
         DeviceService.__init__ = mock_init
@@ -258,14 +278,14 @@ class TestAuthorizationMiddleware:
 
         original_init = DeviceService.__init__
 
-        def mock_init(self, session):
+        def mock_init(self, session, settings=None):
             self.get_device = mock_device_service.get_device
 
         DeviceService.__init__ = mock_init
 
         try:
             # Should raise RoleInsufficientError
-            with pytest.raises(RoleInsufficientError, match="ops_rw.*cannot execute professional"):
+            with pytest.raises(MCPAuthorizationError, match="ops_rw.*cannot execute professional"):
                 await middleware.check_authorization(
                     user=ops_rw_user,
                     tool_name="plan/apply",
@@ -292,7 +312,7 @@ class TestAuthorizationMiddleware:
 
         original_init = DeviceService.__init__
 
-        def mock_init(self, session):
+        def mock_init(self, session, settings=None):
             self.get_device = mock_device_service.get_device
 
         DeviceService.__init__ = mock_init
@@ -341,14 +361,14 @@ class TestAuthorizationMiddleware:
 
         original_init = DeviceService.__init__
 
-        def mock_init(self, session):
+        def mock_init(self, session, settings=None):
             self.get_device = mock_device_service.get_device
 
         DeviceService.__init__ = mock_init
 
         try:
             # Should raise RoleInsufficientError for fundamental tier
-            with pytest.raises(RoleInsufficientError, match="approver.*cannot execute tools"):
+            with pytest.raises(MCPAuthorizationError, match="approver.*cannot execute tools"):
                 await middleware.check_authorization(
                     user=approver_user,
                     tool_name="device/list",
@@ -380,14 +400,14 @@ class TestAuthorizationMiddleware:
 
         original_init = DeviceService.__init__
 
-        def mock_init(self, session):
+        def mock_init(self, session, settings=None):
             self.get_device = mock_device_service.get_device
 
         DeviceService.__init__ = mock_init
 
         try:
-            # Should raise DeviceScopeError
-            with pytest.raises(DeviceScopeError, match="not in allowed scope"):
+            # Should raise MCPAuthorizationError (originally DeviceScopeError)
+            with pytest.raises(MCPAuthorizationError, match="not in allowed scope"):
                 await middleware.check_authorization(
                     user=ops_rw_user,
                     tool_name="dns/update-servers",
@@ -415,14 +435,14 @@ class TestAuthorizationMiddleware:
 
         original_init = DeviceService.__init__
 
-        def mock_init(self, session):
+        def mock_init(self, session, settings=None):
             self.get_device = mock_device_service.get_device
 
         DeviceService.__init__ = mock_init
 
         try:
             # Should raise EnvironmentMismatchError
-            with pytest.raises(EnvironmentMismatchError, match="Environment mismatch"):
+            with pytest.raises(MCPAuthorizationError, match="Environment mismatch"):
                 await middleware.check_authorization(
                     user=admin_user,
                     tool_name="device/list",
@@ -455,14 +475,14 @@ class TestAuthorizationMiddleware:
 
         original_init = DeviceService.__init__
 
-        def mock_init(self, session):
+        def mock_init(self, session, settings=None):
             self.get_device = mock_device_service.get_device
 
         DeviceService.__init__ = mock_init
 
         try:
             # Should raise CapabilityDeniedError
-            with pytest.raises(CapabilityDeniedError, match="allow_professional_workflows"):
+            with pytest.raises(MCPAuthorizationError, match="allow_professional_workflows"):
                 await middleware.check_authorization(
                     user=admin_user,
                     tool_name="plan/apply",
@@ -509,7 +529,7 @@ class TestAuthorizationMiddleware:
 
         original_init = DeviceService.__init__
 
-        def mock_init(self, session):
+        def mock_init(self, session, settings=None):
             self.get_device = mock_device_service.get_device
 
         DeviceService.__init__ = mock_init

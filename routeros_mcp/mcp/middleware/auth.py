@@ -16,9 +16,12 @@ import logging
 from routeros_mcp.config import Settings
 from routeros_mcp.domain.services.device import DeviceService
 from routeros_mcp.infra.db.session import DatabaseSessionManager
+from routeros_mcp.mcp.errors import (
+    AuthorizationError as MCPAuthorizationError,
+    DeviceNotFoundError,
+)
 from routeros_mcp.security.auth import User
 from routeros_mcp.security.authz import (
-    AuthorizationError,
     CapabilityDeniedError,
     DeviceScopeError,
     EnvironmentMismatchError,
@@ -108,15 +111,31 @@ class AuthorizationMiddleware:
                     "device_id": device_id,
                 },
             )
-            raise AuthorizationError(
+            raise MCPAuthorizationError(
                 f"Invalid user role '{user.role}'. "
                 f"Valid roles: {', '.join([r.value for r in UserRole])}"
             ) from e
 
         # Fetch device from database
-        async with self.session_factory.session() as session:
-            device_service = DeviceService(session)
-            device = await device_service.get_device(device_id)
+        try:
+            async with self.session_factory.session() as session:
+                device_service = DeviceService(session, self.settings)
+                device = await device_service.get_device(device_id)
+        except DeviceNotFoundError:
+            # Log device not found as authorization failure
+            logger.warning(
+                "Authorization denied: device not found",
+                extra={
+                    "user_sub": user.sub,
+                    "user_role": user.role,
+                    "tool_name": tool_name,
+                    "device_id": device_id,
+                    "decision": "DENY",
+                    "reason": "DeviceNotFoundError",
+                },
+            )
+            # Re-raise as-is since it's already an MCPError
+            raise
 
         # Log authorization attempt
         logger.info(
@@ -167,23 +186,24 @@ class AuthorizationMiddleware:
             CapabilityDeniedError,
         ) as e:
             # Log denied authorization with context
-            logger.warning(
-                "Authorization denied",
-                extra={
-                    "user_sub": user.sub,
-                    "user_role": user.role,
-                    "user_email": user.email,
-                    "tool_name": tool_name,
-                    "tool_tier": tool_tier.value,
-                    "device_id": device_id,
-                    "device_environment": device.environment,
-                    "decision": "DENY",
-                    "reason": type(e).__name__,
-                    "denial_message": str(e),
-                },
-            )
-            # Re-raise to trigger 403 response
-            raise
+            log_extra = {
+                "user_sub": user.sub,
+                "user_role": user.role,
+                "user_email": user.email,
+                "tool_name": tool_name,
+                "tool_tier": tool_tier.value,
+                "device_id": device_id,
+                "decision": "DENY",
+                "reason": type(e).__name__,
+                "denial_message": str(e),
+            }
+            # Add device_environment if device was fetched successfully
+            if "device" in locals():
+                log_extra["device_environment"] = device.environment
+
+            logger.warning("Authorization denied", extra=log_extra)
+            # Convert to MCPError for proper JSON-RPC handling
+            raise MCPAuthorizationError(str(e)) from e
 
     async def check_authorization_batch(
         self,
@@ -223,8 +243,20 @@ class AuthorizationMiddleware:
                     device_id=device_id,
                 )
                 results[device_id] = None  # Authorized
-            except AuthorizationError as e:
-                results[device_id] = str(e)  # Denied with reason
+            except (MCPAuthorizationError, DeviceNotFoundError) as e:
+                # Handle authorization failures and device not found
+                results[device_id] = str(e)
+            except Exception as e:
+                # Handle unexpected errors gracefully
+                logger.exception(
+                    "Unexpected error during batch authorization",
+                    extra={
+                        "device_id": device_id,
+                        "tool_name": tool_name,
+                        "user_sub": user.sub,
+                    },
+                )
+                results[device_id] = f"Unexpected error: {str(e)}"
 
         return results
 
