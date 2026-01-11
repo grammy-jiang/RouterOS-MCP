@@ -9,13 +9,16 @@ See Phase 5 #7 requirements for detailed specifications.
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from routeros_mcp.infra.db.models import ApprovalRequest as ApprovalRequestModel
 from routeros_mcp.infra.db.models import Plan as PlanModel
+
+if TYPE_CHECKING:
+    from routeros_mcp.domain.services.notification import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -30,13 +33,19 @@ class ApprovalService:
     - Validation of approval permissions and plan state
     """
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        notification_service: "NotificationService | None" = None,
+    ) -> None:
         """Initialize approval service.
 
         Args:
             session: Database session
+            notification_service: Optional notification service for sending emails
         """
         self.session = session
+        self.notification_service = notification_service
 
     async def create_request(
         self,
@@ -95,6 +104,15 @@ class ApprovalService:
                 "requested_by": requested_by,
             },
         )
+
+        # Send notification if service is available
+        if self.notification_service:
+            # Note: In production, we would look up approver email addresses from a user service
+            # For now, we log that notification would be sent
+            logger.info(
+                f"Notification service available - would send approval request email for {plan_id}",
+                extra={"plan_id": plan_id},
+            )
 
         return approval_request
 
@@ -186,6 +204,29 @@ class ApprovalService:
             },
         )
 
+        # Send notification to requester if service is available
+        if self.notification_service:
+            # Get plan details for notification
+            result = await self.session.execute(
+                select(PlanModel).where(PlanModel.id == approval_request.plan_id)
+            )
+            plan = result.scalar_one_or_none()
+
+            if plan:
+                logger.info(
+                    f"Sending approval notification for plan {plan.id}",
+                    extra={"plan_id": plan.id, "requester": approval_request.requested_by},
+                )
+                # Note: In production, we would look up requester email from user service
+                # For now, we use a placeholder pattern
+                await self.notification_service.send_approval_approved(
+                    to_address=f"{approval_request.requested_by}@example.com",
+                    plan_id=approval_request.plan_id,
+                    approved_by=approved_by,
+                    plan_summary=plan.summary or "No summary",
+                    notes=notes,
+                )
+
         return approval_request
 
     async def reject_request(
@@ -238,6 +279,29 @@ class ApprovalService:
                 "rejected_by": rejected_by,
             },
         )
+
+        # Send notification to requester if service is available
+        if self.notification_service:
+            # Get plan details for notification
+            result = await self.session.execute(
+                select(PlanModel).where(PlanModel.id == approval_request.plan_id)
+            )
+            plan = result.scalar_one_or_none()
+
+            if plan:
+                logger.info(
+                    f"Sending rejection notification for plan {plan.id}",
+                    extra={"plan_id": plan.id, "requester": approval_request.requested_by},
+                )
+                # Note: In production, we would look up requester email from user service
+                # For now, we use a placeholder pattern
+                await self.notification_service.send_approval_rejected(
+                    to_address=f"{approval_request.requested_by}@example.com",
+                    plan_id=approval_request.plan_id,
+                    rejected_by=rejected_by,
+                    plan_summary=plan.summary or "No summary",
+                    notes=notes,
+                )
 
         return approval_request
 
