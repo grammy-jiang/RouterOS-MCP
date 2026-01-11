@@ -974,3 +974,100 @@ class User(Base):
         Index("idx_user_role", "role_name"),
         Index("idx_user_active", "is_active"),
     )
+
+
+class ApprovalRequest(Base):
+    """Approval request for professional tier plans (Phase 5).
+
+    Represents a request for approval of a professional-tier plan that
+    requires explicit approval before execution. Tracks approval workflow
+    state including who requested, who approved/rejected, and timestamps.
+
+    Status Values:
+    - pending: Awaiting approval/rejection
+    - approved: Request has been approved
+    - rejected: Request has been rejected
+
+    Relationships:
+        plan: Associated plan requiring approval (N:1)
+    """
+
+    __tablename__ = "approval_requests"
+
+    id: Mapped[str] = mapped_column(
+        String(64), primary_key=True, comment="Unique approval request identifier"
+    )
+
+    plan_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("plans.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="Plan requiring approval",
+    )
+
+    requested_by: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+        comment="User sub who requested approval",
+    )
+
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+        comment="Request creation timestamp",
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="pending",
+        index=True,
+        comment="Approval status: pending/approved/rejected",
+    )
+
+    # Approval fields
+    approved_by: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="User sub who approved request",
+    )
+
+    approved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Approval timestamp",
+    )
+
+    # Rejection fields
+    rejected_by: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="User sub who rejected request",
+    )
+
+    rejected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Rejection timestamp",
+    )
+
+    # Notes field for approval/rejection reasoning
+    notes: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Notes explaining approval/rejection decision",
+    )
+
+    # Relationship to Plan - use selectin for efficient loading in UI contexts
+    # where plan details are typically displayed alongside approval requests
+    plan: Mapped["Plan"] = relationship("Plan", lazy="selectin")
+
+    __table_args__ = (
+        Index("idx_approval_request_plan_id", "plan_id"),
+        Index("idx_approval_request_status", "status"),
+        Index("idx_approval_request_requested_by", "requested_by"),
+        Index("idx_approval_request_requested_at", "requested_at"),
+    )

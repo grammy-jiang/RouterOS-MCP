@@ -11,7 +11,7 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from routeros_mcp.api.admin_models import (
@@ -112,6 +112,16 @@ async def get_audit_service():
 
     async for session in get_session():
         yield AuditService(session)
+
+
+async def get_approval_service():
+    """Dependency to get ApprovalService."""
+    # Import here to avoid namespace pollution
+    from routeros_mcp.domain.services.approval import ApprovalService
+    from routeros_mcp.infra.db.session import get_session
+
+    async for session in get_session():
+        yield ApprovalService(session)
 
 
 @router.get("", response_class=HTMLResponse)
@@ -1137,6 +1147,309 @@ async def get_audit_filters(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get audit filters. Correlation ID: {correlation_id}",
+        )
+
+
+# ==================== Approval Request Endpoints ====================
+
+
+@router.post("/api/approval/request")
+async def create_approval_request(
+    plan_id: str = Body(..., embed=True),
+    notes: str | None = Body(None, embed=True),
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    approval_service: Any = Depends(get_approval_service),
+) -> JSONResponse:
+    """Create a new approval request for a professional-tier plan.
+
+    Requires ops_rw or admin role.
+
+    Args:
+        plan_id: Plan ID requiring approval
+        notes: Optional notes explaining the request
+        user: Current authenticated user
+        approval_service: Approval service dependency
+
+    Returns:
+        JSON with created approval request details
+
+    Raises:
+        HTTPException: If unauthorized or plan not found
+    """
+    # Verify user has ops_rw or admin role
+    user_role = user.get("role", "read_only")
+    if user_role not in ["ops_rw", "admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only ops_rw and admin users can create approval requests",
+        )
+
+    try:
+        requested_by = user.get("sub")
+        approval_request = await approval_service.create_request(
+            plan_id=plan_id,
+            requested_by=requested_by,
+            notes=notes,
+        )
+
+        return JSONResponse(
+            content={
+                "id": approval_request.id,
+                "plan_id": approval_request.plan_id,
+                "requested_by": approval_request.requested_by,
+                "requested_at": approval_request.requested_at.isoformat(),
+                "status": approval_request.status,
+                "notes": approval_request.notes,
+            }
+        )
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error creating approval request: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create approval request. Correlation ID: {correlation_id}",
+        )
+
+
+@router.get("/api/approval/requests")
+async def list_approval_requests(
+    status: str | None = None,
+    plan_id: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    approval_service: Any = Depends(get_approval_service),
+) -> JSONResponse:
+    """List approval requests with optional filtering.
+
+    Approvers (admin and approver roles) can see all requests.
+    Other users can only see their own requests.
+
+    Args:
+        status: Filter by status (pending/approved/rejected)
+        plan_id: Filter by plan ID
+        limit: Maximum number of requests to return
+        offset: Number of requests to skip
+        user: Current authenticated user
+        approval_service: Approval service dependency
+
+    Returns:
+        JSON with list of approval requests
+
+    Raises:
+        HTTPException: If unauthorized or validation error
+    """
+    user_role = user.get("role", "read_only")
+    user_sub = user.get("sub")
+
+    # Validate status parameter
+    if status and status not in ["pending", "approved", "rejected"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid status. Must be pending, approved, or rejected",
+        )
+
+    try:
+        # Get all requests matching filters
+        requests = await approval_service.list_requests(
+            status=status,
+            plan_id=plan_id,
+            limit=limit,
+            offset=offset,
+        )
+
+        # Filter based on role
+        if user_role not in ["admin", "approver"]:
+            # Non-approvers can only see their own requests
+            requests = [r for r in requests if r.requested_by == user_sub]
+
+        return JSONResponse(
+            content={
+                "requests": [
+                    {
+                        "id": req.id,
+                        "plan_id": req.plan_id,
+                        "requested_by": req.requested_by,
+                        "requested_at": req.requested_at.isoformat(),
+                        "status": req.status,
+                        "approved_by": req.approved_by,
+                        "approved_at": req.approved_at.isoformat() if req.approved_at else None,
+                        "rejected_by": req.rejected_by,
+                        "rejected_at": req.rejected_at.isoformat() if req.rejected_at else None,
+                        "notes": req.notes,
+                    }
+                    for req in requests
+                ],
+                "total": len(requests),
+                "limit": limit,
+                "offset": offset,
+            }
+        )
+
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error listing approval requests: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list approval requests. Correlation ID: {correlation_id}",
+        )
+
+
+@router.post("/api/approval/{approval_request_id}/approve")
+async def approve_approval_request(
+    approval_request_id: str,
+    notes: str | None = Body(None, embed=True),
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    approval_service: Any = Depends(get_approval_service),
+) -> JSONResponse:
+    """Approve an approval request.
+
+    Requires admin or approver role.
+
+    Args:
+        approval_request_id: Approval request ID
+        notes: Optional notes explaining the approval
+        user: Current authenticated user
+        approval_service: Approval service dependency
+
+    Returns:
+        JSON with updated approval request details
+
+    Raises:
+        HTTPException: If unauthorized, request not found, or already processed
+    """
+    # Verify user has approver or admin role
+    user_role = user.get("role", "read_only")
+    if user_role not in ["admin", "approver"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin and approver users can approve requests",
+        )
+
+    try:
+        approved_by = user.get("sub")
+        approval_request = await approval_service.approve_request(
+            approval_request_id=approval_request_id,
+            approved_by=approved_by,
+            notes=notes,
+        )
+
+        return JSONResponse(
+            content={
+                "id": approval_request.id,
+                "plan_id": approval_request.plan_id,
+                "requested_by": approval_request.requested_by,
+                "requested_at": approval_request.requested_at.isoformat(),
+                "status": approval_request.status,
+                "approved_by": approval_request.approved_by,
+                "approved_at": approval_request.approved_at.isoformat() if approval_request.approved_at else None,
+                "notes": approval_request.notes,
+            }
+        )
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error approving request: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to approve request. Correlation ID: {correlation_id}",
+        )
+
+
+@router.post("/api/approval/{approval_request_id}/reject")
+async def reject_approval_request(
+    approval_request_id: str,
+    notes: str | None = Body(None, embed=True),
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    approval_service: Any = Depends(get_approval_service),
+) -> JSONResponse:
+    """Reject an approval request.
+
+    Requires admin or approver role.
+
+    Args:
+        approval_request_id: Approval request ID
+        notes: Optional notes explaining the rejection
+        user: Current authenticated user
+        approval_service: Approval service dependency
+
+    Returns:
+        JSON with updated approval request details
+
+    Raises:
+        HTTPException: If unauthorized, request not found, or already processed
+    """
+    # Verify user has approver or admin role
+    user_role = user.get("role", "read_only")
+    if user_role not in ["admin", "approver"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin and approver users can reject requests",
+        )
+
+    try:
+        rejected_by = user.get("sub")
+        approval_request = await approval_service.reject_request(
+            approval_request_id=approval_request_id,
+            rejected_by=rejected_by,
+            notes=notes,
+        )
+
+        return JSONResponse(
+            content={
+                "id": approval_request.id,
+                "plan_id": approval_request.plan_id,
+                "requested_by": approval_request.requested_by,
+                "requested_at": approval_request.requested_at.isoformat(),
+                "status": approval_request.status,
+                "rejected_by": approval_request.rejected_by,
+                "rejected_at": approval_request.rejected_at.isoformat() if approval_request.rejected_at else None,
+                "notes": approval_request.notes,
+            }
+        )
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error rejecting request: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to reject request. Correlation ID: {correlation_id}",
         )
 
 
