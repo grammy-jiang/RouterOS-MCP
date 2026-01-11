@@ -1,7 +1,8 @@
 """Tests for authorization middleware."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from routeros_mcp.config import Settings
 from routeros_mcp.domain.models import Device
@@ -15,6 +16,42 @@ from routeros_mcp.security.authz import (
     RoleInsufficientError,
     ToolTier,
 )
+
+
+def create_test_device(
+    device_id: str,
+    name: str,
+    environment: str = "lab",
+    allow_advanced_writes: bool = True,
+    allow_professional_workflows: bool = True,
+    management_ip: str = "192.168.1.1",
+) -> Device:
+    """Helper function to create test device instances.
+
+    Args:
+        device_id: Device ID
+        name: Device name
+        environment: Device environment (lab/staging/prod)
+        allow_advanced_writes: Advanced writes capability
+        allow_professional_workflows: Professional workflows capability
+        management_ip: Management IP address
+
+    Returns:
+        Device instance with test data
+    """
+    return Device(
+        id=device_id,
+        name=name,
+        management_ip=management_ip,
+        management_port=443,
+        environment=environment,
+        status="healthy",
+        tags={},
+        allow_advanced_writes=allow_advanced_writes,
+        allow_professional_workflows=allow_professional_workflows,
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+    )
 
 
 class TestAuthorizationMiddleware:
@@ -47,39 +84,21 @@ class TestAuthorizationMiddleware:
     @pytest.fixture
     def lab_device(self):
         """Create test device in lab environment."""
-        from datetime import datetime
-
-        return Device(
-            id="dev-lab-01",
+        return create_test_device(
+            device_id="dev-lab-01",
             name="Lab Device 01",
-            management_ip="192.168.1.1",
-            management_port=443,
-            environment="lab",
-            status="healthy",
-            tags={},
-            allow_advanced_writes=True,
-            allow_professional_workflows=True,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
         )
 
     @pytest.fixture
     def prod_device(self):
         """Create test device in prod environment."""
-        from datetime import datetime
-
-        return Device(
-            id="dev-prod-01",
+        return create_test_device(
+            device_id="dev-prod-01",
             name="Prod Device 01",
-            management_ip="10.0.0.1",
-            management_port=443,
             environment="prod",
-            status="healthy",
-            tags={},
+            management_ip="10.0.0.1",
             allow_advanced_writes=False,
             allow_professional_workflows=False,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
         )
 
     @pytest.fixture
@@ -128,27 +147,25 @@ class TestAuthorizationMiddleware:
 
     @pytest.mark.asyncio
     async def test_read_only_user_can_execute_fundamental_tools(
-        self, middleware, mock_session_factory, mock_device_service, read_only_user, lab_device
+        self,
+        middleware,
+        mock_session_factory,
+        mock_device_service,
+        read_only_user,
+        lab_device,
     ):
         """Test read_only user can execute fundamental tier tools."""
-        # Mock device service
+        # Mock device service to return test device
         mock_device_service.get_device.return_value = lab_device
         mock_session = MagicMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock()
         mock_session_factory.session.return_value = mock_session
 
-        # Mock device service creation
-        from routeros_mcp.domain.services.device import DeviceService
+        # Use patch as context manager to mock DeviceService
+        with patch("routeros_mcp.mcp.middleware.auth.DeviceService") as MockDeviceService:
+            MockDeviceService.return_value.get_device = mock_device_service.get_device
 
-        original_init = DeviceService.__init__
-
-        def mock_init(self, session):
-            self.get_device = mock_device_service.get_device
-
-        DeviceService.__init__ = mock_init
-
-        try:
             # Should succeed
             await middleware.check_authorization(
                 user=read_only_user,
@@ -156,8 +173,6 @@ class TestAuthorizationMiddleware:
                 tool_tier=ToolTier.FUNDAMENTAL,
                 device_id="dev-lab-01",
             )
-        finally:
-            DeviceService.__init__ = original_init
 
     @pytest.mark.asyncio
     async def test_read_only_user_cannot_execute_advanced_tools(
@@ -349,20 +364,10 @@ class TestAuthorizationMiddleware:
     ):
         """Test device scope restriction blocks unauthorized devices."""
         # Mock device service with device NOT in scope
-        from datetime import datetime
-
-        out_of_scope_device = Device(
-            id="dev-lab-99",
+        out_of_scope_device = create_test_device(
+            device_id="dev-lab-99",
             name="Lab Device 99",
             management_ip="192.168.1.99",
-            management_port=443,
-            environment="lab",
-            status="healthy",
-            tags={},
-            allow_advanced_writes=True,
-            allow_professional_workflows=True,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
         )
         mock_device_service.get_device.return_value = out_of_scope_device
         mock_session = MagicMock()
@@ -433,20 +438,11 @@ class TestAuthorizationMiddleware:
     ):
         """Test device capability flags block tool execution."""
         # Device with professional workflows disabled
-        from datetime import datetime
-
-        restricted_device = Device(
-            id="dev-lab-restricted",
+        restricted_device = create_test_device(
+            device_id="dev-lab-restricted",
             name="Restricted Lab Device",
             management_ip="192.168.1.50",
-            management_port=443,
-            environment="lab",
-            status="healthy",
-            tags={},
-            allow_advanced_writes=True,
             allow_professional_workflows=False,  # Professional disabled
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
         )
         mock_device_service.get_device.return_value = restricted_device
         mock_session = MagicMock()
@@ -478,40 +474,28 @@ class TestAuthorizationMiddleware:
 
     @pytest.mark.asyncio
     async def test_batch_authorization(
-        self, middleware, mock_session_factory, mock_device_service, ops_rw_user, lab_device
+        self,
+        middleware,
+        mock_session_factory,
+        mock_device_service,
+        ops_rw_user,
+        lab_device,
     ):
         """Test batch authorization for multiple devices."""
-        # Mock device service
-        from datetime import datetime
 
+        # Mock device service with helper function
         async def get_device_by_id(device_id):
             if device_id in ["dev-lab-01", "dev-lab-02"]:
-                return Device(
-                    id=device_id,
+                return create_test_device(
+                    device_id=device_id,
                     name=f"Lab Device {device_id[-2:]}",
                     management_ip="192.168.1.1",
-                    management_port=443,
-                    environment="lab",
-                    status="healthy",
-                    tags={},
-                    allow_advanced_writes=True,
-                    allow_professional_workflows=True,
-                    created_at=datetime.now(),
-                    updated_at=datetime.now(),
                 )
             else:
-                return Device(
-                    id=device_id,
+                return create_test_device(
+                    device_id=device_id,
                     name=f"Lab Device {device_id[-2:]}",
                     management_ip="192.168.1.99",
-                    management_port=443,
-                    environment="lab",
-                    status="healthy",
-                    tags={},
-                    allow_advanced_writes=True,
-                    allow_professional_workflows=True,
-                    created_at=datetime.now(),
-                    updated_at=datetime.now(),
                 )
 
         mock_device_service.get_device.side_effect = get_device_by_id

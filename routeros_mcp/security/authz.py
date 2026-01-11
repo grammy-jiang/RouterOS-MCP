@@ -356,11 +356,12 @@ def check_device_scope(
     # Check if device is in scope
     if device_id not in device_scopes:
         user_info = f" (user: {user_sub})" if user_sub else ""
+        device_list = ", ".join(device_scopes[:5])
+        more_indicator = "..." if len(device_scopes) > 5 else ""
         raise DeviceScopeError(
             f"Device '{device_id}' is not in allowed scope{user_info}. "
-            f"User has access to {len(device_scopes)} device(s): {', '.join(device_scopes[:5])}"
-            f"{'...' if len(device_scopes) > 5 else ''}. "
-            f"Contact an administrator to request access to this device."
+            f"User has access to {len(device_scopes)} device(s): {device_list}{more_indicator}. "
+            "Contact an administrator to request access to this device."
         )
 
     logger.debug(
