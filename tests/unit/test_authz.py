@@ -5,6 +5,7 @@ import pytest
 from routeros_mcp.security.authz import (
     CapabilityDeniedError,
     EnvironmentMismatchError,
+    RoleInsufficientError,
     ToolTier,
     UserRole,
     check_device_capability,
@@ -163,12 +164,49 @@ class TestCheckToolAuthorization:
 class TestCheckUserRole:
     """Tests for check_user_role function."""
 
-    def test_not_implemented_in_phase_1(self) -> None:
-        """Test that user role checks raise NotImplementedError in Phase 1."""
-        with pytest.raises(NotImplementedError, match="Phase 1"):
+    def test_read_only_can_execute_fundamental(self) -> None:
+        """Test that read_only role can execute fundamental tier tools."""
+        check_user_role(
+            UserRole.READ_ONLY,
+            ToolTier.FUNDAMENTAL,
+        )
+
+    def test_read_only_cannot_execute_advanced(self) -> None:
+        """Test that read_only role cannot execute advanced tier tools."""
+        with pytest.raises(RoleInsufficientError, match="read_only.*cannot execute advanced"):
             check_user_role(
-                UserRole.ADMIN,
+                UserRole.READ_ONLY,
+                ToolTier.ADVANCED,
+            )
+
+    def test_ops_rw_can_execute_advanced(self) -> None:
+        """Test that ops_rw role can execute advanced tier tools."""
+        check_user_role(
+            UserRole.OPS_RW,
+            ToolTier.ADVANCED,
+        )
+
+    def test_ops_rw_cannot_execute_professional(self) -> None:
+        """Test that ops_rw role cannot execute professional tier tools."""
+        with pytest.raises(RoleInsufficientError, match="ops_rw.*cannot execute professional"):
+            check_user_role(
                 UserRole.OPS_RW,
+                ToolTier.PROFESSIONAL,
+            )
+
+    def test_admin_can_execute_professional(self) -> None:
+        """Test that admin role can execute professional tier tools."""
+        check_user_role(
+            UserRole.ADMIN,
+            ToolTier.PROFESSIONAL,
+        )
+
+    def test_approver_cannot_execute_any_tools(self) -> None:
+        """Test that approver role cannot execute any tools."""
+        with pytest.raises(RoleInsufficientError, match="approver.*cannot execute tools"):
+            check_user_role(
+                UserRole.APPROVER,
+                ToolTier.FUNDAMENTAL,
             )
 
 

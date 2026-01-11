@@ -209,40 +209,248 @@ def check_tool_authorization(
     )
 
 
-# Phase 4: User role checks (placeholder for future implementation)
+# Phase 5: User role checks and RBAC
 class UserRole(str, Enum):
-    """User role classification for Phase 4.
+    """User role classification for RBAC.
 
-    Phase 1: Not implemented (single-user OS-level auth)
-    Phase 4: OAuth/OIDC integration with role-based access control
+    Roles define hierarchical access to tool tiers:
+    - READ_ONLY: Fundamental tier only (read-only operations)
+    - OPS_RW: Fundamental + Advanced tier (single-device writes)
+    - ADMIN: All tiers including Professional (multi-device operations)
+    - APPROVER: Can approve plans but cannot execute tools
     """
 
     READ_ONLY = "read_only"
     OPS_RW = "ops_rw"
     ADMIN = "admin"
+    APPROVER = "approver"
+
+
+class RoleInsufficientError(AuthorizationError):
+    """Raised when user role is insufficient for operation."""
+
+    pass
+
+
+class DeviceScopeError(AuthorizationError):
+    """Raised when device is not in user's allowed device scope."""
+
+    pass
+
+
+def get_allowed_tool_tier(user_role: UserRole) -> ToolTier:
+    """Get the maximum allowed tool tier for a user role.
+
+    Args:
+        user_role: User's role
+
+    Returns:
+        Maximum tool tier allowed for the role
+
+    Example:
+        tier = get_allowed_tool_tier(UserRole.OPS_RW)
+        # Returns ToolTier.ADVANCED
+    """
+    role_tier_map = {
+        UserRole.READ_ONLY: ToolTier.FUNDAMENTAL,
+        UserRole.OPS_RW: ToolTier.ADVANCED,
+        UserRole.ADMIN: ToolTier.PROFESSIONAL,
+        UserRole.APPROVER: None,  # Approvers cannot execute tools
+    }
+    return role_tier_map.get(user_role)
 
 
 def check_user_role(
     user_role: UserRole,
-    required_role: UserRole,
+    tool_tier: ToolTier,
     user_sub: str | None = None,
+    tool_name: str | None = None,
 ) -> None:
-    """Check that user has required role (Phase 4 only).
+    """Check that user role is sufficient for tool tier.
 
     Args:
         user_role: User's current role
-        required_role: Minimum required role
+        tool_tier: Tool's tier classification
+        user_sub: Optional user subject for error messages
+        tool_name: Optional tool name for error messages
+
+    Raises:
+        RoleInsufficientError: If user role is insufficient for tool tier
+
+    Example:
+        check_user_role(
+            UserRole.READ_ONLY,
+            ToolTier.ADVANCED,
+            "user-123",
+            "dns/update-servers"
+        )  # Raises RoleInsufficientError
+    """
+    allowed_tier = get_allowed_tool_tier(user_role)
+
+    # Approvers cannot execute any tools
+    if allowed_tier is None:
+        user_info = f" (user: {user_sub})" if user_sub else ""
+        tool_info = f" '{tool_name}'" if tool_name else ""
+        raise RoleInsufficientError(
+            f"Role 'approver'{user_info} cannot execute tools{tool_info}. "
+            f"Approvers can only approve plans but not execute operations."
+        )
+
+    # Check if tool tier exceeds user's allowed tier
+    tier_hierarchy = {
+        ToolTier.FUNDAMENTAL: 1,
+        ToolTier.ADVANCED: 2,
+        ToolTier.PROFESSIONAL: 3,
+    }
+
+    if tier_hierarchy[tool_tier] > tier_hierarchy[allowed_tier]:
+        user_info = f" (user: {user_sub})" if user_sub else ""
+        tool_info = f" '{tool_name}'" if tool_name else ""
+        raise RoleInsufficientError(
+            f"Role '{user_role.value}'{user_info} cannot execute {tool_tier.value} tier tools{tool_info}. "
+            f"Maximum allowed tier is {allowed_tier.value}. "
+            f"Contact an administrator to request elevated privileges."
+        )
+
+    logger.debug(
+        f"User role check passed: {user_role.value} can execute {tool_tier.value} tier",
+        extra={
+            "user_sub": user_sub,
+            "user_role": user_role.value,
+            "tool_tier": tool_tier.value,
+            "tool_name": tool_name,
+        },
+    )
+
+
+def check_device_scope(
+    device_id: str,
+    device_scopes: list[str] | None,
+    user_sub: str | None = None,
+) -> None:
+    """Check that device is in user's allowed device scope.
+
+    Args:
+        device_id: Device ID to check
+        device_scopes: User's allowed device IDs (None or empty = full access)
         user_sub: Optional user subject for error messages
 
     Raises:
-        AuthorizationError: If user doesn't have required role
+        DeviceScopeError: If device is not in user's scope
 
-    Note:
-        Phase 1: Not implemented (raises NotImplementedError)
-        Phase 4: Enforces role-based access control
+    Example:
+        check_device_scope(
+            "dev-prod-01",
+            ["dev-lab-01", "dev-staging-01"],
+            "user-123"
+        )  # Raises DeviceScopeError
     """
-    raise NotImplementedError(
-        "User role checks not implemented in Phase 1. "
-        "Phase 1 uses OS-level authentication with implicit admin role. "
-        "User role enforcement will be added in Phase 4 with OAuth/OIDC integration."
+    # None or empty list means full access (typically for admins)
+    if device_scopes is None or len(device_scopes) == 0:
+        logger.debug(
+            f"Device scope check passed: user has full access",
+            extra={"user_sub": user_sub, "device_id": device_id},
+        )
+        return
+
+    # Check if device is in scope
+    if device_id not in device_scopes:
+        user_info = f" (user: {user_sub})" if user_sub else ""
+        raise DeviceScopeError(
+            f"Device '{device_id}' is not in allowed scope{user_info}. "
+            f"User has access to {len(device_scopes)} device(s): {', '.join(device_scopes[:5])}"
+            f"{'...' if len(device_scopes) > 5 else ''}. "
+            f"Contact an administrator to request access to this device."
+        )
+
+    logger.debug(
+        f"Device scope check passed: device in user's scope",
+        extra={
+            "user_sub": user_sub,
+            "device_id": device_id,
+            "device_scope_count": len(device_scopes),
+        },
+    )
+
+
+def check_comprehensive_authorization(
+    user_role: UserRole,
+    device_id: str,
+    device_environment: str,
+    service_environment: str,
+    tool_tier: ToolTier,
+    allow_advanced_writes: bool,
+    allow_professional_workflows: bool,
+    device_scopes: list[str] | None = None,
+    user_sub: str | None = None,
+    tool_name: str | None = None,
+) -> None:
+    """Comprehensive authorization check combining all authorization layers.
+
+    Performs authorization checks in the following order:
+    1. User role vs tool tier
+    2. Device scope (if restricted)
+    3. Environment match
+    4. Device capability flags
+
+    Args:
+        user_role: User's role
+        device_id: Device ID
+        device_environment: Device's environment
+        service_environment: Service's environment
+        tool_tier: Tool's tier classification
+        allow_advanced_writes: Device's advanced writes flag
+        allow_professional_workflows: Device's professional workflows flag
+        device_scopes: User's allowed device IDs (None = full access)
+        user_sub: Optional user subject for error messages
+        tool_name: Optional tool name for error messages
+
+    Raises:
+        RoleInsufficientError: If user role is insufficient
+        DeviceScopeError: If device not in user's scope
+        EnvironmentMismatchError: If environment mismatch
+        CapabilityDeniedError: If device capability not allowed
+
+    Example:
+        check_comprehensive_authorization(
+            user_role=UserRole.OPS_RW,
+            device_id="dev-lab-01",
+            device_environment="lab",
+            service_environment="lab",
+            tool_tier=ToolTier.ADVANCED,
+            allow_advanced_writes=True,
+            allow_professional_workflows=False,
+            device_scopes=["dev-lab-01", "dev-lab-02"],
+            user_sub="user-123",
+            tool_name="dns/update-servers"
+        )
+    """
+    # Check 1: User role vs tool tier
+    check_user_role(user_role, tool_tier, user_sub, tool_name)
+
+    # Check 2: Device scope
+    check_device_scope(device_id, device_scopes, user_sub)
+
+    # Check 3: Environment match
+    check_environment_match(device_environment, service_environment, device_id)
+
+    # Check 4: Device capability flags
+    check_device_capability(
+        tool_tier,
+        allow_advanced_writes,
+        allow_professional_workflows,
+        device_id,
+        tool_name,
+    )
+
+    logger.info(
+        f"Comprehensive authorization check passed",
+        extra={
+            "user_sub": user_sub,
+            "user_role": user_role.value,
+            "device_id": device_id,
+            "tool_name": tool_name,
+            "tool_tier": tool_tier.value,
+            "environment": device_environment,
+        },
     )
