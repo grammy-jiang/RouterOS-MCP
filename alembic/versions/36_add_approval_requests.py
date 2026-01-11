@@ -85,6 +85,7 @@ def upgrade() -> None:
             nullable=True,
             comment="Notes explaining approval/rejection decision",
         ),
+        # Standard timestamp fields (inherited from Base in model)
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),

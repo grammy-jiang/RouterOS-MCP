@@ -1061,7 +1061,8 @@ class ApprovalRequest(Base):
         comment="Notes explaining approval/rejection decision",
     )
 
-    # Relationship to Plan
+    # Relationship to Plan - use selectin for efficient loading in UI contexts
+    # where plan details are typically displayed alongside approval requests
     plan: Mapped["Plan"] = relationship("Plan", lazy="selectin")
 
     __table_args__ = (
