@@ -42,7 +42,7 @@ jobs:
       - name: Set up Python with uv and sync deps
         run: |
           uv python install 3.11
-          uv sync --dev
+          uv sync --extra dev
 
       # Initialize database schema for tests (uses in-memory SQLite for unit tests)
       - name: Initialize database

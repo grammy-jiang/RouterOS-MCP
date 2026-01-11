@@ -39,7 +39,7 @@ jobs:
       - name: Set up Python 3.11 with uv
         run: |
           uv python install 3.11
-          uv sync --dev
+          uv sync --extra dev
 
       - name: Check code formatting with black
         run: |
@@ -92,7 +92,7 @@ jobs:
       - name: Set up Python ${{ matrix.python-version }} with uv
         run: |
           uv python install ${{ matrix.python-version }}
-          uv sync --dev
+          uv sync --extra dev
 
       - name: Initialize database
         run: |
@@ -166,7 +166,7 @@ jobs:
       - name: Set up Python 3.11 with uv
         run: |
           uv python install 3.11
-          uv sync --dev
+          uv sync --extra dev
           uv pip install bandit[toml] safety
 
       - name: Run bandit security scan
