@@ -5,7 +5,7 @@ Computes device health based on metrics, RouterOS responses, and failure history
 
 import logging
 from datetime import UTC, datetime
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -76,14 +76,13 @@ class HealthService:
         # Get device
         device = await self.device_service.get_device(device_id)
 
-        result = None
         try:
             # Try to check connectivity and get metrics
-            resource_data = None
+            resource_data: dict[str, Any] | None = None
             try:
                 # Try REST API first
                 client = await self.device_service.get_rest_client(device_id)
-                resource_data = await client.get("/rest/system/resource")
+                resource_data = cast(dict[str, Any], await client.get("/rest/system/resource"))
                 await client.close()
             except Exception as rest_error:
                 # Fall back to SSH if REST fails
@@ -105,6 +104,9 @@ class HealthService:
                         extra={"device_id": device_id, "ssh_error": str(ssh_error)},
                     )
                     raise Exception(f"No available connection method: REST={rest_error}, SSH={ssh_error}")
+
+            if resource_data is None:
+                raise RuntimeError("Resource data unavailable from device")
 
             # Parse metrics
             cpu_usage = self._parse_cpu_usage(resource_data)
@@ -176,7 +178,7 @@ class HealthService:
 
         # Store health check result
         await self._store_health_check(result)
-        
+
         # Update adaptive polling state based on health check result (Phase 4)
         # Skip if session is None (happens in some test scenarios)
         if self.session is not None:
@@ -283,13 +285,17 @@ class HealthService:
         import asyncio
 
         # Run health checks in parallel
-        tasks = [self.run_health_check(device_id) for device_id in device_ids]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        tasks: list[asyncio.Future[HealthCheckResult]] = [
+            asyncio.ensure_future(self.run_health_check(device_id)) for device_id in device_ids
+        ]
+        results: list[HealthCheckResult | BaseException] = await asyncio.gather(
+            *tasks, return_exceptions=True
+        )
 
         # Build results dict, handling exceptions
-        health_results = {}
+        health_results: dict[str, HealthCheckResult] = {}
         for device_id, result in zip(device_ids, results):
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 # Treat exceptions as unreachable
                 logger.warning(
                     "Health check failed for device",
@@ -301,46 +307,50 @@ class HealthService:
                     timestamp=datetime.now(UTC),
                     issues=[f"Health check failed: {str(result)}"],
                 )
-            else:
-                # Apply custom thresholds for staged rollout
-                # Re-evaluate status based on provided thresholds
-                status = result.status
-                # Start with empty lists to avoid duplicating existing threshold messages
-                issues = []
-                warnings = []
+                continue
 
-                # Check CPU threshold
-                if result.cpu_usage_percent is not None:
-                    if result.cpu_usage_percent >= cpu_threshold:
-                        status = "degraded"
-                        issues.append(
-                            f"CPU usage above threshold: {result.cpu_usage_percent:.1f}% >= {cpu_threshold}%"
-                        )
+            # At this point, result is a HealthCheckResult
+            hc_result = cast(HealthCheckResult, result)
 
-                # Check memory threshold
-                if result.memory_usage_percent is not None:
-                    if result.memory_usage_percent >= memory_threshold:
-                        status = "degraded"
-                        issues.append(
-                            f"Memory usage above threshold: {result.memory_usage_percent:.1f}% >= {memory_threshold}%"
-                        )
+            # Apply custom thresholds for staged rollout
+            # Re-evaluate status based on provided thresholds
+            status = hc_result.status
+            # Start with empty lists to avoid duplicating existing threshold messages
+            issues: list[str] = []
+            warnings: list[str] = []
 
-                # If no custom threshold violations, use original issues/warnings
-                if not issues:
-                    issues = list(result.issues) if result.issues else []
-                    warnings = list(result.warnings) if result.warnings else []
+            # Check CPU threshold
+            if hc_result.cpu_usage_percent is not None:
+                if hc_result.cpu_usage_percent >= cpu_threshold:
+                    status = "degraded"
+                    issues.append(
+                        f"CPU usage above threshold: {hc_result.cpu_usage_percent:.1f}% >= {cpu_threshold}%"
+                    )
+
+            # Check memory threshold
+            if hc_result.memory_usage_percent is not None:
+                if hc_result.memory_usage_percent >= memory_threshold:
+                    status = "degraded"
+                    issues.append(
+                        f"Memory usage above threshold: {hc_result.memory_usage_percent:.1f}% >= {memory_threshold}%"
+                    )
+
+            # If no custom threshold violations, use original issues/warnings
+            if not issues:
+                issues = list(hc_result.issues) if hc_result.issues else []
+                warnings = list(hc_result.warnings) if hc_result.warnings else []
 
                 # Create updated result with custom thresholds applied
                 health_results[device_id] = HealthCheckResult(
                     device_id=device_id,
                     status=cast(Literal["healthy", "degraded", "unreachable"], status),
-                    timestamp=result.timestamp,
-                    cpu_usage_percent=result.cpu_usage_percent,
-                    memory_usage_percent=result.memory_usage_percent,
-                    uptime_seconds=result.uptime_seconds,
+                timestamp=hc_result.timestamp,
+                cpu_usage_percent=hc_result.cpu_usage_percent,
+                memory_usage_percent=hc_result.memory_usage_percent,
+                uptime_seconds=hc_result.uptime_seconds,
                     issues=issues,
                     warnings=warnings,
-                    metadata=result.metadata,
+                metadata=hc_result.metadata,
                 )
 
         return health_results
@@ -438,7 +448,7 @@ class HealthService:
                 extra={"device_id": device_id, "error": str(e)},
             )
 
-    def _parse_ssh_resource_output(self, output: str) -> dict:
+    def _parse_ssh_resource_output(self, output: str) -> dict[str, Any]:
         """Parse SSH output from /system resource print into dict format.
 
         Args:
@@ -447,7 +457,7 @@ class HealthService:
         Returns:
             Dictionary with resource data compatible with REST API format
         """
-        resource_data = {}
+        resource_data: dict[str, Any] = {}
         
         # Parse key-value pairs from RouterOS output
         # Example format:
@@ -508,10 +518,8 @@ class HealthService:
                 return int(float(value))
             except ValueError:
                 return 0
-        
-        return resource_data
 
-    def _parse_cpu_usage(self, resource_data: dict) -> float:
+    def _parse_cpu_usage(self, resource_data: dict[str, Any]) -> float:
         """Parse CPU usage from RouterOS resource data.
 
         Args:
@@ -690,4 +698,4 @@ class HealthService:
             logger.warning(f"Device {device_id} not found for polling interval query")
             return 60  # Default fallback
         
-        return interval
+        return cast(int, interval)

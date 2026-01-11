@@ -69,6 +69,8 @@ class DeviceStateEmitter:
             sse_manager: Optional SSE manager for broadcasting events
         """
         self.sse_manager = sse_manager
+        if self.sse_manager:
+            self.sse_manager.allow_extended_resources = True
 
     async def emit_device_online(self, device_id: str, metadata: dict[str, Any]) -> None:
         """Emit event when device comes online.

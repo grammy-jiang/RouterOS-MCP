@@ -104,6 +104,7 @@ class SSEManager:
         self.update_batch_interval_seconds = update_batch_interval_seconds
         self.health_update_interval_seconds = health_update_interval_seconds
         self.session_factory = session_factory
+        self.allow_extended_resources = False
 
         # Subscription tracking
         self._subscriptions: dict[str, SSESubscription] = {}
@@ -154,7 +155,7 @@ class SSEManager:
         """
         async with self._subscription_lock:
             # Validate resource URI is subscribable (Phase 4: only device health)
-            if not self._is_subscribable(resource_uri):
+            if not self._is_subscribable_instance(resource_uri):
                 # Record subscription error
                 metrics.record_sse_subscription_error(error_type="invalid_uri")
                 raise ValueError(
@@ -518,42 +519,56 @@ class SSEManager:
             "total_events_sent": self._total_events_sent,
         }
 
+    def _is_subscribable_instance(self, resource_uri: str) -> bool:
+        """Instance-aware subscription validation honoring extended resource flag."""
+        if self.allow_extended_resources:
+            return self._is_extended_subscribable(resource_uri)
+        return self._is_subscribable(resource_uri)
+
     @staticmethod
     def _is_subscribable(resource_uri: str) -> bool:
         """Check if a resource URI supports subscriptions.
-        
-        Phase 4: Only device health resources are subscribable.
-        
+
+        Phase 4: Only device health resources are subscribable by default.
+
         Args:
             resource_uri: Resource URI to check
-            
+
         Returns:
             True if the URI supports subscriptions, False otherwise
         """
-        # Phase 4: Only device://*/health is subscribable
         if not resource_uri.startswith("device://"):
             return False
 
-        # Parse device://<device_id>/health
         parts = resource_uri.split("/")
-        if len(parts) >= 4 and parts[3] == "health":
-            return True
+        return len(parts) >= 4 and parts[3] == "health"
+
+    @staticmethod
+    def _is_extended_subscribable(resource_uri: str) -> bool:
+        """Extended subscription validation allowing config and plan resources."""
+        if not resource_uri or "://" not in resource_uri:
+            return False
+
+        scheme, _rest = resource_uri.split("://", 1)
+
+        if scheme == "device":
+            parts = resource_uri.split("/")
+            return len(parts) >= 4 and parts[3] in {"health", "config"}
+
+        if scheme == "plan":
+            parts = resource_uri.split("/")
+            return len(parts) >= 3 and bool(parts[2])
 
         return False
 
     @staticmethod
     def _is_health_resource(resource_uri: str) -> bool:
-        """Check if a resource URI is a device health resource.
-        
-        Uses the same validation logic as _is_subscribable to ensure consistency.
-        
-        Args:
-            resource_uri: Resource URI to check
-            
-        Returns:
-            True if the URI is a device health resource
-        """
-        return SSEManager._is_subscribable(resource_uri)
+        """Check if a resource URI is specifically a device health resource."""
+        if not resource_uri.startswith("device://"):
+            return False
+
+        parts = resource_uri.split("/")
+        return len(parts) >= 4 and parts[3] == "health"
 
     @staticmethod
     def _extract_device_id(resource_uri: str) -> str | None:

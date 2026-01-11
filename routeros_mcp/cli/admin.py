@@ -14,7 +14,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import click
 from rich.console import Console
@@ -386,7 +386,10 @@ def device_test(ctx: click.Context, device_id: str) -> None:
 
             async with session_factory.session() as session:
                 device_service = DeviceService(session, settings)
-                return await device_service.check_connectivity(device_id)
+                return cast(
+                    tuple[bool, dict[str, Any]],
+                    await device_service.check_connectivity(device_id),
+                )
 
         with Progress(
             SpinnerColumn(),
@@ -435,10 +438,13 @@ def plan_list(
 
             async with session_factory.session() as session:
                 plan_service = PlanService(session, settings)
-                return await plan_service.list_plans(
-                    created_by=created_by,
-                    status=status,
-                    limit=limit,
+                return cast(
+                    list[dict[str, Any]],
+                    await plan_service.list_plans(
+                        created_by=created_by,
+                        status=status,
+                        limit=limit,
+                    ),
                 )
 
         plans = asyncio.run(_list_plans())
@@ -486,7 +492,7 @@ def plan_show(ctx: click.Context, plan_id: str, output_format: str) -> None:
 
             async with session_factory.session() as session:
                 plan_service = PlanService(session, settings)
-                return await plan_service.get_plan(plan_id)
+                return cast(dict[str, Any], await plan_service.get_plan(plan_id))
 
         plan_data = asyncio.run(_get_plan())
 
@@ -535,7 +541,7 @@ def plan_approve(ctx: click.Context, plan_id: str, non_interactive: bool) -> Non
 
                 async with session_factory.session() as session:
                     plan_service = PlanService(session, settings)
-                    return await plan_service.get_plan(plan_id)
+                    return cast(dict[str, Any], await plan_service.get_plan(plan_id))
 
             plan_data = asyncio.run(_get_plan())
 

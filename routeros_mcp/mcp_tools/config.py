@@ -8,7 +8,7 @@ detailed requirements.
 """
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 from fastmcp import FastMCP
 
@@ -163,7 +163,9 @@ def register_config_tools(mcp: FastMCP, settings: Settings) -> None:
                     f"  - {d['device_id']} ({d['environment']})" for d in devices_config
                 )
 
-                return format_tool_result(
+                return cast(
+                    dict[str, Any],
+                    format_tool_result(
                     content=f"""DNS/NTP rollout plan created successfully.
 
 Plan ID: {plan['plan_id']}
@@ -182,16 +184,17 @@ The approval token expires at: {plan['approval_expires_at']}
 Per-device changes:
 {device_list}
 """,
-                    meta={
-                        "plan_id": plan["plan_id"],
-                        "approval_token": plan["approval_token"],
-                        "approval_expires_at": plan["approval_expires_at"],
-                        "risk_level": risk_level,
-                        "device_count": len(device_ids),
-                        "batch_count": plan["batch_count"],
-                        "devices_per_batch": devices_per_batch,
-                        "devices": devices_config,
-                    },
+                        meta={
+                            "plan_id": plan["plan_id"],
+                            "approval_token": plan["approval_token"],
+                            "approval_expires_at": plan["approval_expires_at"],
+                            "risk_level": risk_level,
+                            "device_count": len(device_ids),
+                            "batch_count": plan["batch_count"],
+                            "devices_per_batch": devices_per_batch,
+                            "devices": devices_config,
+                        },
+                    ),
                 )
 
         except Exception as e:
@@ -203,6 +206,8 @@ Per-device changes:
         plan_id: str,
         approval_token: str,
         approved_by: str = "system",
+        batch_size: int = 5,
+        batch_pause_seconds: int = 30,
     ) -> dict[str, Any]:
         """Apply approved DNS/NTP rollout plan with background job tracking.
 
@@ -237,28 +242,36 @@ Per-device changes:
                     # Refresh plan to get approved status
                     plan = await plan_service.get_plan(plan_id)
 
+                plan_batch_size = plan.get("batch_size", batch_size)
+                device_ids = plan.get("device_ids", [])
+
                 # Create job for background execution
                 job = await job_service.create_job(
                     job_type="APPLY_DNS_NTP_ROLLOUT",
-                    device_ids=plan["device_ids"],
+                    device_ids=device_ids,
                     plan_id=plan_id,
                     max_attempts=3,
                 )
 
+                status = "pending" if device_ids else "failed"
+                if status != "pending":
+                    await plan_service.update_plan_status(plan_id, status)
+
                 # Calculate estimated duration: ~90 seconds per batch
                 # (60s execution + 30s pause between batches; default batch_size=5)
-                device_count = len(plan["device_ids"])
-                batch_size = plan.get("batch_size", 5)
-                batch_count = (device_count + batch_size - 1) // batch_size
+                device_count = len(device_ids)
+                batch_count = (device_count + plan_batch_size - 1) // plan_batch_size
                 # Estimate: 60s per batch + 30s pause between batches
                 estimated_minutes = max(1, int((batch_count * 90) / 60))
 
-                return format_tool_result(
+                return cast(
+                    dict[str, Any],
+                    format_tool_result(
                     content=f"""DNS/NTP rollout job created successfully.
 
 Plan ID: {plan_id}
 Job ID: {job['job_id']}
-Status: pending
+Status: {status}
 Devices: {device_count}
 Estimated Duration: ~{estimated_minutes} minutes
 
@@ -266,14 +279,17 @@ The job will execute in the background with staged rollout.
 Use job/get-status or query the Job model to track progress.
 View plan details with plan://{plan_id} resource.
 """,
-                    meta={
-                        "job_id": job["job_id"],
-                        "status": "pending",
-                        "estimated_duration_minutes": estimated_minutes,
-                        "plan_id": plan_id,
-                        "device_count": device_count,
-                        "batch_count": batch_count,
-                    },
+                        meta={
+                            "job_id": job["job_id"],
+                            "status": status,
+                            "estimated_duration_minutes": estimated_minutes,
+                            "plan_id": plan_id,
+                            "device_count": device_count,
+                            "batch_count": batch_count,
+                            "batch_size": plan_batch_size,
+                            "batch_pause_seconds": batch_pause_seconds,
+                        },
+                    ),
                 )
 
         except Exception as e:
@@ -331,7 +347,9 @@ View plan details with plan://{plan_id} resource.
 
                 device_list = "\n".join(device_summaries) if device_summaries else "  (none)"
 
-                return format_tool_result(
+                return cast(
+                    dict[str, Any],
+                    format_tool_result(
                     content=f"""Manual rollback completed for plan {plan_id}.
 
 Reason: {reason}
@@ -346,14 +364,15 @@ Per-device results:
 Note: Rollback restores previous DNS/NTP configuration from stored snapshots.
 Verify connectivity and health for affected devices.
 """,
-                    meta={
-                        "plan_id": plan_id,
-                        "status": "rolled_back",
-                        "devices_affected": total_devices,
-                        "reason": reason,
-                        "summary": summary,
-                        "devices": rollback_results.get("devices", {}),
-                    },
+                        meta={
+                            "plan_id": plan_id,
+                            "status": "rolled_back",
+                            "devices_affected": total_devices,
+                            "reason": reason,
+                            "summary": summary,
+                            "devices": rollback_results.get("devices", {}),
+                        },
+                    ),
                 )
 
         except Exception as e:

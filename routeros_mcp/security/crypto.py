@@ -19,7 +19,7 @@ See docs/02-security-oauth-integration-and-access-control.md for key management.
 """
 
 import logging
-from typing import Final
+from typing import Final, cast
 
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -139,7 +139,7 @@ class CredentialEncryption:
         """
         try:
             encrypted_bytes = self._fernet.encrypt(plaintext.encode("utf-8"))
-            return encrypted_bytes.decode("utf-8")
+            return cast(str, encrypted_bytes.decode("utf-8"))
         except Exception as e:
             logger.error("Encryption failed", exc_info=False)  # Don't log secret
             raise EncryptionError(f"Failed to encrypt data: {type(e).__name__}") from e
@@ -162,7 +162,7 @@ class CredentialEncryption:
         """
         try:
             decrypted_bytes = self._fernet.decrypt(ciphertext.encode("utf-8"))
-            return decrypted_bytes.decode("utf-8")
+            return cast(str, decrypted_bytes.decode("utf-8"))
         except InvalidToken as e:
             logger.error("Decryption failed - invalid token or wrong key", exc_info=False)
             raise DecryptionError(
@@ -215,7 +215,7 @@ def generate_encryption_key() -> str:
         key = generate_encryption_key()
         print(f"Export this key: export ROUTEROS_MCP_ENCRYPTION_KEY='{key}'")
     """
-    return Fernet.generate_key().decode("utf-8")
+    return cast(str, Fernet.generate_key().decode("utf-8"))
 
 
 def validate_encryption_key(key: str) -> bool:
