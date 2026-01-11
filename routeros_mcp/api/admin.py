@@ -941,6 +941,9 @@ async def list_audit_events(
     date_from: str | None = None,
     date_to: str | None = None,
     search: str | None = None,
+    user_id: str | None = None,
+    approver_id: str | None = None,
+    approval_request_id: str | None = None,
     user: dict[str, Any] = Depends(get_current_user_dep()),
     audit_service: Any = Depends(get_audit_service),
 ) -> JSONResponse:
@@ -955,6 +958,9 @@ async def list_audit_events(
         date_from: Filter events from this date (ISO format)
         date_to: Filter events to this date (ISO format)
         search: Search in event details
+        user_id: Filter by user ID who performed the action (Phase 5)
+        approver_id: Filter by approver ID (Phase 5)
+        approval_request_id: Filter by approval request ID (Phase 5)
         user: Current authenticated user
         audit_service: Audit service dependency
 
@@ -979,6 +985,9 @@ async def list_audit_events(
             date_from=date_from_dt,
             date_to=date_to_dt,
             search=search,
+            user_id=user_id,
+            approver_id=approver_id,
+            approval_request_id=approval_request_id,
         )
 
         return JSONResponse(content=result)
@@ -1007,6 +1016,9 @@ async def export_audit_events(
     date_from: str | None = None,
     date_to: str | None = None,
     search: str | None = None,
+    user_id: str | None = None,
+    approver_id: str | None = None,
+    approval_request_id: str | None = None,
     user: dict[str, Any] = Depends(get_current_user_dep()),
     audit_service: Any = Depends(get_audit_service),
 ) -> Any:
@@ -1019,6 +1031,9 @@ async def export_audit_events(
         date_from: Filter events from this date (ISO format)
         date_to: Filter events to this date (ISO format)
         search: Search in event details
+        user_id: Filter by user ID who performed the action (Phase 5)
+        approver_id: Filter by approver ID (Phase 5)
+        approval_request_id: Filter by approval request ID (Phase 5)
         user: Current authenticated user
         audit_service: Audit service dependency
 
@@ -1046,6 +1061,9 @@ async def export_audit_events(
             date_from=date_from_dt,
             date_to=date_to_dt,
             search=search,
+            user_id=user_id,
+            approver_id=approver_id,
+            approval_request_id=approval_request_id,
         )
 
         # Create CSV
@@ -1057,6 +1075,9 @@ async def export_audit_events(
             "Timestamp",
             "User Email",
             "User Role",
+            "User ID",
+            "Approver ID",
+            "Approval Request ID",
             "Device ID",
             "Environment",
             "Tool Name",
@@ -1074,6 +1095,9 @@ async def export_audit_events(
                 event["timestamp"],
                 event["user_email"] or "",
                 event["user_role"],
+                event["user_id"] or "",
+                event["approver_id"] or "",
+                event["approval_request_id"] or "",
                 event["device_id"] or "",
                 event["environment"] or "",
                 event["tool_name"],

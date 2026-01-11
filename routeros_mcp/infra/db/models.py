@@ -705,6 +705,29 @@ class AuditEvent(Base):
         String(32), nullable=False, comment="User role at time of action"
     )
 
+    # Phase 5: Per-user audit fields for compliance reporting
+    user_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+        comment="User identifier who performed the action (Phase 5)",
+    )
+
+    approver_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+        comment="User identifier who approved the action (Phase 5)",
+    )
+
+    approval_request_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("approval_requests.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Associated approval request ID (Phase 5)",
+    )
+
     # Device context
     device_id: Mapped[str | None] = mapped_column(
         String(64),
@@ -752,14 +775,23 @@ class AuditEvent(Base):
         Text, nullable=True, comment="Error message if failed"
     )
 
-    # Relationship
+    # Relationships
     device: Mapped[Optional["Device"]] = relationship("Device", back_populates="audit_events")
+    
+    approval_request: Mapped[Optional["ApprovalRequest"]] = relationship(
+        "ApprovalRequest",
+        foreign_keys=[approval_request_id],
+        lazy="noload",
+    )
 
     __table_args__ = (
         Index("idx_audit_timestamp", "timestamp"),
         Index("idx_audit_user_action", "user_sub", "action"),
         Index("idx_audit_tool", "tool_name"),
         Index("idx_audit_result", "result"),
+        Index("idx_audit_user_id", "user_id"),
+        Index("idx_audit_approver_id", "approver_id"),
+        Index("idx_audit_approval_request_id", "approval_request_id"),
     )
 
 
