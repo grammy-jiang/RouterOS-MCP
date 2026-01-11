@@ -95,6 +95,7 @@ class ComplianceService:
         events = result.scalars().all()
 
         # Convert to data format
+        # Note: meta field is excluded from export to prevent accidental exposure of sensitive data
         events_data = [
             {
                 "id": event.id,
@@ -114,7 +115,6 @@ class ComplianceService:
                 "job_id": event.job_id,
                 "result": event.result,
                 "error_message": event.error_message,
-                "meta": event.meta,
             }
             for event in events
         ]
@@ -169,27 +169,27 @@ class ComplianceService:
             ]
         )
 
-        # Write rows
+        # Write rows with consistent null handling
         for event in events:
             writer.writerow(
                 [
-                    event["id"],
-                    event["timestamp"],
-                    event["user_sub"],
-                    event["user_email"] or "",
-                    event["user_role"],
-                    event["user_id"] or "",
-                    event["approver_id"] or "",
-                    event["approval_request_id"] or "",
-                    event["device_id"] or "",
-                    event["environment"] or "",
-                    event["action"],
-                    event["tool_name"],
-                    event["tool_tier"],
-                    event["plan_id"] or "",
-                    event["job_id"] or "",
-                    event["result"],
-                    event["error_message"] or "",
+                    event.get("id", ""),
+                    event.get("timestamp", ""),
+                    event.get("user_sub", ""),
+                    event.get("user_email") or "",
+                    event.get("user_role", ""),
+                    event.get("user_id") or "",
+                    event.get("approver_id") or "",
+                    event.get("approval_request_id") or "",
+                    event.get("device_id") or "",
+                    event.get("environment") or "",
+                    event.get("action", ""),
+                    event.get("tool_name", ""),
+                    event.get("tool_tier", ""),
+                    event.get("plan_id") or "",
+                    event.get("job_id") or "",
+                    event.get("result", ""),
+                    event.get("error_message") or "",
                 ]
             )
 
@@ -338,7 +338,7 @@ class ComplianceService:
         result = await self.session.execute(query)
         violations = result.scalars().all()
 
-        # Convert to data format
+        # Convert to data format (meta excluded to prevent sensitive data exposure)
         violations_data = [
             {
                 "id": v.id,
@@ -352,7 +352,6 @@ class ComplianceService:
                 "tool_name": v.tool_name,
                 "tool_tier": v.tool_tier,
                 "error_message": v.error_message,
-                "meta": v.meta,
             }
             for v in violations
         ]
