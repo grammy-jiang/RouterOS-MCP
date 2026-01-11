@@ -15,7 +15,7 @@ Configuration priority (later overrides earlier):
 
 import warnings
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -130,6 +130,53 @@ class Settings(BaseSettings):
 
     database_echo: bool = Field(
         default=False, description="Echo SQL statements to logs (debug only)"
+    )
+
+    # ========================================
+    # Redis Configuration (Session Store)
+    # ========================================
+
+    redis_url: str = Field(
+        default="redis://localhost:6379/0",
+        description=(
+            "Redis connection URL for session storage. "
+            "Production/staging MUST use TLS (rediss://) and authentication. "
+            "Example production URL: rediss://username:password@redis.example.com:6380/0"
+        ),
+    )
+
+    redis_pool_size: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Redis connection pool size. Recommended: 10-20 for production",
+    )
+
+    redis_timeout_seconds: float = Field(
+        default=5.0,
+        ge=1.0,
+        le=60.0,
+        description="Redis operation timeout. Recommended: 5-10 seconds for production",
+    )
+
+    redis_password: str | None = Field(
+        default=None,
+        description="Redis authentication password (can also be in redis_url)",
+    )
+
+    redis_ssl_cert_file: str | None = Field(
+        default=None,
+        description="Path to Redis SSL client certificate file for mutual TLS",
+    )
+
+    redis_ssl_key_file: str | None = Field(
+        default=None,
+        description="Path to Redis SSL client key file for mutual TLS",
+    )
+
+    redis_ssl_ca_certs: str | None = Field(
+        default=None,
+        description="Path to Redis SSL CA certificates file for server verification",
     )
 
     # ========================================
@@ -391,6 +438,30 @@ class Settings(BaseSettings):
                 )
                 # Set insecure default for lab
                 self.encryption_key = "INSECURE_LAB_KEY_DO_NOT_USE_IN_PRODUCTION"
+        return self
+
+    @model_validator(mode="after")
+    def validate_redis_security(self) -> "Settings":
+        """Validate Redis configuration security for production environments."""
+        if self.environment in ["staging", "prod"]:
+            # Require TLS for production/staging
+            if not self.redis_url.startswith("rediss://"):
+                warnings.warn(
+                    f"Redis URL in {self.environment} environment should use TLS (rediss://). "
+                    "Current configuration may expose session data in transit.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
+            # Warn if using localhost in production
+            if "localhost" in self.redis_url or "127.0.0.1" in self.redis_url:
+                warnings.warn(
+                    f"Redis URL uses localhost in {self.environment} environment. "
+                    "Multi-instance deployments require a shared Redis instance.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
         return self
 
     # ========================================
