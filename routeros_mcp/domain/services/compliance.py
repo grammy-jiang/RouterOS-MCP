@@ -214,9 +214,7 @@ class ComplianceService:
             Dictionary with approval decisions and summary statistics
         """
         # Build query for approval requests
-        query = select(ApprovalRequestModel).order_by(
-            desc(ApprovalRequestModel.requested_at)
-        )
+        query = select(ApprovalRequestModel).order_by(desc(ApprovalRequestModel.requested_at))
 
         conditions = []
         if status:
