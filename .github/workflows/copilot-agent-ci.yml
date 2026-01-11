@@ -116,7 +116,7 @@ jobs:
 
       - name: Run smoke tests
         run: |
-          uv run pytest tests/smoke -v || echo "No smoke tests found"
+          uv run pytest tests/smoke -v --cov=routeros_mcp --cov-append || echo "No smoke tests found"
         env:
           ROUTEROS_MCP_DEBUG: "false"
           ROUTEROS_MCP_LOG_LEVEL: "WARNING"
@@ -124,7 +124,7 @@ jobs:
 
       - name: Run e2e tests
         run: |
-          uv run pytest tests/e2e -v || echo "No e2e tests found"
+          uv run pytest tests/e2e -v --cov=routeros_mcp --cov-append || echo "No e2e tests found"
         env:
           ROUTEROS_MCP_DEBUG: "false"
           ROUTEROS_MCP_LOG_LEVEL: "WARNING"
@@ -140,10 +140,20 @@ jobs:
           fail_ci_if_error: false
         continue-on-error: true
 
+      - name: Combine coverage data
+        if: matrix.python-version == '3.11'
+        run: |
+          # Only combine if there are parallel coverage files
+          if ls .coverage.* 1> /dev/null 2>&1; then
+            uv run coverage combine
+          else
+            echo "No parallel coverage files found, skipping combine"
+          fi
+
       - name: Check coverage threshold
         if: matrix.python-version == '3.11'
         run: |
-          coverage report --fail-under=80
+          uv run coverage report --fail-under=80
         continue-on-error: false
 
   # Security scanning job
