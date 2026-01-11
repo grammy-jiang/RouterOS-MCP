@@ -183,7 +183,7 @@ class Device(Base):
         default=False,
         comment="Allow device to be target of bandwidth tests (Phase 4)",
     )
-    
+
     # Phase 4 adaptive polling fields
     critical: Mapped[bool] = mapped_column(
         Boolean,
@@ -191,28 +191,28 @@ class Device(Base):
         default=False,
         comment="Critical device (30s base polling) vs non-critical (60s base polling) - Phase 4",
     )
-    
+
     health_status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
         default="healthy",
         comment="Current health status: healthy/degraded/unreachable - Phase 4",
     )
-    
+
     consecutive_healthy_checks: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
         default=0,
         comment="Count of consecutive healthy checks for interval adjustment - Phase 4",
     )
-    
+
     polling_interval_seconds: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
         default=60,
         comment="Current adaptive polling interval in seconds - Phase 4",
     )
-    
+
     last_backoff_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
@@ -321,12 +321,12 @@ class Credential(Base):
     encrypted_secret: Mapped[str] = mapped_column(
         Text, nullable=False, comment="Encrypted password/key"
     )
-    
+
     # Phase 4: SSH key authentication fields
     private_key: Mapped[str | None] = mapped_column(
         Text, nullable=True, comment="Encrypted SSH private key (Phase 4)"
     )
-    
+
     public_key_fingerprint: Mapped[str | None] = mapped_column(
         String(128), nullable=True, comment="SSH public key fingerprint for verification (Phase 4)"
     )
@@ -342,7 +342,9 @@ class Credential(Base):
     # Relationship
     device: Mapped["Device"] = relationship("Device", back_populates="credentials")
 
-    __table_args__ = (Index("idx_credential_device_credential_type", "device_id", "credential_type"),)
+    __table_args__ = (
+        Index("idx_credential_device_credential_type", "device_id", "credential_type"),
+    )
 
 
 class HealthCheck(Base):
@@ -662,7 +664,9 @@ class Job(Base):
     __table_args__ = (
         Index("idx_job_status_next_run", "status", "next_run_at"),
         Index("idx_job_type", "job_type"),
-        CheckConstraint("progress_percent >= 0 AND progress_percent <= 100", name="chk_job_progress_percent"),
+        CheckConstraint(
+            "progress_percent >= 0 AND progress_percent <= 100", name="chk_job_progress_percent"
+        ),
     )
 
 
@@ -756,4 +760,138 @@ class AuditEvent(Base):
         Index("idx_audit_user_action", "user_sub", "action"),
         Index("idx_audit_tool", "tool_name"),
         Index("idx_audit_result", "result"),
+    )
+
+
+class Role(Base):
+    """User role for RBAC (Phase 5).
+
+    Defines a named role with associated permissions.
+    Roles are assigned to users and control access to resources.
+
+    Default roles (seeded by migration):
+    - read_only: Read-only access to fundamental tier tools
+    - ops_rw: Read-write access to advanced tier tools
+    - admin: Full access to all tools and administrative functions
+    - approver: Can approve professional tier plans
+
+    Relationships:
+        permissions: Associated permissions (M:N via role_permissions)
+    """
+
+    __tablename__ = "roles"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="Unique role identifier")
+
+    name: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        unique=True,
+        comment="Role name (read_only, ops_rw, admin, approver)",
+    )
+
+    description: Mapped[str] = mapped_column(
+        Text, nullable=False, comment="Human-readable role description"
+    )
+
+    # Many-to-many relationship with Permission
+    permissions: Mapped[list["Permission"]] = relationship(
+        "Permission",
+        secondary="role_permissions",
+        back_populates="roles",
+        lazy="selectin",
+    )
+
+    __table_args__ = (Index("idx_role_name", "name"),)
+
+
+class Permission(Base):
+    """Permission for RBAC (Phase 5).
+
+    Defines granular access control to specific resources and actions.
+    Permissions are associated with roles via many-to-many relationship.
+
+    Permission structure:
+    - resource_type: Type of resource (device, plan, tool, etc.)
+    - resource_id: Specific resource ID (or '*' for wildcard)
+    - action: Allowed action (read, write, execute, approve, etc.)
+
+    Examples:
+    - resource_type='device', resource_id='*', action='read'
+    - resource_type='device', resource_id='dev-001', action='write'
+    - resource_type='plan', resource_id='*', action='approve'
+    - resource_type='tool', resource_id='dns/update-servers', action='execute'
+
+    Relationships:
+        roles: Associated roles (M:N via role_permissions)
+    """
+
+    __tablename__ = "permissions"
+
+    id: Mapped[str] = mapped_column(
+        String(64), primary_key=True, comment="Unique permission identifier"
+    )
+
+    resource_type: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        comment="Resource type (device, plan, tool, etc.)",
+    )
+
+    resource_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        comment="Resource ID or wildcard (*)",
+    )
+
+    action: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        comment="Allowed action (read, write, execute, approve, etc.)",
+    )
+
+    description: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="Optional permission description"
+    )
+
+    # Many-to-many relationship with Role
+    roles: Mapped[list["Role"]] = relationship(
+        "Role",
+        secondary="role_permissions",
+        back_populates="permissions",
+        lazy="selectin",
+    )
+
+    __table_args__ = (
+        Index("idx_permission_resource_type", "resource_type"),
+        Index("idx_permission_resource_action", "resource_type", "resource_id", "action"),
+    )
+
+
+# Many-to-many association table for Role and Permission
+class RolePermission(Base):
+    """Association table for Role-Permission many-to-many relationship (Phase 5).
+
+    Links roles to their associated permissions.
+    """
+
+    __tablename__ = "role_permissions"
+
+    role_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("roles.id", ondelete="CASCADE"),
+        primary_key=True,
+        comment="Role ID",
+    )
+
+    permission_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("permissions.id", ondelete="CASCADE"),
+        primary_key=True,
+        comment="Permission ID",
+    )
+
+    __table_args__ = (
+        Index("idx_role_permission_role", "role_id"),
+        Index("idx_role_permission_permission", "permission_id"),
     )
