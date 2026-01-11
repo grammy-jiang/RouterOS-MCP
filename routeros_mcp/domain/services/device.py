@@ -235,18 +235,30 @@ class DeviceService:
     async def get_device(
         self,
         device_id: str,
+        allowed_device_ids: list[str] | None = None,
     ) -> DeviceDomain:
         """Get device by ID.
 
         Args:
             device_id: Device identifier
+            allowed_device_ids: Optional list of allowed device IDs for scope filtering
+                               (None or empty list = full access)
 
         Returns:
             Device domain model
 
         Raises:
-            DeviceNotFoundError: If device doesn't exist
+            DeviceNotFoundError: If device doesn't exist or not in allowed scope
         """
+        # Check device scope before querying
+        # None or empty list means full access (typically for admins)
+        if allowed_device_ids is not None and len(allowed_device_ids) > 0:
+            if device_id not in allowed_device_ids:
+                raise DeviceNotFoundError(
+                    f"Device '{device_id}' not found or not accessible",
+                    data={"device_id": device_id, "reason": "not_in_scope"},
+                )
+
         result = await self.session.execute(
             select(DeviceORM).where(DeviceORM.id == device_id)
         )
@@ -264,15 +276,18 @@ class DeviceService:
         self,
         environment: str | None = None,
         status: str | None = None,
+        allowed_device_ids: list[str] | None = None,
     ) -> list[DeviceDomain]:
         """List devices with optional filters.
 
         Args:
             environment: Filter by environment
             status: Filter by status
+            allowed_device_ids: Optional list of allowed device IDs for scope filtering
+                               (None or empty list = full access)
 
         Returns:
-            List of devices
+            List of devices (filtered by scope if provided)
         """
         query = select(DeviceORM)
 
@@ -281,6 +296,11 @@ class DeviceService:
 
         if status:
             query = query.where(DeviceORM.status == status)
+
+        # Apply device scope filtering
+        # None or empty list means full access (typically for admins)
+        if allowed_device_ids is not None and len(allowed_device_ids) > 0:
+            query = query.where(DeviceORM.id.in_(allowed_device_ids))
 
         result = await self.session.execute(query)
         devices = result.scalars().all()

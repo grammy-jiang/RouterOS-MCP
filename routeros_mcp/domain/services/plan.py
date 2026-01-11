@@ -603,17 +603,23 @@ class PlanService:
 
         return devices
 
-    async def get_plan(self, plan_id: str) -> dict[str, Any]:
+    async def get_plan(
+        self,
+        plan_id: str,
+        allowed_device_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
         """Get plan details.
 
         Args:
             plan_id: Plan identifier
+            allowed_device_ids: Optional list of allowed device IDs for scope filtering
+                               (None or empty list = full access)
 
         Returns:
             Plan details
 
         Raises:
-            ValueError: If plan not found
+            ValueError: If plan not found or contains devices not in allowed scope
         """
         stmt = select(PlanModel).where(PlanModel.id == plan_id)
         result = await self.session.execute(stmt)
@@ -621,6 +627,20 @@ class PlanService:
 
         if not plan:
             raise ValueError(f"Plan not found: {plan_id}")
+
+        # Check device scope if provided
+        # None or empty list means full access (typically for admins)
+        if allowed_device_ids is not None and len(allowed_device_ids) > 0:
+            plan_device_ids = plan.device_ids or []
+            unauthorized_devices = [
+                dev_id for dev_id in plan_device_ids if dev_id not in allowed_device_ids
+            ]
+            if unauthorized_devices:
+                raise ValueError(
+                    f"Plan '{plan_id}' contains devices not in allowed scope: "
+                    f"{', '.join(unauthorized_devices[:3])}"
+                    f"{'...' if len(unauthorized_devices) > 3 else ''}"
+                )
 
         return {
             "plan_id": plan.id,
@@ -1595,6 +1615,7 @@ class PlanService:
         created_by: str | None = None,
         status: str | None = None,
         limit: int = 50,
+        allowed_device_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """List plans with optional filtering.
 
@@ -1602,9 +1623,11 @@ class PlanService:
             created_by: Filter by creator user sub
             status: Filter by status
             limit: Maximum number of results
+            allowed_device_ids: Optional list of allowed device IDs for scope filtering
+                               (None or empty list = full access)
 
         Returns:
-            List of plan summaries
+            List of plan summaries (filtered by device scope if provided)
         """
         stmt = select(PlanModel)
 
@@ -1618,6 +1641,18 @@ class PlanService:
         result = await self.session.execute(stmt)
         plans = result.scalars().all()
 
+        # Filter plans by device scope
+        # None or empty list means full access (typically for admins)
+        filtered_plans = []
+        for p in plans:
+            if allowed_device_ids is not None and len(allowed_device_ids) > 0:
+                plan_device_ids = p.device_ids or []
+                # Only include plans where ALL devices are in allowed scope
+                if all(dev_id in allowed_device_ids for dev_id in plan_device_ids):
+                    filtered_plans.append(p)
+            else:
+                filtered_plans.append(p)
+
         return [
             {
                 "plan_id": p.id,
@@ -1628,5 +1663,5 @@ class PlanService:
                 "summary": p.summary,
                 "created_at": p.created_at.isoformat(),
             }
-            for p in plans
+            for p in filtered_plans
         ]

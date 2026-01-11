@@ -895,3 +895,82 @@ class RolePermission(Base):
         Index("idx_role_permission_role", "role_id"),
         Index("idx_role_permission_permission", "permission_id"),
     )
+
+
+class User(Base):
+    """User entity for authentication and authorization (Phase 5).
+
+    Represents a user account with role assignment and device scope restrictions.
+    Users are typically created/synced from OAuth/OIDC provider claims.
+
+    Device Scopes:
+        - None or empty list: Full access to all devices (typical for admins)
+        - Non-empty list: Restricted to specific device IDs
+
+    Relationships:
+        role: Assigned role (N:1)
+    """
+
+    __tablename__ = "users"
+
+    # Primary key - OIDC subject (sub claim)
+    sub: Mapped[str] = mapped_column(
+        String(255),
+        primary_key=True,
+        comment="OIDC subject (unique user identifier)",
+    )
+
+    # User identity
+    email: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+        comment="User email address",
+    )
+
+    display_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="User display name",
+    )
+
+    # Role assignment
+    role_name: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("roles.name", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+        comment="Assigned role name",
+    )
+
+    # Device scope restrictions (Phase 5 #6)
+    device_scopes: Mapped[list] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+        comment="Allowed device IDs (empty = full access)",
+    )
+
+    # Account status
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        comment="Whether user account is active",
+    )
+
+    # Last login tracking
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Last successful login timestamp",
+    )
+
+    # Relationship
+    role: Mapped["Role"] = relationship("Role", lazy="selectin")
+
+    __table_args__ = (
+        Index("idx_user_email", "email"),
+        Index("idx_user_role", "role_name"),
+        Index("idx_user_active", "is_active"),
+    )
