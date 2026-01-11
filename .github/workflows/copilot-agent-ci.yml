@@ -141,7 +141,7 @@ jobs:
       - name: Check coverage threshold
         if: matrix.python-version == '3.11'
         run: |
-          coverage report --fail-under=80
+          uv run coverage report --fail-under=80
         continue-on-error: false
 
   # Security scanning job
