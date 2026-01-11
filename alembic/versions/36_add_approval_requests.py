@@ -1,7 +1,7 @@
 """Add approval_requests table for Phase 5 approval workflow
 
-Revision ID: 35
-Revises: 34
+Revision ID: 36
+Revises: 35
 Create Date: 2026-01-11 09:55:00.000000
 
 """
@@ -13,8 +13,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = "35"
-down_revision: str | None = "34"
+revision: str = "36"
+down_revision: str | None = "35"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
