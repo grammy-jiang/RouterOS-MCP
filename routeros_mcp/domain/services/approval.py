@@ -218,9 +218,9 @@ class ApprovalService:
                     extra={"plan_id": plan.id, "requester": approval_request.requested_by},
                 )
                 # Note: In production, we would look up requester email from user service
-                # For now, we use a placeholder pattern
+                # Using @placeholder.invalid to ensure no accidental email delivery
                 await self.notification_service.send_approval_approved(
-                    to_address=f"{approval_request.requested_by}@example.com",
+                    to_address=f"{approval_request.requested_by}@placeholder.invalid",
                     plan_id=approval_request.plan_id,
                     approved_by=approved_by,
                     plan_summary=plan.summary or "No summary",
@@ -294,9 +294,9 @@ class ApprovalService:
                     extra={"plan_id": plan.id, "requester": approval_request.requested_by},
                 )
                 # Note: In production, we would look up requester email from user service
-                # For now, we use a placeholder pattern
+                # Using @placeholder.invalid to ensure no accidental email delivery
                 await self.notification_service.send_approval_rejected(
-                    to_address=f"{approval_request.requested_by}@example.com",
+                    to_address=f"{approval_request.requested_by}@placeholder.invalid",
                     plan_id=approval_request.plan_id,
                     rejected_by=rejected_by,
                     plan_summary=plan.summary or "No summary",

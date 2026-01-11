@@ -313,8 +313,9 @@ class JobService:
                     extra={"job_id": job_id, "user": job.created_by},
                 )
                 # Note: In production, we would look up user email from user service
+                # Using @placeholder.invalid to ensure no accidental email delivery
                 await self.notification_service.send_job_executed(
-                    to_address=f"{job.created_by}@example.com",
+                    to_address=f"{job.created_by}@placeholder.invalid",
                     job_id=job_id,
                     plan_id=job.plan_id,
                     job_type=job.job_type,
@@ -341,8 +342,9 @@ class JobService:
                     extra={"job_id": job_id, "user": job.created_by},
                 )
                 # Note: In production, we would look up user email from user service
+                # Using @placeholder.invalid to ensure no accidental email delivery
                 await self.notification_service.send_job_executed(
-                    to_address=f"{job.created_by}@example.com",
+                    to_address=f"{job.created_by}@placeholder.invalid",
                     job_id=job_id,
                     plan_id=job.plan_id,
                     job_type=job.job_type,

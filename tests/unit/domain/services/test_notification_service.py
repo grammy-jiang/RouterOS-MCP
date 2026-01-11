@@ -291,6 +291,7 @@ def test_smtp_backend_initialization() -> None:
     backend = SMTPNotificationBackend(
         smtp_host="smtp.example.com",
         smtp_port=587,
+        from_address="noreply@example.com",
         use_tls=True,
         username="user@example.com",
         password="secret",
@@ -299,6 +300,7 @@ def test_smtp_backend_initialization() -> None:
 
     assert backend.smtp_host == "smtp.example.com"
     assert backend.smtp_port == 587
+    assert backend.from_address == "noreply@example.com"
     assert backend.use_tls is True
     assert backend.username == "user@example.com"
     assert backend.password == "secret"
@@ -346,6 +348,7 @@ def test_create_notification_service_smtp_backend() -> None:
     assert service.from_address == "test@example.com"
     assert service.backend.smtp_host == "smtp.example.com"
     assert service.backend.smtp_port == 465
+    assert service.backend.from_address == "test@example.com"
     assert service.backend.use_tls is False
     assert service.backend.username == "user"
     assert service.backend.password == "pass"

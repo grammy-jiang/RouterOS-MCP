@@ -85,6 +85,7 @@ class SMTPNotificationBackend(NotificationBackend):
         self,
         smtp_host: str,
         smtp_port: int,
+        from_address: str = "routeros-mcp@example.com",
         use_tls: bool = True,
         username: str | None = None,
         password: str | None = None,
@@ -95,6 +96,7 @@ class SMTPNotificationBackend(NotificationBackend):
         Args:
             smtp_host: SMTP server hostname
             smtp_port: SMTP server port
+            from_address: Email address to use as sender
             use_tls: Use STARTTLS for secure connection
             username: SMTP authentication username
             password: SMTP authentication password
@@ -102,6 +104,7 @@ class SMTPNotificationBackend(NotificationBackend):
         """
         self.smtp_host = smtp_host
         self.smtp_port = smtp_port
+        self.from_address = from_address
         self.use_tls = use_tls
         self.username = username
         self.password = password
@@ -125,6 +128,7 @@ class SMTPNotificationBackend(NotificationBackend):
             msg = MIMEMultipart("alternative")
             msg["Subject"] = notification.subject
             msg["To"] = notification.to_address
+            msg["From"] = self.from_address  # Set From header from service config
 
             # Attach text body
             msg.attach(MIMEText(notification.body_text, "plain"))
@@ -176,7 +180,9 @@ class SMTPNotificationBackend(NotificationBackend):
             if self.username and self.password:
                 smtp.login(self.username, self.password)
 
-            smtp.sendmail(msg["From"] or "noreply@example.com", to_address, msg.as_string())
+            # Extract From address from message header, which was set during message creation
+            from_addr = msg["From"]
+            smtp.sendmail(from_addr, to_address, msg.as_string())
         finally:
             smtp.quit()
 
@@ -425,6 +431,7 @@ def create_notification_service(
         backend: NotificationBackend = SMTPNotificationBackend(
             smtp_host=smtp_host,
             smtp_port=smtp_port,
+            from_address=from_address,
             use_tls=smtp_use_tls,
             username=smtp_username,
             password=smtp_password,
