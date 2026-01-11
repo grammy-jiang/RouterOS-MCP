@@ -140,9 +140,7 @@ class DeviceService:
             )
 
         # Check if device already exists
-        result = await self.session.execute(
-            select(DeviceORM).where(DeviceORM.id == device_data.id)
-        )
+        result = await self.session.execute(select(DeviceORM).where(DeviceORM.id == device_data.id))
         existing = result.scalar_one_or_none()
         if existing:
             raise ValidationError(
@@ -235,21 +233,34 @@ class DeviceService:
     async def get_device(
         self,
         device_id: str,
+        allowed_device_ids: list[str] | None = None,
     ) -> DeviceDomain:
         """Get device by ID.
 
         Args:
             device_id: Device identifier
+            allowed_device_ids: Optional list of allowed device IDs for scope filtering
+                               (None or empty list = full access)
 
         Returns:
             Device domain model
 
         Raises:
-            DeviceNotFoundError: If device doesn't exist
+            DeviceNotFoundError: If device doesn't exist or not in allowed scope
         """
-        result = await self.session.execute(
-            select(DeviceORM).where(DeviceORM.id == device_id)
-        )
+        # Check device scope before querying
+        # None or empty list means full access (typically for admins)
+        if (
+            allowed_device_ids is not None
+            and len(allowed_device_ids) > 0
+            and device_id not in allowed_device_ids
+        ):
+            raise DeviceNotFoundError(
+                f"Device '{device_id}' not found or not accessible",
+                data={"device_id": device_id, "reason": "not_in_scope"},
+            )
+
+        result = await self.session.execute(select(DeviceORM).where(DeviceORM.id == device_id))
         device_orm = result.scalar_one_or_none()
 
         if not device_orm:
@@ -264,15 +275,18 @@ class DeviceService:
         self,
         environment: str | None = None,
         status: str | None = None,
+        allowed_device_ids: list[str] | None = None,
     ) -> list[DeviceDomain]:
         """List devices with optional filters.
 
         Args:
             environment: Filter by environment
             status: Filter by status
+            allowed_device_ids: Optional list of allowed device IDs for scope filtering
+                               (None or empty list = full access)
 
         Returns:
-            List of devices
+            List of devices (filtered by scope if provided)
         """
         query = select(DeviceORM)
 
@@ -281,6 +295,11 @@ class DeviceService:
 
         if status:
             query = query.where(DeviceORM.status == status)
+
+        # Apply device scope filtering
+        # None or empty list means full access (typically for admins)
+        if allowed_device_ids is not None and len(allowed_device_ids) > 0:
+            query = query.where(DeviceORM.id.in_(allowed_device_ids))
 
         result = await self.session.execute(query)
         devices = result.scalars().all()
@@ -304,9 +323,7 @@ class DeviceService:
         Raises:
             DeviceNotFoundError: If device doesn't exist
         """
-        result = await self.session.execute(
-            select(DeviceORM).where(DeviceORM.id == device_id)
-        )
+        result = await self.session.execute(select(DeviceORM).where(DeviceORM.id == device_id))
         device_orm = result.scalar_one_or_none()
 
         if not device_orm:
@@ -370,7 +387,7 @@ class DeviceService:
                     "private_key is required for routeros_ssh_key credential type",
                     data={"device_id": credential_data.device_id},
                 )
-            
+
             # Validate SSH key format
             try:
                 validate_ssh_private_key(credential_data.private_key)
@@ -379,7 +396,7 @@ class DeviceService:
                     f"Invalid SSH private key: {e}",
                     data={"device_id": credential_data.device_id},
                 )
-            
+
             # Generate fingerprint if not provided
             if not credential_data.public_key_fingerprint:
                 try:
@@ -391,13 +408,13 @@ class DeviceService:
                         f"Failed to extract public key fingerprint: {e}",
                         data={"device_id": credential_data.device_id},
                     )
-            
+
             # Encrypt private key
             encrypted_private_key = encrypt_string(
                 credential_data.private_key,
                 self.settings.encryption_key,
             )
-            
+
             # Create credential with SSH key
             credential_orm = CredentialORM(
                 id=f"cred-{credential_data.device_id}-{credential_data.credential_type}",
@@ -416,7 +433,7 @@ class DeviceService:
                     f"password is required for {credential_data.credential_type} credential type",
                     data={"device_id": credential_data.device_id},
                 )
-            
+
             # Encrypt password
             encrypted_secret = encrypt_string(
                 credential_data.password,
@@ -523,7 +540,7 @@ class DeviceService:
         """Get SSH client for device with decrypted credentials.
 
         Caller must close the returned client (`await client.close()`).
-        
+
         Phase 4: Supports both SSH key and password authentication.
         Tries routeros_ssh_key first, falls back to ssh password if not found.
         """
@@ -538,7 +555,7 @@ class DeviceService:
             )
         )
         key_credential = result.scalar_one_or_none()
-        
+
         if key_credential:
             # Check if private_key is actually present
             if not key_credential.private_key:
@@ -574,7 +591,7 @@ class DeviceService:
                         f"SSH client created with key authentication for device '{device_id}'"
                     )
                     return client
-        
+
         # Fallback to password-based SSH authentication
         result = await self.session.execute(
             select(CredentialORM).where(
@@ -640,11 +657,13 @@ class DeviceService:
 
         # --- REST attempt (primary, only if REST credential exists) ---
         rest_credential_exists = await self.session.execute(
-            select(CredentialORM.id).where(
+            select(CredentialORM.id)
+            .where(
                 CredentialORM.device_id == device_id,
                 CredentialORM.credential_type == REST_KIND,
                 CredentialORM.active == True,  # noqa: E712
-            ).limit(1)
+            )
+            .limit(1)
         )
         if rest_credential_exists.scalar_one_or_none():
             attempted_transports.append("rest")
@@ -719,9 +738,7 @@ class DeviceService:
             ssh_time_ms = (time.perf_counter() - ssh_start) * 1000
 
             await self.update_device(device_id, DeviceUpdate(status="healthy"))
-            result = await self.session.execute(
-                select(DeviceORM).where(DeviceORM.id == device_id)
-            )
+            result = await self.session.execute(select(DeviceORM).where(DeviceORM.id == device_id))
             device_orm = result.scalar_one()
             device_orm.last_seen_at = datetime.now(UTC)
             await self.session.commit()
@@ -802,11 +819,11 @@ class DeviceService:
         operation: str | None = None,
     ) -> DeviceDomain:
         """Check device capability flags and environment tags for Phase 3 safety guardrails.
-        
+
         This method enforces two layers of safety:
         1. Environment validation: Ensure device is in an allowed environment
         2. Capability validation: Ensure required capability flags are enabled
-        
+
         Args:
             device_id: Device identifier
             required_capabilities: List of capability flags required for the operation.
@@ -815,15 +832,15 @@ class DeviceService:
                                 If None, defaults to PHASE3_DEFAULT_ALLOWED_ENVIRONMENTS
                                 (lab/staging only).
             operation: Optional operation name for audit logging and error messages.
-        
+
         Returns:
             Device domain model if all checks pass
-        
+
         Raises:
             DeviceNotFoundError: If device doesn't exist
             EnvironmentNotAllowedError: If device environment is not in allowed list
             CapabilityNotAllowedError: If required capability flag is not enabled
-        
+
         Example:
             # Check firewall write capability on lab/staging devices only
             device = await service.check_device_capabilities(
@@ -832,7 +849,7 @@ class DeviceService:
                 allowed_environments=["lab", "staging"],
                 operation="firewall_write"
             )
-            
+
             # Check professional workflows (defaults to lab/staging only)
             device = await service.check_device_capabilities(
                 device_id="dev-prod-01",
@@ -842,11 +859,11 @@ class DeviceService:
         """
         # Get device
         device = await self.get_device(device_id)
-        
+
         # Default to Phase 3 allowed environments (lab/staging only)
         if allowed_environments is None:
             allowed_environments = PHASE3_DEFAULT_ALLOWED_ENVIRONMENTS
-        
+
         # 1. Environment validation (MANDATORY - cannot bypass)
         if device.environment not in allowed_environments:
             error_context = {
@@ -856,7 +873,7 @@ class DeviceService:
                 "allowed_environments": allowed_environments,
                 "operation": operation or "unknown",
             }
-            
+
             # Audit log for environment restriction
             logger.warning(
                 "Device environment restriction enforced",
@@ -866,20 +883,20 @@ class DeviceService:
                     "result": "denied",
                 },
             )
-            
+
             raise EnvironmentNotAllowedError(
                 f"Operation '{operation or 'unknown'}' not allowed on device in '{device.environment}' environment. "
                 f"Allowed environments: {', '.join(allowed_environments)}",
                 context=error_context,
             )
-        
+
         # 2. Capability flag validation (if capabilities specified)
         if required_capabilities:
             for capability in required_capabilities:
                 # Get capability flag value from device (defaults to False if not set)
                 capability_flag_name = capability.value
                 capability_enabled = getattr(device, capability_flag_name, False)
-                
+
                 if not capability_enabled:
                     error_context = {
                         "device_id": device_id,
@@ -889,7 +906,7 @@ class DeviceService:
                         "current_value": capability_enabled,
                         "operation": operation or "unknown",
                     }
-                    
+
                     # Audit log for capability restriction
                     logger.warning(
                         "Device capability flag restriction enforced",
@@ -899,7 +916,7 @@ class DeviceService:
                             "result": "denied",
                         },
                     )
-                    
+
                     raise CapabilityNotAllowedError(
                         f"Operation '{operation or 'unknown'}' requires capability flag '{capability_flag_name}' "
                         f"to be enabled on device '{device.name}' ({device_id}). "
@@ -907,7 +924,7 @@ class DeviceService:
                         f"Please enable this capability flag to proceed.",
                         context=error_context,
                     )
-        
+
         # All checks passed - audit log success
         logger.info(
             "Device capability check passed",
@@ -922,7 +939,7 @@ class DeviceService:
                 "result": "allowed",
             },
         )
-        
+
         return device
 
     async def _invalidate_device_cache(self, device_id: str, reason: str = "state_change") -> None:
@@ -944,7 +961,7 @@ class DeviceService:
                 metrics.record_cache_invalidation("device", reason)
                 logger.info(
                     f"Invalidated device cache entries for device {device_id}",
-                    extra={"device_id": device_id, "invalidated_count": count, "reason": reason}
+                    extra={"device_id": device_id, "invalidated_count": count, "reason": reason},
                 )
         except RuntimeError:
             # Cache not initialized - skip invalidation
