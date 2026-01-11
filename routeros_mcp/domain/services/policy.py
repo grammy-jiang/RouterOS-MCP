@@ -96,7 +96,6 @@ class PolicyEngine:
         user_role: UserRole,
         operation: str,
         user_sub: str | None = None,
-        context: dict[str, Any] | None = None,
     ) -> None:
         """Validate that user's role tier allows the requested operation.
 
@@ -140,58 +139,59 @@ class PolicyEngine:
         operation_info = f"'{operation}'"
 
         # Check if read-only user is attempting write operation
-        if user_role == UserRole.READ_ONLY:
-            if operation in write_operations or operation in admin_operations:
-                logger.warning(
-                    f"Tier policy violation: read_only user{user_info} attempted {operation}",
-                    extra={
-                        "user_sub": user_sub,
-                        "user_role": user_role.value,
-                        "operation": operation,
-                        "policy_type": "tier_restriction",
-                    },
-                )
-                raise TierPolicyViolation(
-                    f"Role 'read_only'{user_info} cannot perform operation {operation_info}. "
-                    f"Read-only users can only perform read operations. "
-                    "Contact an administrator to request elevated privileges."
-                )
+        if user_role == UserRole.READ_ONLY and (
+            operation in write_operations or operation in admin_operations
+        ):
+            logger.warning(
+                f"Tier policy violation: read_only user{user_info} attempted {operation}",
+                extra={
+                    "user_sub": user_sub,
+                    "user_role": user_role.value,
+                    "operation": operation,
+                    "policy_type": "tier_restriction",
+                },
+            )
+            raise TierPolicyViolation(
+                f"Role 'read_only'{user_info} cannot perform operation {operation_info}. "
+                f"Read-only users can only perform read operations. "
+                "Contact an administrator to request elevated privileges."
+            )
 
         # Check if ops_rw user is attempting admin operation
-        if user_role == UserRole.OPS_RW:
-            if operation in admin_operations:
-                logger.warning(
-                    f"Tier policy violation: ops_rw user{user_info} attempted {operation}",
-                    extra={
-                        "user_sub": user_sub,
-                        "user_role": user_role.value,
-                        "operation": operation,
-                        "policy_type": "tier_restriction",
-                    },
-                )
-                raise TierPolicyViolation(
-                    f"Role 'ops_rw'{user_info} cannot perform operation {operation_info}. "
-                    f"This operation requires admin privileges. "
-                    "Contact an administrator to request elevated privileges."
-                )
+        if user_role == UserRole.OPS_RW and operation in admin_operations:
+            logger.warning(
+                f"Tier policy violation: ops_rw user{user_info} attempted {operation}",
+                extra={
+                    "user_sub": user_sub,
+                    "user_role": user_role.value,
+                    "operation": operation,
+                    "policy_type": "tier_restriction",
+                },
+            )
+            raise TierPolicyViolation(
+                f"Role 'ops_rw'{user_info} cannot perform operation {operation_info}. "
+                f"This operation requires admin privileges. "
+                "Contact an administrator to request elevated privileges."
+            )
 
         # Check if approver is attempting to execute operations
-        if user_role == UserRole.APPROVER:
-            if operation in write_operations or operation in admin_operations:
-                logger.warning(
-                    f"Tier policy violation: approver{user_info} attempted {operation}",
-                    extra={
-                        "user_sub": user_sub,
-                        "user_role": user_role.value,
-                        "operation": operation,
-                        "policy_type": "tier_restriction",
-                    },
-                )
-                raise TierPolicyViolation(
-                    f"Role 'approver'{user_info} cannot execute operations. "
-                    f"Approvers can only approve plans but cannot execute {operation_info}. "
-                    "Use an ops_rw or admin account to execute operations."
-                )
+        if user_role == UserRole.APPROVER and (
+            operation in write_operations or operation in admin_operations
+        ):
+            logger.warning(
+                f"Tier policy violation: approver{user_info} attempted {operation}",
+                extra={
+                    "user_sub": user_sub,
+                    "user_role": user_role.value,
+                    "operation": operation,
+                    "policy_type": "tier_restriction",
+                },
+            )
+            raise TierPolicyViolation(
+                f"Role 'approver'{user_info} cannot execute operations. "
+                f"Approvers can only approve plans but cannot execute {operation_info}. "
+                "Use an ops_rw or admin account to execute operations."
+            )
 
         logger.debug(
             f"Tier policy check passed: {user_role.value} can perform {operation}",

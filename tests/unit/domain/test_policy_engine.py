@@ -24,7 +24,7 @@ from routeros_mcp.security.authz import ToolTier, UserRole
 
 
 @pytest.fixture
-async def db_session() -> AsyncSession:
+async def db_session():  # type: ignore[misc]
     """Create an in-memory database session for testing."""
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
 
@@ -55,7 +55,9 @@ async def test_validate_tier_access_read_only_cannot_plan(
     policy_engine: PolicyEngine,
 ) -> None:
     """Test that read_only users cannot create plans."""
-    with pytest.raises(TierPolicyViolation, match="read_only.*cannot perform operation.*plan_create"):
+    with pytest.raises(
+        TierPolicyViolation, match="read_only.*cannot perform operation.*plan_create"
+    ):
         await policy_engine.validate_tier_access(
             user_role=UserRole.READ_ONLY,
             operation="plan_create",
@@ -68,7 +70,9 @@ async def test_validate_tier_access_read_only_cannot_execute(
     policy_engine: PolicyEngine,
 ) -> None:
     """Test that read_only users cannot execute plans."""
-    with pytest.raises(TierPolicyViolation, match="read_only.*cannot perform operation.*plan_execute"):
+    with pytest.raises(
+        TierPolicyViolation, match="read_only.*cannot perform operation.*plan_execute"
+    ):
         await policy_engine.validate_tier_access(
             user_role=UserRole.READ_ONLY,
             operation="plan_execute",
@@ -81,7 +85,9 @@ async def test_validate_tier_access_read_only_cannot_write(
     policy_engine: PolicyEngine,
 ) -> None:
     """Test that read_only users cannot perform device writes."""
-    with pytest.raises(TierPolicyViolation, match="read_only.*cannot perform operation.*device_write"):
+    with pytest.raises(
+        TierPolicyViolation, match="read_only.*cannot perform operation.*device_write"
+    ):
         await policy_engine.validate_tier_access(
             user_role=UserRole.READ_ONLY,
             operation="device_write",
@@ -120,7 +126,9 @@ async def test_validate_tier_access_ops_rw_cannot_multi_device(
     policy_engine: PolicyEngine,
 ) -> None:
     """Test that ops_rw users cannot perform multi-device operations."""
-    with pytest.raises(TierPolicyViolation, match="ops_rw.*cannot perform operation.*multi_device_plan"):
+    with pytest.raises(
+        TierPolicyViolation, match="ops_rw.*cannot perform operation.*multi_device_plan"
+    ):
         await policy_engine.validate_tier_access(
             user_role=UserRole.OPS_RW,
             operation="multi_device_plan",
@@ -413,7 +421,9 @@ async def test_validate_tool_tier_access_read_only_cannot_professional(
     policy_engine: PolicyEngine,
 ) -> None:
     """Test that read_only cannot access professional tier tools."""
-    with pytest.raises(TierPolicyViolation, match="read_only.*cannot execute professional tier tools"):
+    with pytest.raises(
+        TierPolicyViolation, match="read_only.*cannot execute professional tier tools"
+    ):
         await policy_engine.validate_tool_tier_access(
             user_role=UserRole.READ_ONLY,
             tool_tier=ToolTier.PROFESSIONAL,
