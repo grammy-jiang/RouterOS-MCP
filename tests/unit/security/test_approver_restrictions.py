@@ -6,16 +6,24 @@ This module validates that the approver role:
 3. All unauthorized access attempts are logged in audit logs
 
 See Phase 5 Issue #8 for requirements.
+
+Note: This test file provides comprehensive coverage for approver role restrictions,
+complementing the existing test in test_authz_middleware.py::test_approver_cannot_execute_any_tools.
+While that test validates the basic blocking behavior, this suite provides:
+- Detailed validation across all tool tiers (fundamental, advanced, professional)
+- Batch authorization denial testing
+- Comprehensive audit logging validation
+- Role comparison tests
+- Error message clarity verification
+This separation allows for better organization and more thorough testing of the approver
+role enforcement requirements from Phase 5 Issue #8.
 """
 
 import pytest
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from routeros_mcp.config import Settings
 from routeros_mcp.domain.models import Device
-from routeros_mcp.infra.db.session import DatabaseSessionManager
-from routeros_mcp.mcp.middleware.auth import AuthorizationMiddleware
 from routeros_mcp.mcp.errors import AuthorizationError as MCPAuthorizationError
 from routeros_mcp.security.auth import User
 from routeros_mcp.security.authz import (
@@ -112,68 +120,18 @@ class TestApproverRoleChecks:
 
 
 class TestApproverMiddlewareEnforcement:
-    """Test authorization middleware enforcement for approver role."""
+    """Test authorization middleware enforcement for approver role.
 
-    @pytest.fixture
-    def settings(self):
-        """Create test settings."""
-        return Settings(environment="lab")
-
-    @pytest.fixture
-    def mock_session_factory(self):
-        """Create mock database session factory."""
-        factory = MagicMock(spec=DatabaseSessionManager)
-        factory.session = MagicMock()
-        return factory
-
-    @pytest.fixture
-    def middleware(self, mock_session_factory, settings):
-        """Create authorization middleware instance."""
-        return AuthorizationMiddleware(mock_session_factory, settings)
-
-    @pytest.fixture
-    def approver_user(self):
-        """Create approver user with full device access."""
-        return User(
-            sub="user-approver-001",
-            email="approver@example.com",
-            role="approver",
-            device_scope=None,  # Full device access (not the limiting factor)
-            name="Approver User",
-        )
-
-    @pytest.fixture
-    def lab_device(self):
-        """Create test device in lab environment with all capabilities."""
-        return create_test_device(
-            device_id="dev-lab-01",
-            name="Lab Device 01",
-            environment="lab",
-            allow_advanced_writes=True,
-            allow_professional_workflows=True,
-        )
-
-    def setup_device_mock(self, mock_session_factory, device):
-        """Helper to set up device service mock."""
-        mock_session = MagicMock()
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock()
-        mock_session_factory.session.return_value = mock_session
-
-        mock_device_service = MagicMock()
-        mock_device_service.get_device = AsyncMock(return_value=device)
-
-        return patch(
-            "routeros_mcp.mcp.middleware.auth.DeviceService",
-            return_value=mock_device_service,
-        )
+    Uses shared fixtures from conftest.py: settings, mock_session_factory,
+    middleware, approver_user, lab_device, setup_device_mock.
+    """
 
     @pytest.mark.asyncio
     async def test_approver_denied_fundamental_tool_via_middleware(
-        self, middleware, mock_session_factory, approver_user, lab_device
+        self, middleware, setup_device_mock, approver_user, lab_device
     ):
         """Test approver is denied fundamental tier tool execution via middleware."""
-        with self.setup_device_mock(mock_session_factory, lab_device):
+        with setup_device_mock(lab_device):
             with pytest.raises(MCPAuthorizationError) as exc_info:
                 await middleware.check_authorization(
                     user=approver_user,
@@ -188,10 +146,10 @@ class TestApproverMiddlewareEnforcement:
 
     @pytest.mark.asyncio
     async def test_approver_denied_advanced_tool_via_middleware(
-        self, middleware, mock_session_factory, approver_user, lab_device
+        self, middleware, setup_device_mock, approver_user, lab_device
     ):
         """Test approver is denied advanced tier tool execution via middleware."""
-        with self.setup_device_mock(mock_session_factory, lab_device):
+        with setup_device_mock(lab_device):
             with pytest.raises(MCPAuthorizationError) as exc_info:
                 await middleware.check_authorization(
                     user=approver_user,
@@ -206,10 +164,10 @@ class TestApproverMiddlewareEnforcement:
 
     @pytest.mark.asyncio
     async def test_approver_denied_professional_tool_via_middleware(
-        self, middleware, mock_session_factory, approver_user, lab_device
+        self, middleware, setup_device_mock, approver_user, lab_device
     ):
         """Test approver is denied professional tier tool execution via middleware."""
-        with self.setup_device_mock(mock_session_factory, lab_device):
+        with setup_device_mock(lab_device):
             with pytest.raises(MCPAuthorizationError) as exc_info:
                 await middleware.check_authorization(
                     user=approver_user,
@@ -263,28 +221,15 @@ class TestApproverMiddlewareEnforcement:
 
 
 class TestApproverAuditLogging:
-    """Test that approver unauthorized access attempts are logged."""
+    """Test that approver unauthorized access attempts are logged.
+
+    Uses shared fixtures from conftest.py: settings, mock_session_factory,
+    middleware, setup_device_mock.
+    """
 
     @pytest.fixture
-    def settings(self):
-        """Create test settings."""
-        return Settings(environment="lab")
-
-    @pytest.fixture
-    def mock_session_factory(self):
-        """Create mock database session factory."""
-        factory = MagicMock(spec=DatabaseSessionManager)
-        factory.session = MagicMock()
-        return factory
-
-    @pytest.fixture
-    def middleware(self, mock_session_factory, settings):
-        """Create authorization middleware instance."""
-        return AuthorizationMiddleware(mock_session_factory, settings)
-
-    @pytest.fixture
-    def approver_user(self):
-        """Create approver user."""
+    def approver_audit_user(self):
+        """Create approver user for audit testing (separate from shared fixture)."""
         return User(
             sub="user-approver-audit",
             email="approver-audit@example.com",
@@ -294,8 +239,8 @@ class TestApproverAuditLogging:
         )
 
     @pytest.fixture
-    def lab_device(self):
-        """Create test device."""
+    def lab_audit_device(self):
+        """Create test device for audit testing (separate from shared fixture)."""
         return create_test_device(
             device_id="dev-lab-audit",
             name="Lab Device Audit",
@@ -303,7 +248,7 @@ class TestApproverAuditLogging:
 
     @pytest.mark.asyncio
     async def test_approver_denial_logged_with_context(
-        self, middleware, mock_session_factory, approver_user, lab_device
+        self, middleware, mock_session_factory, approver_audit_user, lab_audit_device
     ):
         """Test that approver denial is logged with full context."""
         # Set up device mock
@@ -313,7 +258,7 @@ class TestApproverAuditLogging:
         mock_session_factory.session.return_value = mock_session
 
         mock_device_service = MagicMock()
-        mock_device_service.get_device = AsyncMock(return_value=lab_device)
+        mock_device_service.get_device = AsyncMock(return_value=lab_audit_device)
 
         # Capture log calls
         with (
@@ -326,7 +271,7 @@ class TestApproverAuditLogging:
             # Attempt to execute tool as approver
             with pytest.raises(MCPAuthorizationError):
                 await middleware.check_authorization(
-                    user=approver_user,
+                    user=approver_audit_user,
                     tool_name="system/backup",
                     tool_tier=ToolTier.ADVANCED,
                     device_id="dev-lab-audit",
@@ -348,19 +293,26 @@ class TestApproverAuditLogging:
 
             assert denial_log is not None, "Authorization denied log should exist"
 
-            # Verify log context includes required fields
-            if len(denial_log) > 1 and "extra" in denial_log[1]:
-                log_extra = denial_log[1]["extra"]
-                assert "user_sub" in log_extra
-                assert log_extra["user_sub"] == "user-approver-audit"
-                assert "user_role" in log_extra
-                assert log_extra["user_role"] == "approver"
-                assert "tool_name" in log_extra
-                assert log_extra["tool_name"] == "system/backup"
-                assert "decision" in log_extra
-                assert log_extra["decision"] == "DENY"
-                assert "reason" in log_extra
-                assert log_extra["reason"] == "RoleInsufficientError"
+            # Verify log context includes required fields and fail if format is unexpected
+            assert len(denial_log) > 1, "Authorization denied log should include keyword arguments"
+            assert isinstance(
+                denial_log[1], dict
+            ), "Authorization denied log kwargs should be a dict"
+            assert (
+                "extra" in denial_log[1]
+            ), "Authorization denied log should include 'extra' context"
+
+            log_extra = denial_log[1]["extra"]
+            assert "user_sub" in log_extra
+            assert log_extra["user_sub"] == "user-approver-audit"
+            assert "user_role" in log_extra
+            assert log_extra["user_role"] == "approver"
+            assert "tool_name" in log_extra
+            assert log_extra["tool_name"] == "system/backup"
+            assert "decision" in log_extra
+            assert log_extra["decision"] == "DENY"
+            assert "reason" in log_extra
+            assert log_extra["reason"] == "RoleInsufficientError"
 
 
 class TestApproverVsOtherRoles:
