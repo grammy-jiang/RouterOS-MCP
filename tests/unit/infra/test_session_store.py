@@ -1,0 +1,465 @@
+"""Unit tests for session store implementations."""
+
+import asyncio
+import json
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
+
+from routeros_mcp.infra.session.store import (
+    RedisSessionStore,
+    SESSION_TTL_SECONDS,
+    SessionStore,
+    SessionStoreError,
+)
+
+
+class TestSessionStoreInterface:
+    """Tests for SessionStore abstract interface."""
+
+    def test_session_store_is_abstract(self) -> None:
+        """SessionStore cannot be instantiated directly."""
+        with pytest.raises(TypeError, match="Can't instantiate abstract class"):
+            SessionStore()  # type: ignore
+
+
+class TestRedisSessionStore:
+    """Tests for RedisSessionStore implementation."""
+
+    @pytest.fixture
+    def mock_redis_client(self) -> AsyncMock:
+        """Create mock Redis client."""
+        client = AsyncMock(spec=Redis)
+        client.ping = AsyncMock()
+        client.get = AsyncMock()
+        client.setex = AsyncMock()
+        client.delete = AsyncMock()
+        client.exists = AsyncMock()
+        client.expire = AsyncMock()
+        client.aclose = AsyncMock()
+        return client
+
+    @pytest.fixture
+    def store(self) -> RedisSessionStore:
+        """Create RedisSessionStore instance."""
+        return RedisSessionStore(
+            redis_url="redis://localhost:6379/0",
+            pool_size=5,
+            timeout_seconds=3.0,
+            key_prefix="test:",
+        )
+
+    @pytest.mark.asyncio
+    async def test_init_creates_connection(self, store: RedisSessionStore) -> None:
+        """init() should create Redis connection pool and client."""
+        with (
+            patch("routeros_mcp.infra.session.store.ConnectionPool") as mock_pool_class,
+            patch("routeros_mcp.infra.session.store.Redis") as mock_redis_class,
+        ):
+            mock_pool = MagicMock()
+            mock_pool_class.from_url.return_value = mock_pool
+
+            mock_client = AsyncMock(spec=Redis)
+            mock_client.ping = AsyncMock()
+            mock_redis_class.return_value = mock_client
+
+            await store.init()
+
+            # Verify pool creation
+            mock_pool_class.from_url.assert_called_once_with(
+                "redis://localhost:6379/0",
+                max_connections=5,
+                socket_timeout=3.0,
+                socket_connect_timeout=3.0,
+                decode_responses=True,
+            )
+
+            # Verify client creation and ping
+            mock_redis_class.assert_called_once_with(connection_pool=mock_pool)
+            mock_client.ping.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_init_failure_raises_error(self, store: RedisSessionStore) -> None:
+        """init() should raise SessionStoreError on connection failure."""
+        with (
+            patch("routeros_mcp.infra.session.store.ConnectionPool"),
+            patch("routeros_mcp.infra.session.store.Redis") as mock_redis_class,
+        ):
+            mock_client = AsyncMock(spec=Redis)
+            mock_client.ping = AsyncMock(side_effect=RedisError("Connection failed"))
+            mock_redis_class.return_value = mock_client
+
+            with pytest.raises(SessionStoreError, match="Failed to initialize Redis connection"):
+                await store.init()
+
+    @pytest.mark.asyncio
+    async def test_close_cleanup_resources(
+        self, store: RedisSessionStore, mock_redis_client: AsyncMock
+    ) -> None:
+        """close() should cleanup Redis client and pool."""
+        mock_pool = MagicMock()
+        mock_pool.aclose = AsyncMock()
+
+        store._client = mock_redis_client
+        store._pool = mock_pool
+
+        await store.close()
+
+        mock_redis_client.aclose.assert_called_once()
+        mock_pool.aclose.assert_called_once()
+        assert store._client is None
+        # mypy: pool is set to None after the assert above is checked
+        # so this line is marked as unreachable, but it's still valid
+        assert store._pool is None  # type: ignore[unreachable]
+
+    @pytest.mark.asyncio
+    async def test_get_session_success(
+        self, store: RedisSessionStore, mock_redis_client: AsyncMock
+    ) -> None:
+        """get() should retrieve session data and refresh TTL."""
+        store._client = mock_redis_client
+
+        session_data = {"user_id": "123", "email": "user@example.com"}
+        mock_redis_client.get.return_value = json.dumps(session_data)
+        mock_redis_client.expire.return_value = 1
+
+        result = await store.get("session-abc")
+
+        assert result == session_data
+        mock_redis_client.get.assert_called_once_with("test:session-abc")
+        mock_redis_client.expire.assert_called_once_with("test:session-abc", SESSION_TTL_SECONDS)
+
+    @pytest.mark.asyncio
+    async def test_get_session_not_found(
+        self, store: RedisSessionStore, mock_redis_client: AsyncMock
+    ) -> None:
+        """get() should return None if session not found."""
+        store._client = mock_redis_client
+        mock_redis_client.get.return_value = None
+
+        result = await store.get("nonexistent")
+
+        assert result is None
+        mock_redis_client.get.assert_called_once_with("test:nonexistent")
+        # TTL should not be refreshed for non-existent session
+        mock_redis_client.expire.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_session_redis_error(
+        self, store: RedisSessionStore, mock_redis_client: AsyncMock
+    ) -> None:
+        """get() should raise SessionStoreError on Redis error."""
+        store._client = mock_redis_client
+        mock_redis_client.get.side_effect = RedisError("Connection timeout")
+
+        with pytest.raises(SessionStoreError, match="Failed to retrieve session"):
+            await store.get("session-abc")
+
+    @pytest.mark.asyncio
+    async def test_get_session_not_initialized(self, store: RedisSessionStore) -> None:
+        """get() should raise error if store not initialized."""
+        with pytest.raises(SessionStoreError, match="not initialized"):
+            await store.get("session-abc")
+
+    @pytest.mark.asyncio
+    async def test_set_session_success(
+        self, store: RedisSessionStore, mock_redis_client: AsyncMock
+    ) -> None:
+        """set() should store session data with TTL."""
+        store._client = mock_redis_client
+
+        session_data = {"user_id": "456", "role": "admin"}
+        await store.set("session-xyz", session_data)
+
+        mock_redis_client.setex.assert_called_once_with(
+            "test:session-xyz", SESSION_TTL_SECONDS, json.dumps(session_data)
+        )
+
+    @pytest.mark.asyncio
+    async def test_set_session_custom_ttl(
+        self, store: RedisSessionStore, mock_redis_client: AsyncMock
+    ) -> None:
+        """set() should support custom TTL override."""
+        store._client = mock_redis_client
+
+        session_data = {"temp": "data"}
+        custom_ttl = 3600  # 1 hour
+
+        await store.set("session-temp", session_data, ttl_seconds=custom_ttl)
+
+        mock_redis_client.setex.assert_called_once_with(
+            "test:session-temp", custom_ttl, json.dumps(session_data)
+        )
+
+    @pytest.mark.asyncio
+    async def test_set_session_redis_error(
+        self, store: RedisSessionStore, mock_redis_client: AsyncMock
+    ) -> None:
+        """set() should raise SessionStoreError on Redis error."""
+        store._client = mock_redis_client
+        mock_redis_client.setex.side_effect = RedisError("Write failed")
+
+        with pytest.raises(SessionStoreError, match="Failed to store session"):
+            await store.set("session-abc", {"data": "value"})
+
+    @pytest.mark.asyncio
+    async def test_delete_session_success(
+        self, store: RedisSessionStore, mock_redis_client: AsyncMock
+    ) -> None:
+        """delete() should remove session and return True."""
+        store._client = mock_redis_client
+        mock_redis_client.delete.return_value = 1  # Redis returns count of deleted keys
+
+        result = await store.delete("session-abc")
+
+        assert result is True
+        mock_redis_client.delete.assert_called_once_with("test:session-abc")
+
+    @pytest.mark.asyncio
+    async def test_delete_session_not_found(
+        self, store: RedisSessionStore, mock_redis_client: AsyncMock
+    ) -> None:
+        """delete() should return False if session not found."""
+        store._client = mock_redis_client
+        mock_redis_client.delete.return_value = 0
+
+        result = await store.delete("nonexistent")
+
+        assert result is False
+        mock_redis_client.delete.assert_called_once_with("test:nonexistent")
+
+    @pytest.mark.asyncio
+    async def test_delete_session_redis_error(
+        self, store: RedisSessionStore, mock_redis_client: AsyncMock
+    ) -> None:
+        """delete() should raise SessionStoreError on Redis error."""
+        store._client = mock_redis_client
+        mock_redis_client.delete.side_effect = RedisError("Delete failed")
+
+        with pytest.raises(SessionStoreError, match="Failed to delete session"):
+            await store.delete("session-abc")
+
+    @pytest.mark.asyncio
+    async def test_exists_session_found(
+        self, store: RedisSessionStore, mock_redis_client: AsyncMock
+    ) -> None:
+        """exists() should return True if session exists."""
+        store._client = mock_redis_client
+        mock_redis_client.exists.return_value = 1
+
+        result = await store.exists("session-abc")
+
+        assert result is True
+        mock_redis_client.exists.assert_called_once_with("test:session-abc")
+
+    @pytest.mark.asyncio
+    async def test_exists_session_not_found(
+        self, store: RedisSessionStore, mock_redis_client: AsyncMock
+    ) -> None:
+        """exists() should return False if session not found."""
+        store._client = mock_redis_client
+        mock_redis_client.exists.return_value = 0
+
+        result = await store.exists("nonexistent")
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_refresh_ttl_success(
+        self, store: RedisSessionStore, mock_redis_client: AsyncMock
+    ) -> None:
+        """refresh_ttl() should extend session TTL."""
+        store._client = mock_redis_client
+        mock_redis_client.expire.return_value = 1  # Key exists
+
+        result = await store.refresh_ttl("session-abc")
+
+        assert result is True
+        mock_redis_client.expire.assert_called_once_with("test:session-abc", SESSION_TTL_SECONDS)
+
+    @pytest.mark.asyncio
+    async def test_refresh_ttl_custom_ttl(
+        self, store: RedisSessionStore, mock_redis_client: AsyncMock
+    ) -> None:
+        """refresh_ttl() should support custom TTL override."""
+        store._client = mock_redis_client
+        mock_redis_client.expire.return_value = 1
+
+        custom_ttl = 1800  # 30 minutes
+        result = await store.refresh_ttl("session-abc", ttl_seconds=custom_ttl)
+
+        assert result is True
+        mock_redis_client.expire.assert_called_once_with("test:session-abc", custom_ttl)
+
+    @pytest.mark.asyncio
+    async def test_refresh_ttl_not_found(
+        self, store: RedisSessionStore, mock_redis_client: AsyncMock
+    ) -> None:
+        """refresh_ttl() should return False if session not found."""
+        store._client = mock_redis_client
+        mock_redis_client.expire.return_value = 0  # Key not found
+
+        result = await store.refresh_ttl("nonexistent")
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_refresh_ttl_redis_error(
+        self, store: RedisSessionStore, mock_redis_client: AsyncMock
+    ) -> None:
+        """refresh_ttl() should raise SessionStoreError on Redis error."""
+        store._client = mock_redis_client
+        mock_redis_client.expire.side_effect = RedisError("Expire failed")
+
+        with pytest.raises(SessionStoreError, match="Failed to refresh TTL"):
+            await store.refresh_ttl("session-abc")
+
+    @pytest.mark.asyncio
+    async def test_concurrent_access_simulation(
+        self, store: RedisSessionStore, mock_redis_client: AsyncMock
+    ) -> None:
+        """Simulate concurrent access to same session (sliding window)."""
+        store._client = mock_redis_client
+
+        session_data = {"user_id": "789", "count": 0}
+        mock_redis_client.get.return_value = json.dumps(session_data)
+        mock_redis_client.expire.return_value = 1
+
+        # Simulate 5 concurrent reads (each should refresh TTL)
+        tasks = [store.get("session-concurrent") for _ in range(5)]
+        results = await asyncio.gather(*tasks)
+
+        # All reads should succeed
+        assert all(r == session_data for r in results)
+
+        # get() should be called 5 times
+        assert mock_redis_client.get.call_count == 5
+
+        # TTL should be refreshed 5 times (sliding window)
+        assert mock_redis_client.expire.call_count == 5
+
+    @pytest.mark.asyncio
+    async def test_ttl_expiration_behavior(
+        self, store: RedisSessionStore, mock_redis_client: AsyncMock
+    ) -> None:
+        """Test session expiration after TTL."""
+        store._client = mock_redis_client
+
+        # First get: session exists
+        session_data = {"user_id": "expired"}
+        mock_redis_client.get.return_value = json.dumps(session_data)
+        mock_redis_client.expire.return_value = 1
+
+        result1 = await store.get("session-expire")
+        assert result1 == session_data
+
+        # Simulate expiration: subsequent get returns None
+        mock_redis_client.get.return_value = None
+
+        result2 = await store.get("session-expire")
+        assert result2 is None
+
+    @pytest.mark.asyncio
+    async def test_key_prefix_isolation(
+        self, store: RedisSessionStore, mock_redis_client: AsyncMock
+    ) -> None:
+        """Test that key prefix properly isolates sessions."""
+        store._client = mock_redis_client
+
+        session_data = {"data": "value"}
+        await store.set("my-session", session_data)
+
+        # Verify the Redis key includes the prefix
+        mock_redis_client.setex.assert_called_once()
+        call_args = mock_redis_client.setex.call_args
+        assert call_args[0][0] == "test:my-session"
+
+    @pytest.mark.asyncio
+    async def test_session_data_serialization(
+        self, store: RedisSessionStore, mock_redis_client: AsyncMock
+    ) -> None:
+        """Test complex session data serialization/deserialization."""
+        store._client = mock_redis_client
+
+        # Complex session data with various types
+        complex_data: dict[str, Any] = {
+            "user_id": "complex-123",
+            "roles": ["admin", "user"],
+            "metadata": {"login_time": "2025-01-11T00:00:00Z", "ip": "192.168.1.1"},
+            "permissions": {"read": True, "write": False},
+        }
+
+        await store.set("session-complex", complex_data)
+
+        # Verify serialization
+        mock_redis_client.setex.assert_called_once()
+        call_args = mock_redis_client.setex.call_args
+        serialized = call_args[0][2]
+
+        # Verify we can deserialize back
+        deserialized = json.loads(serialized)
+        assert deserialized == complex_data
+
+    @pytest.mark.asyncio
+    async def test_invalid_json_in_redis(
+        self, store: RedisSessionStore, mock_redis_client: AsyncMock
+    ) -> None:
+        """Test handling of corrupted JSON data in Redis."""
+        store._client = mock_redis_client
+        mock_redis_client.get.return_value = "{ invalid json"
+
+        with pytest.raises(SessionStoreError, match="Failed to retrieve session"):
+            await store.get("session-corrupt")
+
+
+class TestSessionStoreIntegration:
+    """Integration-like tests for session store (mocked Redis)."""
+
+    @pytest.mark.asyncio
+    async def test_session_lifecycle(self) -> None:
+        """Test complete session lifecycle: create, read, update, delete."""
+        with (
+            patch("routeros_mcp.infra.session.store.ConnectionPool") as mock_pool_class,
+            patch("routeros_mcp.infra.session.store.Redis") as mock_redis_class,
+        ):
+            mock_pool = MagicMock()
+            mock_pool.aclose = AsyncMock()
+            mock_pool_class.from_url.return_value = mock_pool
+
+            mock_client = AsyncMock(spec=Redis)
+            mock_client.ping = AsyncMock()
+            mock_redis_class.return_value = mock_client
+
+            store = RedisSessionStore(redis_url="redis://localhost:6379/0")
+            await store.init()
+
+            # 1. Create session
+            mock_client.setex = AsyncMock()
+            initial_data = {"user": "alice", "step": 1}
+            await store.set("session-lifecycle", initial_data)
+            assert mock_client.setex.called
+
+            # 2. Read session
+            mock_client.get = AsyncMock(return_value=json.dumps(initial_data))
+            mock_client.expire = AsyncMock(return_value=1)
+            data = await store.get("session-lifecycle")
+            assert data == initial_data
+
+            # 3. Update session
+            updated_data = {"user": "alice", "step": 2}
+            await store.set("session-lifecycle", updated_data)
+
+            # 4. Delete session
+            mock_client.delete = AsyncMock(return_value=1)
+            deleted = await store.delete("session-lifecycle")
+            assert deleted is True
+
+            # 5. Verify deletion
+            mock_client.get = AsyncMock(return_value=None)
+            data = await store.get("session-lifecycle")
+            assert data is None
+
+            await store.close()

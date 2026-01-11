@@ -133,6 +133,23 @@ class Settings(BaseSettings):
     )
 
     # ========================================
+    # Redis Configuration (Session Store)
+    # ========================================
+
+    redis_url: str = Field(
+        default="redis://localhost:6379/0",
+        description="Redis connection URL for session storage",
+    )
+
+    redis_pool_size: int = Field(
+        default=10, ge=1, le=100, description="Redis connection pool size"
+    )
+
+    redis_timeout_seconds: float = Field(
+        default=5.0, ge=1.0, le=60.0, description="Redis operation timeout"
+    )
+
+    # ========================================
     # OIDC Authentication (HTTP Transport)
     # ========================================
 
