@@ -197,7 +197,7 @@ class ComplianceService:
 
     async def get_approval_decisions(
         self,
-        status: Literal["approved", "rejected"] | None = None,
+        status: Literal["approved", "rejected", "pending"] | None = None,
         date_from: datetime | None = None,
         limit: int = 100,
         offset: int = 0,
@@ -205,7 +205,7 @@ class ComplianceService:
         """Get summary of approval decisions for compliance reporting.
 
         Args:
-            status: Filter by approval status ('approved' or 'rejected')
+            status: Filter by approval status ('approved', 'rejected', or 'pending')
             date_from: Start date for filtering decisions
             limit: Maximum number of decisions to return
             offset: Number of decisions to skip (pagination)
@@ -310,11 +310,7 @@ class ComplianceService:
             Dictionary with policy violations and summary statistics
         """
         # Build query for AUTHZ_DENIED events
-        query = (
-            select(AuditEventORM)
-            .where(AuditEventORM.action == "AUTHZ_DENIED")
-            .order_by(desc(AuditEventORM.timestamp))
-        )
+        query = select(AuditEventORM).order_by(desc(AuditEventORM.timestamp))
 
         conditions = [AuditEventORM.action == "AUTHZ_DENIED"]
         if device_id:
@@ -371,6 +367,8 @@ class ComplianceService:
             device_stats_query = device_stats_query.where(AuditEventORM.timestamp >= date_from)
         if date_to:
             device_stats_query = device_stats_query.where(AuditEventORM.timestamp <= date_to)
+        if device_id:
+            device_stats_query = device_stats_query.where(AuditEventORM.device_id == device_id)
 
         device_stats_result = await self.session.execute(device_stats_query)
         device_stats = {row[0]: row[1] for row in device_stats_result.all() if row[0]}
@@ -397,22 +395,25 @@ class ComplianceService:
         date_to: datetime | None = None,
         limit: int = 100,
     ) -> dict[str, Any]:
-        """Get role assignment audit trail for compliance reporting.
+        """Get audit events with role usage information for compliance reporting.
 
-        Role changes are tracked in audit events with specific action types.
+        This returns recent audit events (optionally filtered by user and date),
+        grouped by user, including the role that was in effect for each action.
+        This tracks role usage patterns (which actions users performed with which roles),
+        not discrete role assignment or role change events.
 
         Args:
             user_id: Filter by user ID
             date_from: Start date for filtering
             date_to: End date for filtering
-            limit: Maximum number of role changes to return
+            limit: Maximum number of audit events to return
 
         Returns:
-            Dictionary with role assignment history
+            Dictionary with role usage history grouped by user
         """
-        # Build query for role-related audit events
-        # Note: Role assignment actions might be logged as special audit events
-        # For now, we look for any user_role changes in audit events
+        # Build query for audit events that include user/role context
+        # Note: This reports how roles are used in actions, not discrete
+        # role-assignment or role-change events
         query = select(AuditEventORM).order_by(desc(AuditEventORM.timestamp))
 
         conditions = []

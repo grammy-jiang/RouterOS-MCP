@@ -1643,10 +1643,10 @@ async def compliance_approvals_summary(
 
     try:
         # Validate status parameter
-        if status and status not in ["approved", "rejected"]:
+        if status and status not in ["approved", "rejected", "pending"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid status. Must be 'approved' or 'rejected'",
+                detail="Invalid status. Must be 'approved', 'rejected', or 'pending'",
             )
 
         # Parse date filter

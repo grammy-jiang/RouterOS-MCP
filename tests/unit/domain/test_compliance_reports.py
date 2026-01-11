@@ -400,6 +400,21 @@ async def test_get_approval_decisions_rejected_only(
 
 
 @pytest.mark.asyncio
+async def test_get_approval_decisions_pending_only(
+    compliance_service: ComplianceService,
+    sample_approval_requests: list[ApprovalRequestModel],
+) -> None:
+    """Test getting only pending decisions."""
+    result = await compliance_service.get_approval_decisions(status="pending")
+
+    assert result["total"] == 1
+    assert len(result["decisions"]) == 1
+    assert result["decisions"][0]["status"] == "pending"
+    assert result["decisions"][0]["requested_by"] == "user-3"
+    assert result["filters"]["status"] == "pending"
+
+
+@pytest.mark.asyncio
 async def test_get_approval_decisions_with_date_filter(
     compliance_service: ComplianceService,
     sample_approval_requests: list[ApprovalRequestModel],
