@@ -5,12 +5,18 @@ This module provides authorization decision logic for:
 - Tool tier enforcement (fundamental/advanced/professional)
 - Phase 1: Device-level authorization only
 - Phase 4: Add user role checks and device scoping
+- Phase 5: Policy engine for centralized validation (see domain/services/policy.py)
 
 Key principles:
 - All authorization is server-side (never trust client)
 - Device capability flags control tool access per device
 - Environment isolation prevents cross-environment operations
 - Fail-safe: deny by default, explicit allow required
+
+Note: For centralized policy validation including tier validation, self-approval
+prevention, and device scope enforcement, use PolicyEngine from
+routeros_mcp.domain.services.policy. This module provides lower-level authorization
+primitives that can be used standalone or composed via the policy engine.
 
 See docs/02-security-oauth-integration-and-access-control.md for details.
 """
