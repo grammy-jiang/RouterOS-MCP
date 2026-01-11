@@ -258,7 +258,7 @@ async def test_list_events_date_range_filter(initialize_session_manager, db_sess
     from datetime import timedelta
 
     base_time = datetime.now(UTC)
-    
+
     # Create events at different times
     event1 = AuditEvent(
         id="evt-001",
@@ -760,14 +760,13 @@ async def test_phase5_event_fields_in_response(initialize_session_manager, db_se
 
     assert len(result["events"]) == 1
     event_data = result["events"][0]
-    
+
     # Verify all Phase 5 fields are present
     assert "user_id" in event_data
     assert "approver_id" in event_data
     assert "approval_request_id" in event_data
-    
+
     # Verify values
     assert event_data["user_id"] == "user-1"
     assert event_data["approver_id"] == "approver-1"
     assert event_data["approval_request_id"] == "req-001"
-

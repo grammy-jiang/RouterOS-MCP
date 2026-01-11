@@ -777,7 +777,7 @@ class AuditEvent(Base):
 
     # Relationships
     device: Mapped[Optional["Device"]] = relationship("Device", back_populates="audit_events")
-    
+
     approval_request: Mapped[Optional["ApprovalRequest"]] = relationship(
         "ApprovalRequest",
         foreign_keys=[approval_request_id],

@@ -194,11 +194,7 @@ class AuditService:
         Returns:
             List of tool names
         """
-        stmt = (
-            select(AuditEventORM.tool_name)
-            .distinct()
-            .order_by(AuditEventORM.tool_name)
-        )
+        stmt = select(AuditEventORM.tool_name).distinct().order_by(AuditEventORM.tool_name)
 
         result = await self.session.execute(stmt)
         tools = result.scalars().all()
@@ -415,4 +411,3 @@ class AuditService:
         )
         self.session.add(event)
         await self.session.commit()
-

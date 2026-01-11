@@ -30,20 +30,20 @@ logger = logging.getLogger(__name__)
 
 def _parse_iso_date(date_str: str | None, param_name: str) -> datetime | None:
     """Parse ISO date string for audit event filtering.
-    
+
     Args:
         date_str: ISO format date string (e.g., "2024-01-01T00:00:00Z")
         param_name: Parameter name for error messages
-        
+
     Returns:
         Parsed datetime object or None if date_str is None
-        
+
     Raises:
         HTTPException: If date string is invalid
     """
     if not date_str:
         return None
-        
+
     try:
         return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
     except ValueError as e:
@@ -60,12 +60,14 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 def get_current_user_dep():
     """Get current user dependency - import here to avoid namespace pollution."""
     from routeros_mcp.api.http import get_current_user
+
     return get_current_user
 
 
 async def get_session_dep():
     """Get database session dependency - import here to avoid namespace pollution."""
     from routeros_mcp.infra.db.session import get_session
+
     async for session in get_session():
         yield session
 
@@ -182,7 +184,8 @@ async def list_devices(
                 "capabilities": device.capabilities,
                 "last_seen": device.last_seen.isoformat() if device.last_seen else None,
                 "status": (
-                    "online" if device.last_seen and device.last_seen > stale_threshold
+                    "online"
+                    if device.last_seen and device.last_seen > stale_threshold
                     else "offline"
                 ),
             }
@@ -193,11 +196,10 @@ async def list_devices(
 
     except Exception as e:
         from routeros_mcp.infra.observability.logging import get_correlation_id
+
         correlation_id = get_correlation_id()
         logger.error(
-            f"Error listing devices: {e}",
-            exc_info=True,
-            extra={"correlation_id": correlation_id}
+            f"Error listing devices: {e}", exc_info=True, extra={"correlation_id": correlation_id}
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -230,7 +232,7 @@ async def create_device(
 
     try:
         # Generate device ID from name with collision handling
-        base_slug = re.sub(r'[^a-z0-9]+', '-', device_data.name.lower()).strip('-')
+        base_slug = re.sub(r"[^a-z0-9]+", "-", device_data.name.lower()).strip("-")
         device_id = f"dev-{base_slug}"
 
         # Check for collision and add counter if needed
@@ -355,8 +357,7 @@ async def update_device(
             # Delete existing credential if it exists, then create new one
             await device_service.session.execute(
                 sql_delete(CredentialORM).where(
-                    CredentialORM.device_id == device_id,
-                    CredentialORM.credential_type == "rest"
+                    CredentialORM.device_id == device_id, CredentialORM.credential_type == "rest"
                 )
             )
             await device_service.add_credential(
@@ -389,6 +390,7 @@ async def update_device(
         ) from e
     except Exception as e:
         from routeros_mcp.infra.observability.logging import get_correlation_id
+
         correlation_id = get_correlation_id()
         logger.error(
             f"Error updating device {device_id}: {e}",
@@ -455,6 +457,7 @@ async def delete_device(
         ) from e
     except Exception as e:
         from routeros_mcp.infra.observability.logging import get_correlation_id
+
         correlation_id = get_correlation_id()
         logger.error(
             f"Error deleting device {device_id}: {e}",
@@ -502,6 +505,7 @@ async def test_device_connectivity(
         ) from e
     except Exception as e:
         from routeros_mcp.infra.observability.logging import get_correlation_id
+
         correlation_id = get_correlation_id()
         logger.error(
             f"Error testing connectivity for device {device_id}: {e}",
@@ -557,11 +561,10 @@ async def list_plans(
 
     except Exception as e:
         from routeros_mcp.infra.observability.logging import get_correlation_id
+
         correlation_id = get_correlation_id()
         logger.error(
-            f"Error listing plans: {e}",
-            exc_info=True,
-            extra={"correlation_id": correlation_id}
+            f"Error listing plans: {e}", exc_info=True, extra={"correlation_id": correlation_id}
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -617,11 +620,12 @@ async def get_plan_detail(
         )
     except Exception as e:
         from routeros_mcp.infra.observability.logging import get_correlation_id
+
         correlation_id = get_correlation_id()
         logger.error(
             f"Error getting plan {plan_id}: {e}",
             exc_info=True,
-            extra={"correlation_id": correlation_id}
+            extra={"correlation_id": correlation_id},
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -675,11 +679,12 @@ async def approve_plan(
         )
     except Exception as e:
         from routeros_mcp.infra.observability.logging import get_correlation_id
+
         correlation_id = get_correlation_id()
         logger.error(
             f"Error approving plan {plan_id}: {e}",
             exc_info=True,
-            extra={"correlation_id": correlation_id}
+            extra={"correlation_id": correlation_id},
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -738,11 +743,12 @@ async def reject_plan(
         )
     except Exception as e:
         from routeros_mcp.infra.observability.logging import get_correlation_id
+
         correlation_id = get_correlation_id()
         logger.error(
             f"Error rejecting plan {plan_id}: {e}",
             exc_info=True,
-            extra={"correlation_id": correlation_id}
+            extra={"correlation_id": correlation_id},
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -798,7 +804,7 @@ async def get_job_status(
                 matched_progress = False
                 try:
                     # Match "X/Y devices" first, e.g. "10/20 devices"
-                    match = re.search(r'(\d+)/(\d+)\s+devices', result_summary)
+                    match = re.search(r"(\d+)/(\d+)\s+devices", result_summary)
                     if match:
                         processed = int(match.group(1))
                         matched_progress = True
@@ -807,7 +813,7 @@ async def get_job_status(
                         )
                     else:
                         # Try alternative format "Completed X devices"
-                        match = re.search(r'Completed\s+(\d+)\s+devices', result_summary)
+                        match = re.search(r"Completed\s+(\d+)\s+devices", result_summary)
                         if match:
                             processed = int(match.group(1))
                             matched_progress = True
@@ -859,11 +865,12 @@ async def get_job_status(
         )
     except Exception as e:
         from routeros_mcp.infra.observability.logging import get_correlation_id
+
         correlation_id = get_correlation_id()
         logger.error(
             f"Error getting job {job_id}: {e}",
             exc_info=True,
-            extra={"correlation_id": correlation_id}
+            extra={"correlation_id": correlation_id},
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -919,11 +926,12 @@ async def cancel_job(
         )
     except Exception as e:
         from routeros_mcp.infra.observability.logging import get_correlation_id
+
         correlation_id = get_correlation_id()
         logger.error(
             f"Error cancelling job {job_id}: {e}",
             exc_info=True,
-            extra={"correlation_id": correlation_id}
+            extra={"correlation_id": correlation_id},
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -996,11 +1004,12 @@ async def list_audit_events(
         raise
     except Exception as e:
         from routeros_mcp.infra.observability.logging import get_correlation_id
+
         correlation_id = get_correlation_id()
         logger.error(
             f"Error listing audit events: {e}",
             exc_info=True,
-            extra={"correlation_id": correlation_id}
+            extra={"correlation_id": correlation_id},
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1071,43 +1080,47 @@ async def export_audit_events(
         writer = csv.writer(output)
 
         # Write header
-        writer.writerow([
-            "Timestamp",
-            "User Email",
-            "User Role",
-            "User ID",
-            "Approver ID",
-            "Approval Request ID",
-            "Device ID",
-            "Environment",
-            "Tool Name",
-            "Tool Tier",
-            "Action",
-            "Success",
-            "Result Summary",
-            "Error Message",
-            "Correlation ID",
-        ])
+        writer.writerow(
+            [
+                "Timestamp",
+                "User Email",
+                "User Role",
+                "User ID",
+                "Approver ID",
+                "Approval Request ID",
+                "Device ID",
+                "Environment",
+                "Tool Name",
+                "Tool Tier",
+                "Action",
+                "Success",
+                "Result Summary",
+                "Error Message",
+                "Correlation ID",
+            ]
+        )
 
         # Write rows
         for event in result["events"]:
-            writer.writerow([
-                event["timestamp"],
-                event["user_email"] or "",
-                event["user_role"],
-                event["user_id"] or "",
-                event["approver_id"] or "",
-                event["approval_request_id"] or "",
-                event["device_id"] or "",
-                event["environment"] or "",
-                event["tool_name"],
-                event["tool_tier"],
-                event["action"],
-                "Success" if event["success"] else "Failure",
-                event["result_summary"] or "",
-                event["error_message"] or "",
-                event["correlation_id"] or "",
-            ])
+            writer.writerow(
+                [
+                    event["timestamp"],
+                    event["user_email"] or "",
+                    event["user_role"],
+                    event["user_id"] or "",
+                    event["approver_id"] or "",
+                    event["approval_request_id"] or "",
+                    event["device_id"] or "",
+                    event["environment"] or "",
+                    event["tool_name"],
+                    event["tool_tier"],
+                    event["action"],
+                    "Success" if event["success"] else "Failure",
+                    event["result_summary"] or "",
+                    event["error_message"] or "",
+                    event["correlation_id"] or "",
+                ]
+            )
 
         # Return CSV as download
         output.seek(0)
@@ -1123,11 +1136,12 @@ async def export_audit_events(
         raise
     except Exception as e:
         from routeros_mcp.infra.observability.logging import get_correlation_id
+
         correlation_id = get_correlation_id()
         logger.error(
             f"Error exporting audit events: {e}",
             exc_info=True,
-            extra={"correlation_id": correlation_id}
+            extra={"correlation_id": correlation_id},
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1162,11 +1176,12 @@ async def get_audit_filters(
 
     except Exception as e:
         from routeros_mcp.infra.observability.logging import get_correlation_id
+
         correlation_id = get_correlation_id()
         logger.error(
             f"Error getting audit filters: {e}",
             exc_info=True,
-            extra={"correlation_id": correlation_id}
+            extra={"correlation_id": correlation_id},
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1234,11 +1249,12 @@ async def create_approval_request(
         )
     except Exception as e:
         from routeros_mcp.infra.observability.logging import get_correlation_id
+
         correlation_id = get_correlation_id()
         logger.error(
             f"Error creating approval request: {e}",
             exc_info=True,
-            extra={"correlation_id": correlation_id}
+            extra={"correlation_id": correlation_id},
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1323,11 +1339,12 @@ async def list_approval_requests(
 
     except Exception as e:
         from routeros_mcp.infra.observability.logging import get_correlation_id
+
         correlation_id = get_correlation_id()
         logger.error(
             f"Error listing approval requests: {e}",
             exc_info=True,
-            extra={"correlation_id": correlation_id}
+            extra={"correlation_id": correlation_id},
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1382,7 +1399,11 @@ async def approve_approval_request(
                 "requested_at": approval_request.requested_at.isoformat(),
                 "status": approval_request.status,
                 "approved_by": approval_request.approved_by,
-                "approved_at": approval_request.approved_at.isoformat() if approval_request.approved_at else None,
+                "approved_at": (
+                    approval_request.approved_at.isoformat()
+                    if approval_request.approved_at
+                    else None
+                ),
                 "notes": approval_request.notes,
             }
         )
@@ -1394,11 +1415,10 @@ async def approve_approval_request(
         )
     except Exception as e:
         from routeros_mcp.infra.observability.logging import get_correlation_id
+
         correlation_id = get_correlation_id()
         logger.error(
-            f"Error approving request: {e}",
-            exc_info=True,
-            extra={"correlation_id": correlation_id}
+            f"Error approving request: {e}", exc_info=True, extra={"correlation_id": correlation_id}
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1453,7 +1473,11 @@ async def reject_approval_request(
                 "requested_at": approval_request.requested_at.isoformat(),
                 "status": approval_request.status,
                 "rejected_by": approval_request.rejected_by,
-                "rejected_at": approval_request.rejected_at.isoformat() if approval_request.rejected_at else None,
+                "rejected_at": (
+                    approval_request.rejected_at.isoformat()
+                    if approval_request.rejected_at
+                    else None
+                ),
                 "notes": approval_request.notes,
             }
         )
@@ -1465,11 +1489,10 @@ async def reject_approval_request(
         )
     except Exception as e:
         from routeros_mcp.infra.observability.logging import get_correlation_id
+
         correlation_id = get_correlation_id()
         logger.error(
-            f"Error rejecting request: {e}",
-            exc_info=True,
-            extra={"correlation_id": correlation_id}
+            f"Error rejecting request: {e}", exc_info=True, extra={"correlation_id": correlation_id}
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
