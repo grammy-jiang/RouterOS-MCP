@@ -54,6 +54,7 @@ class IPService:
         self.session = session
         self.settings = settings
         self.device_service = DeviceService(session, settings)
+        self._cache: Any | None = None  # RedisResourceCache instance
 
     async def list_addresses(
         self,
@@ -72,6 +73,13 @@ class IPService:
         """
         await self.device_service.get_device(device_id)
 
+        # Try to get from Redis cache first
+        if self.settings.redis_cache_enabled:
+            cached = await self._get_from_cache(device_id)
+            if cached is not None:
+                logger.debug(f"Returning cached IP data for {device_id}")
+                return cached
+
         try:
             addresses = await self._list_addresses_via_rest(device_id)
             # Add transport metadata
@@ -79,6 +87,11 @@ class IPService:
                 addr["transport"] = "rest"
                 addr["fallback_used"] = False
                 addr["rest_error"] = None
+
+            # Cache the result
+            if self.settings.redis_cache_enabled:
+                await self._set_to_cache(device_id, addresses)
+
             return addresses
         except (
             RouterOSTimeoutError,
@@ -99,10 +112,15 @@ class IPService:
                     addr["transport"] = "ssh"
                     addr["fallback_used"] = True
                     addr["rest_error"] = str(rest_exc)
+
+                # Cache the result
+                if self.settings.redis_cache_enabled:
+                    await self._set_to_cache(device_id, addresses)
+
                 return addresses
             except Exception as ssh_exc:
                 logger.error(
-                    f"Both REST and SSH address listing failed",
+                    "Both REST and SSH address listing failed",
                     exc_info=ssh_exc,
                     extra={"device_id": device_id, "rest_error": str(rest_exc)},
                 )
@@ -261,7 +279,7 @@ class IPService:
                 return address
             except Exception as ssh_exc:
                 logger.error(
-                    f"Both REST and SSH get_address failed",
+                    "Both REST and SSH get_address failed",
                     exc_info=ssh_exc,
                     extra={
                         "device_id": device_id,
@@ -372,7 +390,7 @@ class IPService:
                 return arp_entries
             except Exception as ssh_exc:
                 logger.error(
-                    f"Both REST and SSH ARP table failed",
+                    "Both REST and SSH ARP table failed",
                     exc_info=ssh_exc,
                     extra={"device_id": device_id, "rest_error": str(rest_exc)},
                 )
@@ -456,13 +474,13 @@ class IPService:
                 # parts[3] = mac-address
                 # parts[4] = interface
                 # parts[5] = status (optional)
-                
+
                 idx = 1  # Start after ID
-                
+
                 # Check if second part looks like flags (all uppercase letters)
                 if len(parts) > 1 and parts[1].isalpha() and parts[1].isupper():
                     idx = 2  # Skip flags, start from address
-                
+
                 # Extract fields: [id] [flags?] [address] [mac-address] [interface] [status?]
                 if len(parts) > idx + 2:
                     address = parts[idx]
@@ -640,3 +658,43 @@ class IPService:
 
         finally:
             await client.close()
+
+
+    async def _get_from_cache(self, device_id: str) -> list[dict[str, Any]] | None:
+        """Get IP address data from Redis cache.
+        
+        Args:
+            device_id: Device identifier
+        
+        Returns:
+            Cached IP address data or None
+        """
+        try:
+            from routeros_mcp.infra.cache import get_redis_cache
+            if self._cache is None:
+                self._cache = get_redis_cache()
+            return await self._cache.get_ips(device_id)
+        except RuntimeError:
+            # Cache not initialized
+            return None
+        except Exception as e:
+            logger.warning(f"Cache get error: {e}")
+            return None
+
+    async def _set_to_cache(self, device_id: str, data: list[dict[str, Any]]) -> None:
+        """Set IP address data to Redis cache.
+        
+        Args:
+            device_id: Device identifier
+            data: IP address data to cache
+        """
+        try:
+            from routeros_mcp.infra.cache import get_redis_cache
+            if self._cache is None:
+                self._cache = get_redis_cache()
+            await self._cache.set_ips(device_id, data)
+        except RuntimeError:
+            # Cache not initialized
+            pass
+        except Exception as e:
+            logger.warning(f"Cache set error: {e}")

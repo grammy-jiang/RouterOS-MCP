@@ -53,6 +53,7 @@ class RoutingService:
         self.session = session
         self.settings = settings
         self.device_service = DeviceService(session, settings)
+        self._cache: Any | None = None  # RedisResourceCache instance
 
     async def get_routing_summary(
         self,
@@ -71,11 +72,23 @@ class RoutingService:
         """
         await self.device_service.get_device(device_id)
 
+        # Try to get from Redis cache first
+        if self.settings.redis_cache_enabled:
+            cached = await self._get_from_cache(device_id)
+            if cached is not None:
+                logger.debug(f"Returning cached routing data for {device_id}")
+                return cached
+
         try:
             summary = await self._get_routing_summary_via_rest(device_id)
             summary["transport"] = "rest"
             summary["fallback_used"] = False
             summary["rest_error"] = None
+
+            # Cache the result
+            if self.settings.redis_cache_enabled:
+                await self._set_to_cache(device_id, summary)
+
             return summary
         except (
             RouterOSTimeoutError,
@@ -93,6 +106,11 @@ class RoutingService:
                 summary["transport"] = "ssh"
                 summary["fallback_used"] = True
                 summary["rest_error"] = str(rest_exc)
+
+                # Cache the result
+                if self.settings.redis_cache_enabled:
+                    await self._set_to_cache(device_id, summary)
+
                 return summary
             except Exception as ssh_exc:
                 logger.error(
@@ -449,3 +467,43 @@ class RoutingService:
 
         finally:
             await ssh_client.close()
+
+
+    async def _get_from_cache(self, device_id: str) -> dict[str, Any] | None:
+        """Get routing data from Redis cache.
+        
+        Args:
+            device_id: Device identifier
+        
+        Returns:
+            Cached routing data or None
+        """
+        try:
+            from routeros_mcp.infra.cache import get_redis_cache
+            if self._cache is None:
+                self._cache = get_redis_cache()
+            return await self._cache.get_routes(device_id)
+        except RuntimeError:
+            # Cache not initialized
+            return None
+        except Exception as e:
+            logger.warning(f"Cache get error: {e}")
+            return None
+
+    async def _set_to_cache(self, device_id: str, data: dict[str, Any]) -> None:
+        """Set routing data to Redis cache.
+        
+        Args:
+            device_id: Device identifier
+            data: Routing data to cache
+        """
+        try:
+            from routeros_mcp.infra.cache import get_redis_cache
+            if self._cache is None:
+                self._cache = get_redis_cache()
+            await self._cache.set_routes(device_id, data)
+        except RuntimeError:
+            # Cache not initialized
+            pass
+        except Exception as e:
+            logger.warning(f"Cache set error: {e}")

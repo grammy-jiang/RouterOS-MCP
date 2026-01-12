@@ -574,6 +574,73 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
                 detail="Logout failed",
             ) from e
 
+    # Cache management endpoint
+    @app.post("/api/devices/{device_id}/refresh-cache")
+    async def refresh_device_cache(
+        device_id: str,
+        settings: Settings = Depends(get_settings),
+    ) -> dict[str, Any]:
+        """Refresh Redis cache for a device.
+
+        This endpoint invalidates all cached resource data (interfaces, IPs, routes)
+        for the specified device. The next request for device resources will fetch
+        fresh data from the device and repopulate the cache.
+
+        Args:
+            device_id: Device identifier
+            settings: Application settings
+
+        Returns:
+            Cache refresh status with number of invalidated keys
+
+        Raises:
+            HTTPException: If cache refresh fails
+        """
+        if not settings.redis_cache_enabled:
+            return {
+                "success": False,
+                "message": "Redis cache is not enabled",
+                "invalidated_keys": 0,
+            }
+
+        try:
+            from routeros_mcp.infra.cache import get_redis_cache
+
+            cache = get_redis_cache()
+            invalidated = await cache.invalidate_device(device_id)
+
+            logger.info(
+                f"Cache refreshed for device: {device_id}",
+                extra={
+                    "device_id": device_id,
+                    "invalidated_keys": invalidated,
+                },
+            )
+
+            return {
+                "success": True,
+                "message": f"Cache invalidated for device {device_id}",
+                "invalidated_keys": invalidated,
+            }
+
+        except RuntimeError as e:
+            logger.warning(f"Cache not initialized: {e}")
+            return {
+                "success": False,
+                "message": "Cache not initialized",
+                "invalidated_keys": 0,
+            }
+        except Exception as e:
+            logger.error(
+                f"Cache refresh failed for device {device_id}",
+                extra={"device_id": device_id, "error": str(e)},
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Cache refresh failed: {str(e)}",
+            ) from e
+
     return app
 
 

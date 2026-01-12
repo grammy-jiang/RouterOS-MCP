@@ -58,6 +58,7 @@ class InterfaceService:
         self.session = session
         self.settings = settings
         self.device_service = DeviceService(session, settings)
+        self._cache: Any | None = None  # RedisResourceCache instance
 
     async def list_interfaces(
         self,
@@ -76,6 +77,13 @@ class InterfaceService:
         """
         await self.device_service.get_device(device_id)
 
+        # Try to get from Redis cache first
+        if self.settings.redis_cache_enabled:
+            cached = await self._get_from_cache(device_id)
+            if cached is not None:
+                logger.debug(f"Returning cached interface data for {device_id}")
+                return cached
+
         try:
             interfaces = await self._list_interfaces_via_rest(device_id)
             # Add transport metadata
@@ -83,6 +91,11 @@ class InterfaceService:
                 iface["transport"] = "rest"
                 iface["fallback_used"] = False
                 iface["rest_error"] = None
+
+            # Cache the result
+            if self.settings.redis_cache_enabled:
+                await self._set_to_cache(device_id, interfaces)
+
             return interfaces
         except (
             RouterOSTimeoutError,
@@ -103,10 +116,15 @@ class InterfaceService:
                     iface["transport"] = "ssh"
                     iface["fallback_used"] = True
                     iface["rest_error"] = str(rest_exc)
+
+                # Cache the result
+                if self.settings.redis_cache_enabled:
+                    await self._set_to_cache(device_id, interfaces)
+
                 return interfaces
             except Exception as ssh_exc:
                 logger.error(
-                    f"Both REST and SSH interface listing failed",
+                    "Both REST and SSH interface listing failed",
                     exc_info=ssh_exc,
                     extra={"device_id": device_id, "rest_error": str(rest_exc)},
                 )
@@ -206,13 +224,13 @@ class InterfaceService:
                     # Remaining parts are numeric fields and MAC address
                     # Format: [actual-mtu] [l2mtu] [max-l2mtu] [mac-address]
                     remaining = parts[idx + 2:]
-                    
+
                     # Try to extract MTU fields and MAC address from remaining fields
                     actual_mtu = 1500  # Default
                     l2mtu = 1514  # Default
                     max_l2mtu = 9796  # Default
                     mac_address = ""
-                    
+
                     # Extract numeric fields in order
                     numeric_idx = 0
                     for field in remaining:
@@ -301,7 +319,7 @@ class InterfaceService:
                 return interface
             except Exception as ssh_exc:
                 logger.error(
-                    f"Both REST and SSH get_interface failed",
+                    "Both REST and SSH get_interface failed",
                     exc_info=ssh_exc,
                     extra={
                         "device_id": device_id,
@@ -416,7 +434,7 @@ class InterfaceService:
                 return stats
             except Exception as ssh_exc:
                 logger.error(
-                    f"Both REST and SSH interface stats failed",
+                    "Both REST and SSH interface stats failed",
                     exc_info=ssh_exc,
                     extra={"device_id": device_id, "rest_error": str(rest_exc)},
                 )
@@ -494,10 +512,10 @@ class InterfaceService:
             interfaces = self._parse_interface_print_output(output)
 
             result: list[dict[str, Any]] = []
-            
+
             # If no specific interface names requested, get stats for all running interfaces
             target_interfaces = interface_names if interface_names else None
-            
+
             for iface in interfaces:
                 name = iface.get("name")
                 if not name:
@@ -572,7 +590,7 @@ class InterfaceService:
                 val = val.lower().strip()
                 # Remove spaces from numbers (e.g., "3 707" -> "3707")
                 val = val.replace(" ", "")
-                
+
                 if "kbps" in val:
                     return float(val.replace("kbps", "")) * 1000
                 elif "mbps" in val:
@@ -598,3 +616,43 @@ class InterfaceService:
                 stats["tx_bits_per_second"] = int(float(parse_value(value)))
 
         return stats
+
+
+    async def _get_from_cache(self, device_id: str) -> list[dict[str, Any]] | None:
+        """Get interface data from Redis cache.
+        
+        Args:
+            device_id: Device identifier
+        
+        Returns:
+            Cached interface data or None
+        """
+        try:
+            from routeros_mcp.infra.cache import get_redis_cache
+            if self._cache is None:
+                self._cache = get_redis_cache()
+            return await self._cache.get_interfaces(device_id)
+        except RuntimeError:
+            # Cache not initialized
+            return None
+        except Exception as e:
+            logger.warning(f"Cache get error: {e}")
+            return None
+
+    async def _set_to_cache(self, device_id: str, data: list[dict[str, Any]]) -> None:
+        """Set interface data to Redis cache.
+        
+        Args:
+            device_id: Device identifier
+            data: Interface data to cache
+        """
+        try:
+            from routeros_mcp.infra.cache import get_redis_cache
+            if self._cache is None:
+                self._cache = get_redis_cache()
+            await self._cache.set_interfaces(device_id, data)
+        except RuntimeError:
+            # Cache not initialized
+            pass
+        except Exception as e:
+            logger.warning(f"Cache set error: {e}")

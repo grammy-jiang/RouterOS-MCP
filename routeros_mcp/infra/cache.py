@@ -25,7 +25,7 @@ Example:
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from prometheus_client import Counter, Histogram
 from redis.asyncio import ConnectionPool, Redis
@@ -68,7 +68,7 @@ class RedisResourceCache:
     - ips: IP address assignments
     - routes: Routing table entries
     """
-    
+
     def __init__(
         self,
         redis_url: str,
@@ -100,10 +100,10 @@ class RedisResourceCache:
         self.timeout_seconds = timeout_seconds
         self.key_prefix = key_prefix
         self.enabled = enabled
-        
-        self._pool: Optional[ConnectionPool] = None
-        self._client: Optional[Redis] = None
-        
+
+        self._pool: ConnectionPool | None = None
+        self._client: Redis | None = None
+
         logger.info(
             "RedisResourceCache initialized",
             extra={
@@ -113,7 +113,7 @@ class RedisResourceCache:
                 "ttl_routes": ttl_routes,
             },
         )
-    
+
     async def init(self) -> None:
         """Initialize Redis connection pool and client.
         
@@ -123,7 +123,7 @@ class RedisResourceCache:
         if not self.enabled:
             logger.info("Redis cache disabled, skipping initialization")
             return
-        
+
         try:
             self._pool = ConnectionPool.from_url(
                 self.redis_url,
@@ -132,30 +132,30 @@ class RedisResourceCache:
                 socket_connect_timeout=self.timeout_seconds,
                 decode_responses=True,
             )
-            
+
             self._client = Redis(connection_pool=self._pool)
-            
+
             # Test connection
             await self._client.ping()
-            
+
             logger.info("Redis cache connection established")
-            
+
         except RedisError as e:
             logger.error(f"Failed to initialize Redis cache: {e}")
             raise RedisCacheError(f"Failed to initialize Redis cache: {e}") from e
-    
+
     async def close(self) -> None:
         """Close Redis connection and cleanup resources."""
         if self._client:
             await self._client.aclose()
             self._client = None
-        
+
         if self._pool:
             await self._pool.aclose()
             self._pool = None
-        
+
         logger.info("Redis cache connection closed")
-    
+
     def _make_key(self, device_id: str, resource_type: str) -> str:
         """Create cache key for device resource.
         
@@ -167,8 +167,8 @@ class RedisResourceCache:
             Redis key in format "resource:{device_id}:{resource_type}"
         """
         return f"{self.key_prefix}{device_id}:{resource_type}"
-    
-    async def get_interfaces(self, device_id: str) -> Optional[list[dict[str, Any]]]:
+
+    async def get_interfaces(self, device_id: str) -> list[dict[str, Any]] | None:
         """Get cached interface data for device.
         
         Args:
@@ -178,7 +178,7 @@ class RedisResourceCache:
             Cached interface data or None if not found
         """
         return await self._get(device_id, "interfaces")
-    
+
     async def set_interfaces(
         self, device_id: str, data: list[dict[str, Any]]
     ) -> None:
@@ -189,8 +189,8 @@ class RedisResourceCache:
             data: Interface data to cache
         """
         await self._set(device_id, "interfaces", data, self.ttl_interfaces)
-    
-    async def get_ips(self, device_id: str) -> Optional[list[dict[str, Any]]]:
+
+    async def get_ips(self, device_id: str) -> list[dict[str, Any]] | None:
         """Get cached IP address data for device.
         
         Args:
@@ -200,7 +200,7 @@ class RedisResourceCache:
             Cached IP address data or None if not found
         """
         return await self._get(device_id, "ips")
-    
+
     async def set_ips(
         self, device_id: str, data: list[dict[str, Any]]
     ) -> None:
@@ -211,8 +211,8 @@ class RedisResourceCache:
             data: IP address data to cache
         """
         await self._set(device_id, "ips", data, self.ttl_ips)
-    
-    async def get_routes(self, device_id: str) -> Optional[dict[str, Any]]:
+
+    async def get_routes(self, device_id: str) -> dict[str, Any] | None:
         """Get cached routing data for device.
         
         Args:
@@ -222,7 +222,7 @@ class RedisResourceCache:
             Cached routing data or None if not found
         """
         return await self._get(device_id, "routes")
-    
+
     async def set_routes(
         self, device_id: str, data: dict[str, Any]
     ) -> None:
@@ -233,10 +233,10 @@ class RedisResourceCache:
             data: Routing data to cache
         """
         await self._set(device_id, "routes", data, self.ttl_routes)
-    
+
     async def _get(
         self, device_id: str, resource_type: str
-    ) -> Optional[Any]:
+    ) -> Any | None:
         """Get cached data for device resource.
         
         Args:
@@ -248,21 +248,21 @@ class RedisResourceCache:
         """
         if not self.enabled or not self._client:
             return None
-        
+
         key = self._make_key(device_id, resource_type)
-        
+
         try:
             import time
             start_time = time.time()
-            
+
             value = await self._client.get(key)
-            
+
             duration = time.time() - start_time
             redis_cache_operation_duration_seconds.labels(
                 operation="get",
                 resource_type=resource_type,
             ).observe(duration)
-            
+
             if value is None:
                 redis_cache_operations_total.labels(
                     operation="get",
@@ -271,16 +271,16 @@ class RedisResourceCache:
                 ).inc()
                 logger.debug(f"Cache miss: {key}")
                 return None
-            
+
             redis_cache_operations_total.labels(
                 operation="get",
                 resource_type=resource_type,
                 status="hit",
             ).inc()
-            
+
             logger.debug(f"Cache hit: {key}")
             return json.loads(value)
-        
+
         except (RedisError, json.JSONDecodeError) as e:
             redis_cache_operations_total.labels(
                 operation="get",
@@ -289,7 +289,7 @@ class RedisResourceCache:
             ).inc()
             logger.warning(f"Cache get error for {key}: {e}")
             return None
-    
+
     async def _set(
         self,
         device_id: str,
@@ -307,30 +307,30 @@ class RedisResourceCache:
         """
         if not self.enabled or not self._client:
             return
-        
+
         key = self._make_key(device_id, resource_type)
-        
+
         try:
             import time
             start_time = time.time()
-            
+
             value = json.dumps(data)
             await self._client.setex(key, ttl_seconds, value)
-            
+
             duration = time.time() - start_time
             redis_cache_operation_duration_seconds.labels(
                 operation="set",
                 resource_type=resource_type,
             ).observe(duration)
-            
+
             redis_cache_operations_total.labels(
                 operation="set",
                 resource_type=resource_type,
                 status="success",
             ).inc()
-            
+
             logger.debug(f"Cache set: {key} (ttl={ttl_seconds}s)")
-        
+
         except (RedisError, TypeError) as e:
             redis_cache_operations_total.labels(
                 operation="set",
@@ -338,7 +338,7 @@ class RedisResourceCache:
                 status="error",
             ).inc()
             logger.warning(f"Cache set error for {key}: {e}")
-    
+
     async def invalidate_device(self, device_id: str) -> int:
         """Invalidate all cached data for a device.
         
@@ -350,39 +350,39 @@ class RedisResourceCache:
         """
         if not self.enabled or not self._client:
             return 0
-        
+
         try:
             import time
             start_time = time.time()
-            
+
             # Delete all resource types for this device
             keys = [
                 self._make_key(device_id, "interfaces"),
                 self._make_key(device_id, "ips"),
                 self._make_key(device_id, "routes"),
             ]
-            
+
             deleted = await self._client.delete(*keys)
-            
+
             duration = time.time() - start_time
             redis_cache_operation_duration_seconds.labels(
                 operation="invalidate",
                 resource_type="all",
             ).observe(duration)
-            
+
             redis_cache_operations_total.labels(
                 operation="invalidate",
                 resource_type="all",
                 status="success",
             ).inc()
-            
+
             logger.info(
                 f"Invalidated cache for device: {device_id} ({deleted} keys)",
                 extra={"device_id": device_id, "deleted_keys": deleted},
             )
-            
+
             return deleted
-        
+
         except RedisError as e:
             redis_cache_operations_total.labels(
                 operation="invalidate",
@@ -391,7 +391,7 @@ class RedisResourceCache:
             ).inc()
             logger.warning(f"Cache invalidation error for {device_id}: {e}")
             return 0
-    
+
     async def invalidate_resource(
         self, device_id: str, resource_type: str
     ) -> bool:
@@ -406,23 +406,23 @@ class RedisResourceCache:
         """
         if not self.enabled or not self._client:
             return False
-        
+
         key = self._make_key(device_id, resource_type)
-        
+
         try:
             deleted = await self._client.delete(key)
-            
+
             redis_cache_operations_total.labels(
                 operation="invalidate",
                 resource_type=resource_type,
                 status="success" if deleted > 0 else "not_found",
             ).inc()
-            
+
             if deleted > 0:
                 logger.info(f"Invalidated cache: {key}")
-            
+
             return deleted > 0
-        
+
         except RedisError as e:
             redis_cache_operations_total.labels(
                 operation="invalidate",
@@ -434,7 +434,7 @@ class RedisResourceCache:
 
 
 # Global cache instance
-_cache_instance: Optional[RedisResourceCache] = None
+_cache_instance: RedisResourceCache | None = None
 
 
 def get_redis_cache() -> RedisResourceCache:
