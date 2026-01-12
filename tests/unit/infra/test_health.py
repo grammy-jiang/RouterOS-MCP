@@ -1,13 +1,11 @@
 """Unit tests for health check infrastructure."""
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from routeros_mcp.config import Settings
@@ -129,9 +127,7 @@ class TestHealthChecker:
         assert checker.settings == settings
         assert checker._is_shutting_down is False
 
-    def test_set_shutdown_marks_as_shutting_down(
-        self, settings: Settings
-    ) -> None:
+    def test_set_shutdown_marks_as_shutting_down(self, settings: Settings) -> None:
         """set_shutdown() should mark checker as shutting down."""
         checker = HealthChecker(settings)
 
@@ -164,9 +160,7 @@ class TestHealthChecker:
 
         # Mock Redis ping
         with (
-            patch.object(
-                Redis, "from_url", return_value=AsyncMock(spec=Redis)
-            ) as mock_redis,
+            patch.object(Redis, "from_url", return_value=AsyncMock(spec=Redis)) as mock_redis,
             patch(
                 "httpx.AsyncClient.get",
                 new_callable=AsyncMock,
@@ -198,9 +192,7 @@ class TestHealthChecker:
         checker = HealthChecker(settings, db_engine=mock_db_engine)
 
         with (
-            patch.object(
-                Redis, "from_url", return_value=AsyncMock(spec=Redis)
-            ) as mock_redis,
+            patch.object(Redis, "from_url", return_value=AsyncMock(spec=Redis)) as mock_redis,
             patch(
                 "httpx.AsyncClient.get",
                 new_callable=AsyncMock,
@@ -226,18 +218,14 @@ class TestHealthChecker:
 
         # Mock Redis failure
         with (
-            patch.object(
-                Redis, "from_url", return_value=AsyncMock(spec=Redis)
-            ) as mock_redis,
+            patch.object(Redis, "from_url", return_value=AsyncMock(spec=Redis)) as mock_redis,
             patch(
                 "httpx.AsyncClient.get",
                 new_callable=AsyncMock,
             ) as mock_http_get,
         ):
             mock_redis_client = mock_redis.return_value
-            mock_redis_client.ping = AsyncMock(
-                side_effect=RedisError("Connection timeout")
-            )
+            mock_redis_client.ping = AsyncMock(side_effect=RedisError("Connection timeout"))
             mock_redis_client.aclose = AsyncMock()
 
             # Mock OIDC success
@@ -248,9 +236,7 @@ class TestHealthChecker:
             result = await checker.check_health()
 
         assert result.status == HealthStatus.DEGRADED
-        redis_component = next(
-            c for c in result.components if c.name == "redis"
-        )
+        redis_component = next(c for c in result.components if c.name == "redis")
         assert redis_component.healthy is False
         assert "Connection timeout" in redis_component.message
 
@@ -263,9 +249,7 @@ class TestHealthChecker:
 
         # Mock OIDC failure
         with (
-            patch.object(
-                Redis, "from_url", return_value=AsyncMock(spec=Redis)
-            ) as mock_redis,
+            patch.object(Redis, "from_url", return_value=AsyncMock(spec=Redis)) as mock_redis,
             patch(
                 "httpx.AsyncClient.get",
                 new_callable=AsyncMock,
@@ -315,9 +299,7 @@ class TestHealthChecker:
         settings.oidc_enabled = False
         checker = HealthChecker(settings, db_engine=mock_db_engine)
 
-        with patch.object(
-            Redis, "from_url", return_value=AsyncMock(spec=Redis)
-        ) as mock_redis:
+        with patch.object(Redis, "from_url", return_value=AsyncMock(spec=Redis)) as mock_redis:
             mock_redis_client = mock_redis.return_value
             mock_redis_client.ping = AsyncMock()
             mock_redis_client.aclose = AsyncMock()
@@ -362,9 +344,7 @@ class TestHealthChecker:
         """_check_redis() should return healthy component on success."""
         checker = HealthChecker(settings)
 
-        with patch.object(
-            Redis, "from_url", return_value=AsyncMock(spec=Redis)
-        ) as mock_redis:
+        with patch.object(Redis, "from_url", return_value=AsyncMock(spec=Redis)) as mock_redis:
             mock_redis_client = mock_redis.return_value
             mock_redis_client.ping = AsyncMock()
             mock_redis_client.aclose = AsyncMock()
@@ -381,13 +361,9 @@ class TestHealthChecker:
         """_check_redis() should return unhealthy component on failure."""
         checker = HealthChecker(settings)
 
-        with patch.object(
-            Redis, "from_url", return_value=AsyncMock(spec=Redis)
-        ) as mock_redis:
+        with patch.object(Redis, "from_url", return_value=AsyncMock(spec=Redis)) as mock_redis:
             mock_redis_client = mock_redis.return_value
-            mock_redis_client.ping = AsyncMock(
-                side_effect=RedisError("Connection failed")
-            )
+            mock_redis_client.ping = AsyncMock(side_effect=RedisError("Connection failed"))
             mock_redis_client.aclose = AsyncMock()
 
             component = await checker._check_redis()
@@ -436,9 +412,7 @@ class TestHealthChecker:
         assert component.duration_ms > 0
 
     @pytest.mark.asyncio
-    async def test_check_oidc_no_issuer_configured(
-        self, settings: Settings
-    ) -> None:
+    async def test_check_oidc_no_issuer_configured(self, settings: Settings) -> None:
         """_check_oidc() should return unhealthy when issuer not configured."""
         settings.oidc_issuer = None
         settings.oidc_provider_url = None
@@ -463,9 +437,7 @@ class TestHealthChecker:
 
         assert status == HealthStatus.READY
 
-    def test_determine_status_database_unhealthy(
-        self, settings: Settings
-    ) -> None:
+    def test_determine_status_database_unhealthy(self, settings: Settings) -> None:
         """_determine_status() should return DEGRADED when database unhealthy."""
         checker = HealthChecker(settings)
         components = [
@@ -477,9 +449,7 @@ class TestHealthChecker:
 
         assert status == HealthStatus.DEGRADED
 
-    def test_determine_status_redis_unhealthy(
-        self, settings: Settings
-    ) -> None:
+    def test_determine_status_redis_unhealthy(self, settings: Settings) -> None:
         """_determine_status() should return DEGRADED when Redis unhealthy."""
         checker = HealthChecker(settings)
         components = [
@@ -491,9 +461,7 @@ class TestHealthChecker:
 
         assert status == HealthStatus.DEGRADED
 
-    def test_determine_status_oidc_unhealthy(
-        self, settings: Settings
-    ) -> None:
+    def test_determine_status_oidc_unhealthy(self, settings: Settings) -> None:
         """_determine_status() should return DEGRADED when OIDC unhealthy."""
         checker = HealthChecker(settings)
         components = [

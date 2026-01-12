@@ -8,6 +8,7 @@ This module provides the main entry point that:
 """
 
 import asyncio
+import contextlib
 import logging
 import signal
 import sys
@@ -170,8 +171,8 @@ class GracefulShutdown:
 
     def register_handlers(self) -> None:
         """Register signal handlers for SIGTERM and SIGINT."""
-        signal.signal(signal.SIGTERM, lambda s, f: self._handle_signal(s))
-        signal.signal(signal.SIGINT, lambda s, f: self._handle_signal(s))
+        signal.signal(signal.SIGTERM, lambda s, _f: self._handle_signal(s))
+        signal.signal(signal.SIGINT, lambda s, _f: self._handle_signal(s))
 
     async def wait_for_shutdown(self) -> None:
         """Wait for shutdown signal."""
@@ -187,9 +188,7 @@ class GracefulShutdown:
             logger.info("HTTP app marked as shutting down")
 
         # Wait for drain window
-        logger.info(
-            f"Waiting {self.timeout}s for in-flight requests to complete"
-        )
+        logger.info(f"Waiting {self.timeout}s for in-flight requests to complete")
         await asyncio.sleep(self.timeout)
 
         # Stop MCP server
@@ -281,10 +280,8 @@ def main() -> int:  # pragma: no cover
                 # Cancel server task if still running
                 if not server_task.done():
                     server_task.cancel()
-                    try:
+                    with contextlib.suppress(asyncio.CancelledError):
                         await server_task
-                    except asyncio.CancelledError:
-                        pass
 
             # Ensure an event loop exists without using deprecated get_event_loop()
             try:

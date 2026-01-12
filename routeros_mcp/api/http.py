@@ -278,6 +278,7 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
         # Return 503 if shutting down
         if result.status == HealthStatus.SHUTDOWN:
             from fastapi.responses import JSONResponse
+
             return JSONResponse(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 content=result.to_dict(),

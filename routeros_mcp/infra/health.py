@@ -22,7 +22,7 @@ import httpx
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from routeros_mcp.config import Settings
 
@@ -103,9 +103,7 @@ class HealthCheckResult:
         return {
             "status": self.status.value,
             "timestamp": self.timestamp.isoformat(),
-            "components": {
-                comp.name: comp.to_dict() for comp in self.components
-            },
+            "components": {comp.name: comp.to_dict() for comp in self.components},
         }
 
 
@@ -181,9 +179,7 @@ class HealthChecker:
 
         return HealthCheckResult(status=status, components=components)
 
-    def _determine_status(
-        self, components: list[ComponentHealth]
-    ) -> HealthStatus:
+    def _determine_status(self, components: list[ComponentHealth]) -> HealthStatus:
         """Determine overall health status from component checks.
 
         Args:
@@ -193,16 +189,12 @@ class HealthChecker:
             Overall health status
         """
         # Database is critical - if it's down, we're degraded
-        db_component = next(
-            (c for c in components if c.name == "database"), None
-        )
+        db_component = next((c for c in components if c.name == "database"), None)
         if db_component and not db_component.healthy:
             return HealthStatus.DEGRADED
 
         # Check if any non-database components are unhealthy
-        any_unhealthy = any(
-            not c.healthy for c in components if c.name != "database"
-        )
+        any_unhealthy = any(not c.healthy for c in components if c.name != "database")
 
         # If non-critical components are down, we're degraded but still usable
         if any_unhealthy:
@@ -279,7 +271,7 @@ class HealthChecker:
                 duration_ms=duration_ms,
             )
 
-        except (RedisError, ConnectionError, asyncio.TimeoutError) as e:
+        except (RedisError, ConnectionError, TimeoutError) as e:
             duration_ms = (asyncio.get_event_loop().time() - start) * 1000
             logger.warning(
                 "Redis health check failed",
@@ -332,7 +324,7 @@ class HealthChecker:
                 duration_ms=duration_ms,
             )
 
-        except (httpx.HTTPError, asyncio.TimeoutError) as e:
+        except (httpx.HTTPError, TimeoutError) as e:
             duration_ms = (asyncio.get_event_loop().time() - start) * 1000
             logger.warning(
                 "OIDC health check failed",
