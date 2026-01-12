@@ -1,8 +1,6 @@
 """Unit tests for Redis resource cache."""
 
-import asyncio
 import json
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -392,7 +390,7 @@ class TestRedisResourceCacheGlobal:
     def test_reset_redis_cache(self) -> None:
         """reset_redis_cache() should clear global instance."""
         initialize_redis_cache(redis_url="redis://localhost:6379/0")
-        
+
         reset_redis_cache()
 
         with pytest.raises(RuntimeError, match="RedisResourceCache not initialized"):

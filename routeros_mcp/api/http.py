@@ -579,6 +579,7 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
     async def refresh_device_cache(
         device_id: str,
         settings: Settings = Depends(get_settings),
+        user: dict[str, Any] = Depends(get_current_user),
     ) -> dict[str, Any]:
         """Refresh Redis cache for a device.
 
@@ -589,12 +590,13 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
         Args:
             device_id: Device identifier
             settings: Application settings
+            user: Current authenticated user
 
         Returns:
             Cache refresh status with number of invalidated keys
 
         Raises:
-            HTTPException: If cache refresh fails
+            HTTPException: If cache refresh fails or device not found
         """
         if not settings.redis_cache_enabled:
             return {
@@ -604,6 +606,16 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
             }
 
         try:
+            # Validate device exists before invalidating cache
+            from routeros_mcp.infra.db.session import get_session
+            from routeros_mcp.domain.services.device import DeviceService
+
+            async with get_session() as session:
+                device_service = DeviceService(session, settings)
+                # This will raise DeviceNotFoundError if device doesn't exist
+                await device_service.get_device(device_id)
+
+            # Now invalidate the cache
             from routeros_mcp.infra.cache import get_redis_cache
 
             cache = get_redis_cache()
@@ -614,6 +626,7 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
                 extra={
                     "device_id": device_id,
                     "invalidated_keys": invalidated,
+                    "user": user.get("sub"),
                 },
             )
 
