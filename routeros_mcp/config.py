@@ -288,6 +288,11 @@ class Settings(BaseSettings):
     # ========================================
     # Redis Resource Cache Configuration
     # ========================================
+    # Note: The resource cache shares the Redis connection configuration
+    # (redis_url, redis_pool_size, redis_timeout_seconds) with the session store.
+    # Both use the same Redis instance but different key prefixes to avoid conflicts:
+    # - Session store keys: "session:*"
+    # - Resource cache keys: "resource:*"
 
     redis_cache_enabled: bool = Field(
         default=True,

@@ -12,19 +12,20 @@ Example:
         ttl_routes=300,
     )
     await cache.init()
-    
+
     # Cache interface data
     await cache.set_interfaces("dev-lab-01", interfaces_data)
-    
+
     # Retrieve cached data
     cached = await cache.get_interfaces("dev-lab-01")
-    
+
     # Invalidate device cache
     await cache.invalidate_device("dev-lab-01")
 """
 
 import json
 import logging
+import time
 from typing import Any
 
 from prometheus_client import Counter, Histogram
@@ -252,7 +253,6 @@ class RedisResourceCache:
         key = self._make_key(device_id, resource_type)
 
         try:
-            import time
             start_time = time.time()
 
             value = await self._client.get(key)
@@ -311,7 +311,6 @@ class RedisResourceCache:
         key = self._make_key(device_id, resource_type)
 
         try:
-            import time
             start_time = time.time()
 
             value = json.dumps(data)
@@ -352,7 +351,6 @@ class RedisResourceCache:
             return 0
 
         try:
-            import time
             start_time = time.time()
 
             # Delete all resource types for this device
