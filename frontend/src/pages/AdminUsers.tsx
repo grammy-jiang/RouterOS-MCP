@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { userApi, deviceApi, ApiError } from '../services/api';
 import UserForm from '../components/UserForm';
 import type { User, UserCreateRequest, UserUpdateRequest, Role } from '../types/user';
@@ -17,11 +17,7 @@ export default function AdminUsers() {
   const [filterActive, setFilterActive] = useState<boolean | null>(null);
   const [filterRole, setFilterRole] = useState<string>('');
 
-  useEffect(() => {
-    loadData();
-  }, [filterActive, filterRole]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -44,7 +40,11 @@ export default function AdminUsers() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filterActive, filterRole]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleAddUser = async (data: UserCreateRequest | UserUpdateRequest) => {
     try {
