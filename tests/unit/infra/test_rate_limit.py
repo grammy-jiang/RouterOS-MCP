@@ -749,7 +749,9 @@ async def test_redis_store_reset_by_user_with_mock():
 
     # Mock scan operations - scan returns (cursor, keys) tuple
     mock_redis = AsyncMock()
-    mock_redis.scan = AsyncMock(return_value=(0, ["rate_limit:read_only:user-123", "rate_limit:ops_rw:user-123"]))
+    mock_redis.scan = AsyncMock(
+        return_value=(0, ["rate_limit:read_only:user-123", "rate_limit:ops_rw:user-123"])
+    )
     mock_redis.delete = AsyncMock()
 
     with patch("routeros_mcp.infra.rate_limit.ConnectionPool") as mock_pool_class:
@@ -785,7 +787,9 @@ async def test_redis_store_reset_by_role_with_mock():
     )
 
     mock_redis = AsyncMock()
-    mock_redis.scan = AsyncMock(return_value=(0, ["rate_limit:admin:user-a", "rate_limit:admin:user-b"]))
+    mock_redis.scan = AsyncMock(
+        return_value=(0, ["rate_limit:admin:user-a", "rate_limit:admin:user-b"])
+    )
     mock_redis.delete = AsyncMock()
 
     with patch("routeros_mcp.infra.rate_limit.ConnectionPool") as mock_pool_class:
