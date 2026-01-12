@@ -4,10 +4,15 @@ This module provides the main entry point that:
 1. Loads and validates configuration
 2. Sets up logging
 3. Prepares to start the MCP server (implementation in later tasks)
+4. Handles graceful shutdown on SIGTERM/SIGINT
 """
 
+import asyncio
+import contextlib
 import logging
+import signal
 import sys
+from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 from routeros_mcp.cli import load_config_from_cli
@@ -117,6 +122,107 @@ def print_startup_banner(settings: Settings) -> None:  # pragma: no cover
     logger.info("=" * 60)
 
 
+class GracefulShutdown:
+    """Graceful shutdown coordinator.
+
+    Manages shutdown signal handling and resource cleanup with
+    configurable drain window for in-flight requests.
+    """
+
+    def __init__(self, timeout: float = 30.0) -> None:
+        """Initialize shutdown coordinator.
+
+        Args:
+            timeout: Drain window timeout in seconds
+        """
+        self.timeout = timeout
+        self._shutdown_event = asyncio.Event()
+        self._server: Any = None
+        self._http_app: Any = None
+
+    def set_server(self, server: Any) -> None:
+        """Register MCP server for shutdown.
+
+        Args:
+            server: MCP server instance
+        """
+        self._server = server
+
+    def set_http_app(self, app: Any) -> None:
+        """Register HTTP app for shutdown.
+
+        Args:
+            app: FastAPI app instance
+        """
+        self._http_app = app
+
+    def _handle_signal(self, signum: int) -> None:
+        """Signal handler that triggers shutdown.
+
+        Args:
+            signum: Signal number
+        """
+        signal_name = signal.Signals(signum).name
+        logger = logging.getLogger(__name__)
+        logger.info(
+            f"Received {signal_name}, initiating graceful shutdown",
+            extra={"signal": signal_name, "timeout": self.timeout},
+        )
+        self._shutdown_event.set()
+
+    def register_handlers(self) -> None:
+        """Register signal handlers for SIGTERM and SIGINT."""
+        signal.signal(signal.SIGTERM, lambda signum, _frame: self._handle_signal(signum))
+        signal.signal(signal.SIGINT, lambda signum, _frame: self._handle_signal(signum))
+
+    async def wait_for_shutdown(self) -> None:
+        """Wait for shutdown signal."""
+        await self._shutdown_event.wait()
+
+    async def cleanup(self) -> None:
+        """Cleanup resources during shutdown."""
+        logger = logging.getLogger(__name__)
+
+        # Mark HTTP app as shutting down (for health endpoint)
+        if self._http_app:
+            self._http_app.state._is_shutting_down = True
+            logger.info("HTTP app marked as shutting down")
+
+        # Wait for drain window
+        logger.info(f"Waiting {self.timeout}s for in-flight requests to complete")
+        await asyncio.sleep(self.timeout)
+
+        # Stop MCP server
+        if self._server:
+            await self._server.stop()
+            logger.info("MCP server stopped")
+
+        # Close database connections
+        try:
+            from routeros_mcp.infra.db.session import get_session_manager
+
+            manager = get_session_manager()
+            await manager.close()
+            logger.info("Database connections closed")
+        except RuntimeError as e:
+            # Session manager not initialized
+            logger.debug(f"Database session manager not initialized during shutdown: {e}")
+
+        # Close Redis cache if enabled
+        try:
+            from routeros_mcp.infra.cache import get_redis_cache, reset_redis_cache
+
+            cache = get_redis_cache()
+            await cache.close()
+            reset_redis_cache()
+            logger.info("Redis cache closed")
+        except RuntimeError as e:
+            # Cache not initialized
+            logger.debug(f"Redis cache not initialized during shutdown: {e}")
+
+        logger.info("Graceful shutdown complete")
+
+
 def main() -> int:  # pragma: no cover
     """Main entry point for RouterOS MCP Service.
 
@@ -144,13 +250,51 @@ def main() -> int:  # pragma: no cover
             logger.info(f"Starting MCP server in {settings.mcp_transport} mode")
 
             # Import here to avoid circular dependencies
-            import asyncio
             from routeros_mcp.mcp.server import create_mcp_server
 
-            # Run async server
+            # Run async server with graceful shutdown
             async def run_server() -> None:
+                # Create shutdown coordinator
+                shutdown = GracefulShutdown(timeout=30.0)
+                shutdown.register_handlers()
+
+                # Create and start server
                 server = await create_mcp_server(settings)
-                await server.start()
+                shutdown.set_server(server)
+
+                # For HTTP transport, attempt to access the HTTP app for shutdown coordination
+                # Note: FastMCP creates the app internally during run_http_async(), making it
+                # inaccessible here. The health endpoint checks app.state._is_shutting_down,
+                # which won't be set in HTTP mode. This is a known limitation.
+                # TODO: Explore FastMCP hooks or store app reference for shutdown coordination
+                if settings.mcp_transport == "http":
+                    # Attempt to find the HTTP app if exposed by the server
+                    if hasattr(server, "http_app"):
+                        shutdown.set_http_app(server.http_app)
+                        logger.info("HTTP app registered with shutdown coordinator")
+                    elif hasattr(server, "app"):
+                        shutdown.set_http_app(server.app)
+                        logger.info("HTTP app registered with shutdown coordinator")
+                    else:
+                        logger.warning(
+                            "HTTP app not accessible for shutdown coordination. "
+                            "Health endpoint shutdown state will not be set in HTTP mode."
+                        )
+
+                # Start server in background task
+                server_task = asyncio.create_task(server.start())
+
+                # Wait for shutdown signal
+                await shutdown.wait_for_shutdown()
+
+                # Cancel server task if still running
+                if not server_task.done():
+                    server_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await server_task
+
+                # Cleanup resources after server task is cancelled
+                await shutdown.cleanup()
 
             # Ensure an event loop exists without using deprecated get_event_loop()
             try:

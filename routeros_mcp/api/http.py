@@ -240,16 +240,57 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
     # Health check endpoint
     @app.get("/health")
     async def health_check() -> dict[str, Any]:
-        """Health check endpoint.
+        """Health check endpoint for load balancer integration.
+
+        Checks:
+        - Database connectivity
+        - Redis connectivity (if enabled)
+        - OIDC provider reachability (if enabled)
+        - Service shutdown state
 
         Returns:
-            Service health status
+            Service health status with component details
+
+        Status Codes:
+            200 OK: Service ready or degraded (non-critical components down)
+            503 Service Unavailable: Service shutting down
         """
-        return {
-            "status": "healthy",
-            "environment": settings.environment,
-            "transport": settings.mcp_transport,
-        }
+        from routeros_mcp.infra.health import HealthChecker, HealthStatus
+        from routeros_mcp.infra.db.session import get_session_manager
+
+        # Get database engine for health checker
+        try:
+            manager = get_session_manager(settings)
+            db_engine = manager.engine
+        except RuntimeError as exc:
+            # If the session manager is not initialized, treat the service as unavailable
+            # instead of letting the health checker implicitly try to initialize it.
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Database session manager not initialized",
+            ) from exc
+
+        # Create health checker
+        checker = HealthChecker(settings, db_engine=db_engine)
+
+        # Check if we're shutting down (set by signal handler)
+        if getattr(app.state, "_is_shutting_down", False):
+            checker.set_shutdown()
+
+        # Perform health check
+        result = await checker.check_health()
+
+        # Return 503 if shutting down
+        if result.status == HealthStatus.SHUTDOWN:
+            from fastapi.responses import JSONResponse
+
+            return JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content=result.to_dict(),
+            )
+
+        # Return 200 for ready or degraded
+        return result.to_dict()
 
     # Metrics endpoint (Prometheus format)
     @app.get("/metrics")
