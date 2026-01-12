@@ -286,6 +286,41 @@ class Settings(BaseSettings):
     )
 
     # ========================================
+    # Redis Resource Cache Configuration
+    # ========================================
+    # Note: The resource cache shares the Redis connection configuration
+    # (redis_url, redis_pool_size, redis_timeout_seconds) with the session store.
+    # Both use the same Redis instance but different key prefixes to avoid conflicts:
+    # - Session store keys: "session:*"
+    # - Resource cache keys: "resource:*"
+
+    redis_cache_enabled: bool = Field(
+        default=True,
+        description="Enable Redis-backed resource caching for device data",
+    )
+
+    redis_cache_ttl_interfaces: int = Field(
+        default=300,
+        ge=10,
+        le=3600,
+        description="TTL for interface data cache in seconds (default: 5 minutes)",
+    )
+
+    redis_cache_ttl_ips: int = Field(
+        default=300,
+        ge=10,
+        le=3600,
+        description="TTL for IP address data cache in seconds (default: 5 minutes)",
+    )
+
+    redis_cache_ttl_routes: int = Field(
+        default=300,
+        ge=10,
+        le=3600,
+        description="TTL for routing data cache in seconds (default: 5 minutes)",
+    )
+
+    # ========================================
     # Security & Encryption
     # ========================================
 

@@ -14,10 +14,8 @@ from fastmcp import FastMCP
 
 from routeros_mcp.config import Settings
 from routeros_mcp.domain.services.health import HealthService
-from routeros_mcp.domain.services.system import SystemService
 from routeros_mcp.infra.db.session import (
     DatabaseSessionManager,
-    get_session_factory,
     initialize_session_manager,
 )
 from routeros_mcp.mcp.errors import MCPError, map_exception_to_error
@@ -265,12 +263,6 @@ require appropriate device capabilities and permissions.
     def _register_resources(self) -> None:
         """Register MCP resources with the server."""
         # Import resource registration functions
-        from routeros_mcp.mcp_resources import (
-            register_device_resources,
-            register_fleet_resources,
-            register_plan_resources,
-            register_audit_resources,
-        )
 
         # Note: Resources need session_factory which is initialized in start()
         # We'll register them in start() instead
@@ -306,7 +298,7 @@ require appropriate device capabilities and permissions.
         self.session_factory = await initialize_session_manager(self.settings)
         logger.info("Database session manager initialized")
 
-        # Initialize resource cache
+        # Initialize resource cache (in-memory)
         from routeros_mcp.infra.observability.resource_cache import initialize_cache
 
         initialize_cache(
@@ -322,6 +314,35 @@ require appropriate device capabilities and permissions.
                 "max_entries": self.settings.mcp_resource_cache_max_entries,
             },
         )
+
+        # Initialize Redis resource cache
+        if self.settings.redis_cache_enabled:
+            from routeros_mcp.infra.cache import initialize_redis_cache, RedisCacheError
+
+            try:
+                cache = initialize_redis_cache(
+                    redis_url=self.settings.redis_url,
+                    ttl_interfaces=self.settings.redis_cache_ttl_interfaces,
+                    ttl_ips=self.settings.redis_cache_ttl_ips,
+                    ttl_routes=self.settings.redis_cache_ttl_routes,
+                    pool_size=self.settings.redis_pool_size,
+                    timeout_seconds=self.settings.redis_timeout_seconds,
+                    enabled=True,
+                )
+                await cache.init()
+                logger.info(
+                    "Redis resource cache initialized",
+                    extra={
+                        "ttl_interfaces": self.settings.redis_cache_ttl_interfaces,
+                        "ttl_ips": self.settings.redis_cache_ttl_ips,
+                        "ttl_routes": self.settings.redis_cache_ttl_routes,
+                    },
+                )
+            except RedisCacheError as e:
+                logger.warning(
+                    f"Redis cache initialization failed, continuing without cache: {e}",
+                    extra={"redis_url": self.settings.redis_url},
+                )
 
         # Register resources (now that we have session_factory)
         from routeros_mcp.mcp_resources import (
@@ -431,12 +452,12 @@ require appropriate device capabilities and permissions.
     async def stop(self) -> None:
         """Stop the MCP server gracefully."""
         logger.info("Stopping MCP server")
-        
+
         # Stop job scheduler if running
         if self.scheduler:
             await self.scheduler.shutdown(wait=True)
             logger.info("Job scheduler stopped")
-        
+
         # FastMCP handles cleanup automatically
 
 
