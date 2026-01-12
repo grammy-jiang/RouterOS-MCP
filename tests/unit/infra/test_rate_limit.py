@@ -542,19 +542,25 @@ async def test_redis_store_concurrent_requests_at_limit(redis_store):
 @pytest.mark.asyncio
 async def test_redis_store_handles_connection_failure():
     """Test Redis store handles connection failures gracefully."""
-    from redis.exceptions import RedisError
+    from unittest.mock import patch
 
-    # Create store with invalid Redis URL
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    # Create store with valid URL (won't actually connect due to mock)
     store = RateLimitStore(
-        redis_url="redis://invalid-host:6379/0",
+        redis_url="redis://localhost:6379/0",
         pool_size=1,
         timeout_seconds=1.0,
         window_seconds=60,
     )
 
-    # Init should fail with RedisError
-    with pytest.raises(RedisError):
-        await store.init()
+    # Mock the Redis connection to fail during init
+    with patch("routeros_mcp.infra.rate_limit.ConnectionPool") as mock_pool:
+        mock_pool.from_url.side_effect = RedisConnectionError("Connection refused")
+
+        # Init should fail with RedisError
+        with pytest.raises(RedisConnectionError):
+            await store.init()
 
 
 @pytest.mark.asyncio
