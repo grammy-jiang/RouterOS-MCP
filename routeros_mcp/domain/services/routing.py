@@ -482,7 +482,8 @@ class RoutingService:
             from routeros_mcp.infra.cache import get_redis_cache
             if self._cache is None:
                 self._cache = get_redis_cache()
-            return await self._cache.get_routes(device_id)
+            result: dict[str, Any] | None = await self._cache.get_routes(device_id)
+            return result
         except RuntimeError:
             # Cache not initialized
             return None

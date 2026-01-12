@@ -317,26 +317,32 @@ require appropriate device capabilities and permissions.
 
         # Initialize Redis resource cache
         if self.settings.redis_cache_enabled:
-            from routeros_mcp.infra.cache import initialize_redis_cache
+            from routeros_mcp.infra.cache import initialize_redis_cache, RedisCacheError
 
-            cache = initialize_redis_cache(
-                redis_url=self.settings.redis_url,
-                ttl_interfaces=self.settings.redis_cache_ttl_interfaces,
-                ttl_ips=self.settings.redis_cache_ttl_ips,
-                ttl_routes=self.settings.redis_cache_ttl_routes,
-                pool_size=self.settings.redis_pool_size,
-                timeout_seconds=self.settings.redis_timeout_seconds,
-                enabled=True,
-            )
-            await cache.init()
-            logger.info(
-                "Redis resource cache initialized",
-                extra={
-                    "ttl_interfaces": self.settings.redis_cache_ttl_interfaces,
-                    "ttl_ips": self.settings.redis_cache_ttl_ips,
-                    "ttl_routes": self.settings.redis_cache_ttl_routes,
-                },
-            )
+            try:
+                cache = initialize_redis_cache(
+                    redis_url=self.settings.redis_url,
+                    ttl_interfaces=self.settings.redis_cache_ttl_interfaces,
+                    ttl_ips=self.settings.redis_cache_ttl_ips,
+                    ttl_routes=self.settings.redis_cache_ttl_routes,
+                    pool_size=self.settings.redis_pool_size,
+                    timeout_seconds=self.settings.redis_timeout_seconds,
+                    enabled=True,
+                )
+                await cache.init()
+                logger.info(
+                    "Redis resource cache initialized",
+                    extra={
+                        "ttl_interfaces": self.settings.redis_cache_ttl_interfaces,
+                        "ttl_ips": self.settings.redis_cache_ttl_ips,
+                        "ttl_routes": self.settings.redis_cache_ttl_routes,
+                    },
+                )
+            except RedisCacheError as e:
+                logger.warning(
+                    f"Redis cache initialization failed, continuing without cache: {e}",
+                    extra={"redis_url": self.settings.redis_url},
+                )
 
         # Register resources (now that we have session_factory)
         from routeros_mcp.mcp_resources import (
