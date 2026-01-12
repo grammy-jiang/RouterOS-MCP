@@ -35,7 +35,7 @@ class TestComponentHealth:
         assert component.duration_ms == 12.5
 
     def test_to_dict_serializes_correctly(self) -> None:
-        """to_dict() should serialize to dictionary."""
+        """to_dict() should serialize to dictionary without name field."""
         component = ComponentHealth(
             name="redis",
             healthy=False,
@@ -46,7 +46,6 @@ class TestComponentHealth:
         result = component.to_dict()
 
         assert result == {
-            "name": "redis",
             "healthy": False,
             "message": "Connection timeout",
             "duration_ms": 5000.12,  # Rounded to 2 decimals

@@ -64,10 +64,9 @@ class ComponentHealth:
         """Convert to dictionary for JSON serialization.
 
         Returns:
-            Dictionary representation
+            Dictionary representation (without name field to avoid redundancy)
         """
         return {
-            "name": self.name,
             "healthy": self.healthy,
             "message": self.message,
             "duration_ms": round(self.duration_ms, 2),

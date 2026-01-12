@@ -12,6 +12,7 @@ import contextlib
 import logging
 import signal
 import sys
+from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 from routeros_mcp.cli import load_config_from_cli
@@ -136,10 +137,10 @@ class GracefulShutdown:
         """
         self.timeout = timeout
         self._shutdown_event = asyncio.Event()
-        self._server: any = None
-        self._http_app: any = None
+        self._server: Any = None
+        self._http_app: Any = None
 
-    def set_server(self, server: any) -> None:
+    def set_server(self, server: Any) -> None:
         """Register MCP server for shutdown.
 
         Args:
@@ -147,7 +148,7 @@ class GracefulShutdown:
         """
         self._server = server
 
-    def set_http_app(self, app: any) -> None:
+    def set_http_app(self, app: Any) -> None:
         """Register HTTP app for shutdown.
 
         Args:
@@ -171,8 +172,8 @@ class GracefulShutdown:
 
     def register_handlers(self) -> None:
         """Register signal handlers for SIGTERM and SIGINT."""
-        signal.signal(signal.SIGTERM, lambda s, _f: self._handle_signal(s))
-        signal.signal(signal.SIGINT, lambda s, _f: self._handle_signal(s))
+        signal.signal(signal.SIGTERM, lambda signum, _frame: self._handle_signal(signum))
+        signal.signal(signal.SIGINT, lambda signum, _frame: self._handle_signal(signum))
 
     async def wait_for_shutdown(self) -> None:
         """Wait for shutdown signal."""
@@ -203,9 +204,9 @@ class GracefulShutdown:
             manager = get_session_manager()
             await manager.close()
             logger.info("Database connections closed")
-        except RuntimeError:
+        except RuntimeError as e:
             # Session manager not initialized
-            pass
+            logger.debug(f"Database session manager not initialized during shutdown: {e}")
 
         # Close Redis cache if enabled
         try:
@@ -215,9 +216,9 @@ class GracefulShutdown:
             await cache.close()
             reset_redis_cache()
             logger.info("Redis cache closed")
-        except RuntimeError:
+        except RuntimeError as e:
             # Cache not initialized
-            pass
+            logger.debug(f"Redis cache not initialized during shutdown: {e}")
 
         logger.info("Graceful shutdown complete")
 
@@ -261,12 +262,24 @@ def main() -> int:  # pragma: no cover
                 server = await create_mcp_server(settings)
                 shutdown.set_server(server)
 
-                # For HTTP transport, get the FastAPI app for shutdown state
+                # For HTTP transport, attempt to access the HTTP app for shutdown coordination
+                # Note: FastMCP creates the app internally during run_http_async(), making it
+                # inaccessible here. The health endpoint checks app.state._is_shutting_down,
+                # which won't be set in HTTP mode. This is a known limitation.
+                # TODO: Explore FastMCP hooks or store app reference for shutdown coordination
                 if settings.mcp_transport == "http":
-                    # The HTTP app is created inside server.start(), so we
-                    # can't access it here. The shutdown state will be checked
-                    # via app.state._is_shutting_down in the health endpoint.
-                    pass
+                    # Attempt to find the HTTP app if exposed by the server
+                    if hasattr(server, "http_app"):
+                        shutdown.set_http_app(server.http_app)
+                        logger.info("HTTP app registered with shutdown coordinator")
+                    elif hasattr(server, "app"):
+                        shutdown.set_http_app(server.app)
+                        logger.info("HTTP app registered with shutdown coordinator")
+                    else:
+                        logger.warning(
+                            "HTTP app not accessible for shutdown coordination. "
+                            "Health endpoint shutdown state will not be set in HTTP mode."
+                        )
 
                 # Start server in background task
                 server_task = asyncio.create_task(server.start())
@@ -274,14 +287,14 @@ def main() -> int:  # pragma: no cover
                 # Wait for shutdown signal
                 await shutdown.wait_for_shutdown()
 
-                # Cleanup resources
-                await shutdown.cleanup()
-
                 # Cancel server task if still running
                 if not server_task.done():
                     server_task.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
                         await server_task
+
+                # Cleanup resources after server task is cancelled
+                await shutdown.cleanup()
 
             # Ensure an event loop exists without using deprecated get_event_loop()
             try:

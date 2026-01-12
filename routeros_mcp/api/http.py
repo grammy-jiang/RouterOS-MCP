@@ -261,9 +261,14 @@ def create_http_app(settings: Settings) -> FastAPI:  # pragma: no cover
         # Get database engine for health checker
         try:
             manager = get_session_manager(settings)
-            db_engine = manager.engine if manager._engine else None
-        except RuntimeError:
-            db_engine = None
+            db_engine = manager.engine
+        except RuntimeError as exc:
+            # If the session manager is not initialized, treat the service as unavailable
+            # instead of letting the health checker implicitly try to initialize it.
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Database session manager not initialized",
+            ) from exc
 
         # Create health checker
         checker = HealthChecker(settings, db_engine=db_engine)
