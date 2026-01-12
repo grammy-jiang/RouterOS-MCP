@@ -24,7 +24,7 @@ from routeros_mcp.security.authz import ToolTier, UserRole
 
 
 @pytest.fixture
-async def db_session():  # type: ignore[misc]
+async def db_session() -> AsyncSession:
     """Create an in-memory database session for testing."""
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
 

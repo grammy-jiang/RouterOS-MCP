@@ -19,7 +19,12 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from routeros_mcp.infra.db.models import AuditEvent as AuditEventModel
-from routeros_mcp.security.authz import ToolTier, UserRole, _TIER_HIERARCHY
+from routeros_mcp.security.authz import (
+    RoleInsufficientError,
+    ToolTier,
+    UserRole,
+    check_user_role,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +114,6 @@ class PolicyEngine:
             user_role: User's current role
             operation: Operation being attempted (e.g., "plan_create", "plan_execute")
             user_sub: Optional user subject for audit logging
-            context: Optional context dict for audit logging
 
         Raises:
             TierPolicyViolation: If user role is insufficient for operation
@@ -213,6 +217,11 @@ class PolicyEngine:
 
         Enforces separation of duties by preventing users from approving their
         own requests. This is a critical security control for change management.
+
+        Note: This provides a reusable policy validation that can be called from
+        multiple contexts (ApprovalService, external workflows, etc.). The
+        ApprovalService.approve_request() method should call this method to
+        ensure consistent validation logic rather than implementing its own check.
 
         Args:
             requester_sub: User subject who created the request
@@ -425,8 +434,9 @@ class PolicyEngine:
     ) -> None:
         """Validate that user role allows access to tool tier.
 
-        This is a convenience method that wraps the tier hierarchy check
-        from the authz module with policy engine semantics.
+        This is a convenience method that delegates to the authz module's
+        check_user_role() and translates RoleInsufficientError to
+        TierPolicyViolation for consistency with policy engine semantics.
 
         Args:
             user_role: User's current role
@@ -444,16 +454,13 @@ class PolicyEngine:
                 user_sub="user-123"
             )  # Raises TierPolicyViolation
         """
-        from routeros_mcp.security.authz import get_allowed_tool_tier
-
-        allowed_tier = get_allowed_tool_tier(user_role)
-
-        # Approvers cannot execute any tools
-        if allowed_tier is None:
-            user_info = f" (user: {user_sub})" if user_sub else ""
-            tool_info = f" '{tool_name}'" if tool_name else ""
+        try:
+            # Delegate to existing authz module validation
+            check_user_role(user_role, tool_tier, user_sub, tool_name)
+        except RoleInsufficientError as e:
+            # Log as policy violation for policy engine context
             logger.warning(
-                f"Tier policy violation: approver{user_info} attempted to execute tool",
+                f"Tier policy violation: {user_role.value} attempted {tool_tier.value} tier tool",
                 extra={
                     "user_sub": user_sub,
                     "user_role": user_role.value,
@@ -462,30 +469,8 @@ class PolicyEngine:
                     "policy_type": "tier_restriction",
                 },
             )
-            raise TierPolicyViolation(
-                f"Role 'approver'{user_info} cannot execute tools{tool_info}. "
-                "Approvers can only approve plans but not execute operations."
-            )
-
-        # Check if tool tier exceeds user's allowed tier
-        if _TIER_HIERARCHY[tool_tier.value] > _TIER_HIERARCHY[allowed_tier.value]:
-            user_info = f" (user: {user_sub})" if user_sub else ""
-            tool_info = f" '{tool_name}'" if tool_name else ""
-            logger.warning(
-                f"Tier policy violation: {user_role.value}{user_info} attempted {tool_tier.value} tier tool",
-                extra={
-                    "user_sub": user_sub,
-                    "user_role": user_role.value,
-                    "tool_tier": tool_tier.value,
-                    "tool_name": tool_name,
-                    "policy_type": "tier_restriction",
-                },
-            )
-            raise TierPolicyViolation(
-                f"Role '{user_role.value}'{user_info} cannot execute {tool_tier.value} tier tools{tool_info}. "
-                f"Maximum allowed tier is {allowed_tier.value}. "
-                "Contact an administrator to request elevated privileges."
-            )
+            # Translate to TierPolicyViolation for policy engine semantics
+            raise TierPolicyViolation(str(e)) from e
 
         logger.debug(
             f"Tool tier policy check passed: {user_role.value} can execute {tool_tier.value} tier",
