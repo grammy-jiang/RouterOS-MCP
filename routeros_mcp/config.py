@@ -399,6 +399,55 @@ class Settings(BaseSettings):
     )
 
     # ========================================
+    # Rate Limiting Configuration (Phase 5 #13)
+    # ========================================
+
+    rate_limit_enabled: bool = Field(
+        default=True,
+        description="Enable rate limiting middleware for tool execution",
+    )
+
+    rate_limit_read_only_per_minute: int = Field(
+        default=10,
+        ge=1,
+        le=1000,
+        description="Rate limit for read_only role: requests per minute",
+    )
+
+    rate_limit_ops_rw_per_minute: int = Field(
+        default=5,
+        ge=1,
+        le=1000,
+        description="Rate limit for ops_rw role: requests per minute",
+    )
+
+    rate_limit_admin_per_minute: int = Field(
+        default=0,
+        ge=0,
+        le=1000,
+        description="Rate limit for admin role: requests per minute (0 = unlimited)",
+    )
+
+    rate_limit_approver_per_minute: int = Field(
+        default=5,
+        ge=1,
+        le=1000,
+        description="Rate limit for approver role: requests per minute",
+    )
+
+    rate_limit_window_seconds: int = Field(
+        default=60,
+        ge=10,
+        le=3600,
+        description="Time window for rate limiting in seconds",
+    )
+
+    rate_limit_use_redis: bool = Field(
+        default=True,
+        description="Use Redis for distributed rate limiting (required for multi-instance)",
+    )
+
+    # ========================================
     # Validators
     # ========================================
 
