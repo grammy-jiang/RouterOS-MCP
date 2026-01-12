@@ -622,3 +622,258 @@ async def test_redis_store_get_remaining_returns_zero_on_error():
         assert remaining == 0
 
     await store.close()
+
+
+# ========================================
+# Fully Mocked Redis Tests (No Redis Required)
+# ========================================
+
+
+@pytest.mark.asyncio
+async def test_redis_store_check_and_record_success_with_mock():
+    """Test Redis store check_and_record with fully mocked Redis (no Redis instance needed)."""
+    from unittest.mock import AsyncMock, patch
+
+    store = RateLimitStore(
+        redis_url="redis://localhost:6379/15",
+        pool_size=1,
+        timeout_seconds=1.0,
+        window_seconds=60,
+    )
+
+    # Mock ConnectionPool and Redis client
+    mock_redis = AsyncMock()
+    mock_redis.eval.return_value = [1, 1, 0]  # Lua script returns [allowed, count, retry_after]
+
+    with patch("routeros_mcp.infra.rate_limit.ConnectionPool") as mock_pool_class:
+        mock_pool = AsyncMock()
+        mock_pool_class.from_url.return_value = mock_pool
+
+        # Patch Redis constructor to return our mock
+        with patch("routeros_mcp.infra.rate_limit.Redis", return_value=mock_redis):
+            await store.init()
+
+            # Test check_and_record - should succeed
+            await store.check_and_record("user-999", "read_only", limit=10)
+
+            # Verify Lua script was called
+            assert mock_redis.eval.called
+
+            await store.close()
+
+
+@pytest.mark.asyncio
+async def test_redis_store_blocks_when_limit_exceeded_with_mock():
+    """Test Redis store raises RateLimitExceededError when limit exceeded (fully mocked)."""
+    from unittest.mock import AsyncMock, patch
+
+    store = RateLimitStore(
+        redis_url="redis://localhost:6379/15",
+        pool_size=1,
+        timeout_seconds=1.0,
+        window_seconds=60,
+    )
+
+    # Mock Redis to return limit exceeded: [0, current_count, retry_after]
+    mock_redis = AsyncMock()
+    mock_redis.eval.return_value = [0, 6, 30]  # 0=not allowed, 6 requests, 30s retry
+
+    with patch("routeros_mcp.infra.rate_limit.ConnectionPool") as mock_pool_class:
+        mock_pool = AsyncMock()
+        mock_pool_class.from_url.return_value = mock_pool
+
+        with patch("routeros_mcp.infra.rate_limit.Redis", return_value=mock_redis):
+            await store.init()
+
+            # Should raise RateLimitExceededError
+            with pytest.raises(RateLimitExceededError) as exc_info:
+                await store.check_and_record("user-888", "ops_rw", limit=5)
+
+            error = exc_info.value
+            assert error.data["user_id"] == "user-888"
+            assert error.data["role"] == "ops_rw"
+            assert error.data["limit"] == 5
+
+            await store.close()
+
+
+@pytest.mark.asyncio
+async def test_redis_store_get_remaining_with_mock():
+    """Test Redis store get_remaining with fully mocked Redis."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    store = RateLimitStore(
+        redis_url="redis://localhost:6379/15",
+        pool_size=1,
+        timeout_seconds=1.0,
+        window_seconds=60,
+    )
+
+    # Mock pipeline operations
+    mock_pipeline = AsyncMock()
+    mock_pipeline.zremrangebyscore = MagicMock(return_value=mock_pipeline)
+    mock_pipeline.zcard = MagicMock(return_value=mock_pipeline)
+    mock_pipeline.ttl = MagicMock(return_value=mock_pipeline)
+    mock_pipeline.execute = AsyncMock(return_value=[None, 3, 45])  # 3 requests used, 45s TTL
+
+    mock_redis = AsyncMock()
+    mock_redis.pipeline = MagicMock(return_value=mock_pipeline)
+
+    with patch("routeros_mcp.infra.rate_limit.ConnectionPool") as mock_pool_class:
+        mock_pool = AsyncMock()
+        mock_pool_class.from_url.return_value = mock_pool
+
+        with patch("routeros_mcp.infra.rate_limit.Redis", return_value=mock_redis):
+            await store.init()
+
+            # Get remaining
+            remaining = await store.get_remaining("user-777", "read_only", limit=10)
+
+            # Should be 10 - 3 = 7
+            assert remaining == 7
+
+            await store.close()
+
+
+@pytest.mark.asyncio
+async def test_redis_store_reset_by_user_with_mock():
+    """Test Redis store reset by user with fully mocked Redis."""
+    from unittest.mock import AsyncMock, patch
+
+    store = RateLimitStore(
+        redis_url="redis://localhost:6379/15",
+        pool_size=1,
+        timeout_seconds=1.0,
+        window_seconds=60,
+    )
+
+    # Mock scan operations - scan returns (cursor, keys) tuple
+    mock_redis = AsyncMock()
+    mock_redis.scan = AsyncMock(return_value=(0, ["rate_limit:read_only:user-123", "rate_limit:ops_rw:user-123"]))
+    mock_redis.delete = AsyncMock()
+
+    with patch("routeros_mcp.infra.rate_limit.ConnectionPool") as mock_pool_class:
+        mock_pool = AsyncMock()
+        mock_pool_class.from_url.return_value = mock_pool
+
+        with patch("routeros_mcp.infra.rate_limit.Redis", return_value=mock_redis):
+            await store.init()
+
+            # Reset by user_id
+            await store.reset(user_id="user-123")
+
+            # Verify scan was called with correct pattern for user
+            call_args = mock_redis.scan.call_args
+            assert "rate_limit:*:user-123" in str(call_args)
+
+            # Verify delete was called
+            assert mock_redis.delete.called
+
+            await store.close()
+
+
+@pytest.mark.asyncio
+async def test_redis_store_reset_by_role_with_mock():
+    """Test Redis store reset by role with fully mocked Redis."""
+    from unittest.mock import AsyncMock, patch
+
+    store = RateLimitStore(
+        redis_url="redis://localhost:6379/15",
+        pool_size=1,
+        timeout_seconds=1.0,
+        window_seconds=60,
+    )
+
+    mock_redis = AsyncMock()
+    mock_redis.scan = AsyncMock(return_value=(0, ["rate_limit:admin:user-a", "rate_limit:admin:user-b"]))
+    mock_redis.delete = AsyncMock()
+
+    with patch("routeros_mcp.infra.rate_limit.ConnectionPool") as mock_pool_class:
+        mock_pool = AsyncMock()
+        mock_pool_class.from_url.return_value = mock_pool
+
+        with patch("routeros_mcp.infra.rate_limit.Redis", return_value=mock_redis):
+            await store.init()
+
+            # Reset by role
+            await store.reset(role="admin")
+
+            # Verify scan was called with role pattern
+            call_args = mock_redis.scan.call_args
+            assert "rate_limit:admin:*" in str(call_args)
+
+            await store.close()
+
+
+@pytest.mark.asyncio
+async def test_redis_store_reset_all_with_mock():
+    """Test Redis store reset all with fully mocked Redis."""
+    from unittest.mock import AsyncMock, patch
+
+    store = RateLimitStore(
+        redis_url="redis://localhost:6379/15",
+        pool_size=1,
+        timeout_seconds=1.0,
+        window_seconds=60,
+    )
+
+    mock_redis = AsyncMock()
+    mock_redis.scan = AsyncMock(
+        return_value=(0, ["rate_limit:read_only:user-1", "rate_limit:ops_rw:user-2"])
+    )
+    mock_redis.delete = AsyncMock()
+
+    with patch("routeros_mcp.infra.rate_limit.ConnectionPool") as mock_pool_class:
+        mock_pool = AsyncMock()
+        mock_pool_class.from_url.return_value = mock_pool
+
+        with patch("routeros_mcp.infra.rate_limit.Redis", return_value=mock_redis):
+            await store.init()
+
+            # Reset all
+            await store.reset()
+
+            # Verify scan was called with wildcard pattern
+            call_args = mock_redis.scan.call_args
+            assert "rate_limit:*" in str(call_args)
+
+            await store.close()
+
+
+@pytest.mark.asyncio
+async def test_redis_store_unlimited_with_mock():
+    """Test Redis store with unlimited limit (0) using mocks."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    store = RateLimitStore(
+        redis_url="redis://localhost:6379/15",
+        pool_size=1,
+        timeout_seconds=1.0,
+        window_seconds=60,
+    )
+
+    mock_redis = AsyncMock()
+    mock_redis.eval = AsyncMock()
+    mock_redis.pipeline = MagicMock()
+
+    with patch("routeros_mcp.infra.rate_limit.ConnectionPool") as mock_pool_class:
+        mock_pool = AsyncMock()
+        mock_pool_class.from_url.return_value = mock_pool
+
+        with patch("routeros_mcp.infra.rate_limit.Redis", return_value=mock_redis):
+            await store.init()
+
+            # Check with limit=0 (unlimited)
+            await store.check_and_record("admin-user", "admin", limit=0)
+
+            # Redis eval should NOT be called for unlimited
+            mock_redis.eval.assert_not_called()
+
+            # Get remaining for unlimited
+            remaining = await store.get_remaining("admin-user", "admin", limit=0)
+            assert remaining == 999999  # UNLIMITED_RATE_LIMIT constant
+
+            # Redis pipeline should NOT be called for unlimited
+            mock_redis.pipeline.assert_not_called()
+
+            await store.close()

@@ -328,7 +328,7 @@ class RateLimitStore:
             pipe.zremrangebyscore(key, 0, cutoff)
             pipe.zcard(key)
             results = await pipe.execute()
-            current_count = results[1]
+            current_count = int(results[1])
 
             return max(0, limit - current_count)
 

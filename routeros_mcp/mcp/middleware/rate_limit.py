@@ -35,7 +35,7 @@ try:
     from redis.exceptions import RedisError
 except ImportError:
     # Fallback if redis not installed
-    RedisError = Exception  # type: ignore
+    RedisError = Exception
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +121,7 @@ class RateLimitMiddleware:
             "approver": self.settings.rate_limit_approver_per_minute,
         }
 
-        return role_limits.get(role, 10)  # Default to 10/min if unknown role
+        return int(role_limits.get(role, 10))  # Default to 10/min if unknown role
 
     async def check_rate_limit(
         self,
