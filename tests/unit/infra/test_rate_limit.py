@@ -58,7 +58,7 @@ async def redis_store():
 async def test_memory_store_allows_within_limit(memory_store):
     """Test in-memory store allows requests within limit."""
     # Should allow 10 requests
-    for i in range(10):
+    for _i in range(10):
         await memory_store.check_and_record("user-123", "read_only", limit=10)
 
     # All 10 used
@@ -70,7 +70,7 @@ async def test_memory_store_allows_within_limit(memory_store):
 async def test_memory_store_blocks_over_limit(memory_store):
     """Test in-memory store blocks requests over limit."""
     # Fill up to limit
-    for i in range(10):
+    for _i in range(10):
         await memory_store.check_and_record("user-123", "read_only", limit=10)
 
     # 11th request should raise error
@@ -90,7 +90,7 @@ async def test_memory_store_blocks_over_limit(memory_store):
 async def test_memory_store_unlimited_access(memory_store):
     """Test in-memory store allows unlimited access with limit=0."""
     # Should allow unlimited requests
-    for i in range(100):
+    for _i in range(100):
         await memory_store.check_and_record("user-admin", "admin", limit=0)
 
     # Should still be unlimited
@@ -106,7 +106,7 @@ async def test_memory_store_sliding_window(memory_store):
     await store.init()
 
     # Fill up to limit
-    for i in range(5):
+    for _i in range(5):
         await store.check_and_record("user-123", "ops_rw", limit=5)
 
     # Should be blocked
@@ -128,7 +128,7 @@ async def test_memory_store_sliding_window(memory_store):
 async def test_memory_store_per_user_isolation(memory_store):
     """Test in-memory store tracks users independently."""
     # Fill limit for user-1
-    for i in range(10):
+    for _i in range(10):
         await memory_store.check_and_record("user-1", "read_only", limit=10)
 
     # user-2 should still be allowed
@@ -141,7 +141,7 @@ async def test_memory_store_per_user_isolation(memory_store):
 async def test_memory_store_per_role_isolation(memory_store):
     """Test in-memory store tracks roles independently."""
     # Fill limit for read_only
-    for i in range(10):
+    for _i in range(10):
         await memory_store.check_and_record("user-123", "read_only", limit=10)
 
     # Same user with different role should still be allowed
@@ -226,7 +226,7 @@ async def test_memory_store_reset_user_and_role(memory_store):
 async def test_redis_store_allows_within_limit(redis_store):
     """Test Redis store allows requests within limit."""
     # Should allow 10 requests
-    for i in range(10):
+    for _i in range(10):
         await redis_store.check_and_record("user-123", "read_only", limit=10)
 
     # All 10 used
@@ -238,7 +238,7 @@ async def test_redis_store_allows_within_limit(redis_store):
 async def test_redis_store_blocks_over_limit(redis_store):
     """Test Redis store blocks requests over limit."""
     # Fill up to limit
-    for i in range(5):
+    for _i in range(5):
         await redis_store.check_and_record("user-456", "ops_rw", limit=5)
 
     # 6th request should raise error
@@ -257,7 +257,7 @@ async def test_redis_store_blocks_over_limit(redis_store):
 async def test_redis_store_unlimited_access(redis_store):
     """Test Redis store allows unlimited access with limit=0."""
     # Should allow many requests
-    for i in range(50):
+    for _i in range(50):
         await redis_store.check_and_record("user-admin", "admin", limit=0)
 
     # Should still be unlimited
@@ -280,7 +280,7 @@ async def test_redis_store_sliding_window(redis_store):
 
     try:
         # Fill up to limit
-        for i in range(5):
+        for _i in range(5):
             await store.check_and_record("user-789", "ops_rw", limit=5)
 
         # Should be blocked
@@ -304,7 +304,7 @@ async def test_redis_store_sliding_window(redis_store):
 async def test_redis_store_per_user_isolation(redis_store):
     """Test Redis store tracks users independently."""
     # Fill limit for user-1
-    for i in range(10):
+    for _i in range(10):
         await redis_store.check_and_record("user-a", "read_only", limit=10)
 
     # user-b should still be allowed
@@ -317,7 +317,7 @@ async def test_redis_store_per_user_isolation(redis_store):
 async def test_redis_store_per_role_isolation(redis_store):
     """Test Redis store tracks roles independently."""
     # Fill limit for read_only
-    for i in range(10):
+    for _i in range(10):
         await redis_store.check_and_record("user-c", "read_only", limit=10)
 
     # Same user with different role should still be allowed
@@ -435,7 +435,7 @@ async def test_memory_store_records_metrics(memory_store):
     )
 
     # Record allowed requests
-    for i in range(3):
+    for _i in range(3):
         await memory_store.check_and_record("user-metrics", "read_only", limit=5)
 
     # Check metrics were recorded
@@ -445,7 +445,7 @@ async def test_memory_store_records_metrics(memory_store):
     assert allowed_count >= 3
 
     # Trigger rate limit exceeded
-    for i in range(2):
+    for _i in range(2):
         await memory_store.check_and_record("user-metrics", "read_only", limit=5)
 
     with pytest.raises(RateLimitExceededError):
@@ -462,7 +462,7 @@ async def test_redis_store_records_metrics(redis_store):
     from routeros_mcp.infra.rate_limit import rate_limit_operations_total
 
     # Record some requests
-    for i in range(3):
+    for _i in range(3):
         await redis_store.check_and_record("user-redis-metrics", "ops_rw", limit=5)
 
     # Check metrics were recorded
@@ -470,3 +470,149 @@ async def test_redis_store_records_metrics(redis_store):
         operation="check", status="allowed", role="ops_rw"
     )._value._value
     assert allowed_count >= 3
+
+
+# ========================================
+# Concurrent Request Tests
+# ========================================
+
+
+@pytest.mark.asyncio
+async def test_memory_store_concurrent_requests_at_limit(memory_store):
+    """Test in-memory store correctly handles concurrent requests at limit boundary."""
+    import asyncio
+
+    limit = 5
+
+    # Pre-fill to one below limit
+    for _i in range(limit - 1):
+        await memory_store.check_and_record("user-concurrent", "ops_rw", limit=limit)
+
+    # Attempt multiple concurrent requests at the boundary
+    # Only one should succeed, others should fail
+    async def try_request():
+        try:
+            await memory_store.check_and_record("user-concurrent", "ops_rw", limit=limit)
+            return True
+        except RateLimitExceededError:
+            return False
+
+    results = await asyncio.gather(*[try_request() for _ in range(5)])
+
+    # Exactly one should have succeeded (the 5th request)
+    success_count = sum(results)
+    assert success_count == 1, f"Expected 1 success but got {success_count}"
+
+
+@pytest.mark.asyncio
+async def test_redis_store_concurrent_requests_at_limit(redis_store):
+    """Test Redis store correctly handles concurrent requests at limit boundary.
+
+    This test verifies the Lua script prevents race conditions.
+    """
+    import asyncio
+
+    limit = 5
+
+    # Pre-fill to one below limit
+    for _i in range(limit - 1):
+        await redis_store.check_and_record("user-concurrent-redis", "ops_rw", limit=limit)
+
+    # Attempt multiple concurrent requests at the boundary
+    # Only one should succeed, others should fail (no race condition)
+    async def try_request():
+        try:
+            await redis_store.check_and_record("user-concurrent-redis", "ops_rw", limit=limit)
+            return True
+        except RateLimitExceededError:
+            return False
+
+    results = await asyncio.gather(*[try_request() for _ in range(5)])
+
+    # Exactly one should have succeeded (the 5th request)
+    success_count = sum(results)
+    assert success_count == 1, f"Expected 1 success but got {success_count}"
+
+
+# ========================================
+# Redis Error Handling Tests
+# ========================================
+
+
+@pytest.mark.asyncio
+async def test_redis_store_handles_connection_failure():
+    """Test Redis store handles connection failures gracefully."""
+    from redis.exceptions import RedisError
+
+    # Create store with invalid Redis URL
+    store = RateLimitStore(
+        redis_url="redis://invalid-host:6379/0",
+        pool_size=1,
+        timeout_seconds=1.0,
+        window_seconds=60,
+    )
+
+    # Init should fail with RedisError
+    with pytest.raises(RedisError):
+        await store.init()
+
+
+@pytest.mark.asyncio
+async def test_redis_store_check_fails_when_redis_down():
+    """Test rate limit check fails when Redis is unavailable.
+
+    This verifies fail-closed behavior: requests are blocked when Redis is down.
+    """
+    from unittest.mock import patch
+
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    store = RateLimitStore(
+        redis_url="redis://localhost:6379/15",
+        pool_size=1,
+        timeout_seconds=1.0,
+        window_seconds=60,
+    )
+
+    try:
+        await store.init()
+    except Exception:
+        pytest.skip("Redis not available for testing")
+
+    # Mock Redis eval to raise connection error
+    with (
+        patch.object(store._redis, "eval", side_effect=RedisConnectionError("Connection refused")),
+        pytest.raises(RedisConnectionError),
+    ):
+        # Should raise RedisError (fail-closed)
+        await store.check_and_record("user-test", "ops_rw", limit=5)
+
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_redis_store_get_remaining_returns_zero_on_error():
+    """Test get_remaining returns 0 (safe default) when Redis errors occur."""
+    from unittest.mock import patch
+
+    from redis.exceptions import TimeoutError as RedisTimeoutError
+
+    store = RateLimitStore(
+        redis_url="redis://localhost:6379/15",
+        pool_size=1,
+        timeout_seconds=1.0,
+        window_seconds=60,
+    )
+
+    try:
+        await store.init()
+    except Exception:
+        pytest.skip("Redis not available for testing")
+
+    # Mock Redis pipeline to raise timeout error
+    with patch.object(store._redis, "pipeline", side_effect=RedisTimeoutError("Timeout")):
+        # Should return 0 as safe default
+        remaining = await store.get_remaining("user-test", "ops_rw", limit=10)
+        assert remaining == 0
+
+    await store.close()

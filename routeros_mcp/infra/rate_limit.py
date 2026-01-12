@@ -44,6 +44,9 @@ from routeros_mcp.mcp.errors import RateLimitExceededError
 
 logger = logging.getLogger(__name__)
 
+# Constants
+UNLIMITED_RATE_LIMIT = 999999  # Value representing unlimited rate limit quota
+
 # Metrics for rate limiting operations
 rate_limit_operations_total = Counter(
     "routeros_mcp_rate_limit_operations_total",
@@ -199,32 +202,60 @@ class RateLimitStore:
         cutoff = now - self.window_seconds
 
         try:
-            # Use Redis pipeline for atomic operations
-            pipe = self._redis.pipeline()
+            # Use Redis Lua script for atomic check-and-increment
+            # This prevents race conditions where concurrent requests could exceed the limit
+            lua_script = """
+            local key = KEYS[1]
+            local now = tonumber(ARGV[1])
+            local cutoff = tonumber(ARGV[2])
+            local limit = tonumber(ARGV[3])
+            local window = tonumber(ARGV[4])
 
-            # Remove old entries outside window
-            pipe.zremrangebyscore(key, 0, cutoff)
+            -- Remove old entries outside window
+            redis.call('ZREMRANGEBYSCORE', key, 0, cutoff)
 
-            # Count current requests in window
-            pipe.zcard(key)
+            -- Count current requests in window
+            local current = redis.call('ZCARD', key)
 
-            # Execute pipeline
-            results = await pipe.execute()
-            current_count = results[1]
+            -- Check if limit exceeded
+            if current >= limit then
+                -- Get oldest timestamp for retry-after calculation
+                local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+                local retry_after = 0
+                if #oldest > 0 then
+                    retry_after = math.floor(oldest[2] + window - now)
+                end
+                return {0, current, retry_after}  -- exceeded
+            end
+
+            -- Record this request with current timestamp
+            redis.call('ZADD', key, now, tostring(now))
+
+            -- Set expiry on key (cleanup after window + buffer)
+            redis.call('EXPIRE', key, window + 60)
+
+            return {1, current + 1, 0}  -- allowed
+            """
+
+            # Execute atomic Lua script
+            result = await self._redis.eval(
+                lua_script,
+                1,  # number of keys
+                key,  # KEYS[1]
+                now,  # ARGV[1]
+                cutoff,  # ARGV[2]
+                limit,  # ARGV[3]
+                self.window_seconds,  # ARGV[4]
+            )
+
+            allowed, current_count, retry_after = result
 
             # Check if limit exceeded
-            if current_count >= limit:
+            if allowed == 0:
                 rate_limit_exceeded_total.labels(role=role).inc()
                 rate_limit_operations_total.labels(
                     operation="check", status="exceeded", role=role
                 ).inc()
-
-                # Get oldest timestamp for retry-after calculation
-                oldest_timestamps = await self._redis.zrange(key, 0, 0, withscores=True)
-                retry_after = 0
-                if oldest_timestamps:
-                    oldest_ts = oldest_timestamps[0][1]
-                    retry_after = int(oldest_ts + self.window_seconds - now)
 
                 raise RateLimitExceededError(
                     f"Rate limit exceeded for role '{role}': "
@@ -234,16 +265,10 @@ class RateLimitStore:
                         "role": role,
                         "limit": limit,
                         "window_seconds": self.window_seconds,
-                        "current_count": current_count,
-                        "retry_after_seconds": max(1, retry_after),
+                        "current_count": int(current_count),
+                        "retry_after_seconds": max(1, int(retry_after)),
                     },
                 )
-
-            # Record this request with current timestamp
-            await self._redis.zadd(key, {str(now): now})
-
-            # Set expiry on key (cleanup after window + buffer)
-            await self._redis.expire(key, self.window_seconds + 60)
 
             rate_limit_operations_total.labels(operation="check", status="allowed", role=role).inc()
 
@@ -254,7 +279,7 @@ class RateLimitStore:
 
             logger.debug(
                 f"Rate limit check passed: {role} user {user_id} "
-                f"({current_count + 1}/{limit} in {self.window_seconds}s window)"
+                f"({int(current_count)}/{limit} in {self.window_seconds}s window)"
             )
 
         except RateLimitExceededError:
@@ -264,7 +289,9 @@ class RateLimitStore:
                 f"Redis error during rate limit check: {e}",
                 extra={"user_id": user_id, "role": role},
             )
-            # Record metric but don't fail the request on Redis errors
+            # Fail-closed: block requests when Redis is unavailable to maintain rate limiting
+            # This prevents bypassing rate limits during Redis outages but may cause service
+            # disruption if Redis is down. For fail-open behavior, return success here instead.
             rate_limit_operations_total.labels(operation="check", status="error", role=role).inc()
             raise
 
@@ -289,7 +316,7 @@ class RateLimitStore:
 
         # Unlimited access
         if limit == 0:
-            return 999999  # Return large number to indicate unlimited
+            return UNLIMITED_RATE_LIMIT
 
         key = self._get_key(user_id, role)
         now = time.time()
@@ -483,7 +510,7 @@ class InMemoryRateLimitStore:
             Number of requests remaining
         """
         if limit == 0:
-            return 999999
+            return UNLIMITED_RATE_LIMIT
 
         async with self._lock:
             key = (user_id, role)

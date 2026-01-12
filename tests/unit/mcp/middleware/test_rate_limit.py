@@ -3,7 +3,6 @@
 import pytest
 
 from routeros_mcp.config import Settings
-from routeros_mcp.infra.rate_limit import close_rate_limit_store
 from routeros_mcp.mcp.errors import RateLimitExceededError
 from routeros_mcp.mcp.middleware.rate_limit import (
     RateLimitMiddleware,
@@ -136,7 +135,7 @@ async def test_middleware_init_multiple_times(settings):
 async def test_check_rate_limit_allows_within_limit(middleware, read_only_user):
     """Test rate limit check allows requests within limit."""
     # Should allow 10 requests
-    for i in range(10):
+    for _i in range(10):
         headers = await middleware.check_rate_limit(read_only_user, "device/list")
         assert headers["limit"] == 10
         assert headers["remaining"] >= 0
@@ -147,7 +146,7 @@ async def test_check_rate_limit_allows_within_limit(middleware, read_only_user):
 async def test_check_rate_limit_blocks_over_limit(middleware, ops_rw_user):
     """Test rate limit check blocks requests over limit."""
     # Fill up to limit (5 for ops_rw)
-    for i in range(5):
+    for _i in range(5):
         await middleware.check_rate_limit(ops_rw_user, "dns/update-servers")
 
     # 6th request should raise error
@@ -165,7 +164,7 @@ async def test_check_rate_limit_blocks_over_limit(middleware, ops_rw_user):
 async def test_check_rate_limit_admin_unlimited(middleware, admin_user):
     """Test admin users have unlimited access."""
     # Should allow many requests
-    for i in range(50):
+    for _i in range(50):
         headers = await middleware.check_rate_limit(admin_user, "system/reboot")
         assert headers["limit"] == 0
         assert headers["remaining"] == 999999
@@ -199,7 +198,7 @@ async def test_check_rate_limit_per_user_isolation(middleware, read_only_user):
     )
 
     # Fill limit for user1
-    for i in range(10):
+    for _i in range(10):
         await middleware.check_rate_limit(read_only_user, "device/list")
 
     # user2 should still be allowed
@@ -256,7 +255,7 @@ async def test_get_rate_limit_headers(middleware, read_only_user):
 async def test_get_rate_limit_headers_after_requests(middleware, ops_rw_user):
     """Test rate limit headers reflect current usage."""
     # Make 3 requests
-    for i in range(3):
+    for _i in range(3):
         await middleware.check_rate_limit(ops_rw_user, "interface/list")
 
     headers = await middleware.get_rate_limit_headers(ops_rw_user)
@@ -309,7 +308,7 @@ async def test_check_rate_limit_when_disabled_allows_all(settings, read_only_use
     await mw.init()
 
     # Should allow unlimited requests
-    for i in range(100):
+    for _i in range(100):
         headers = await mw.check_rate_limit(read_only_user, "device/list")
         assert headers["limit"] == 999999
         assert headers["remaining"] == 999999
@@ -321,7 +320,7 @@ async def test_check_rate_limit_when_disabled_allows_all(settings, read_only_use
 async def test_rate_limit_exceeded_includes_retry_after(middleware, ops_rw_user):
     """Test rate limit exceeded error includes retry-after data."""
     # Fill up to limit
-    for i in range(5):
+    for _i in range(5):
         await middleware.check_rate_limit(ops_rw_user, "tool/execute")
 
     # Next request should include retry-after
@@ -390,7 +389,7 @@ async def test_full_rate_limit_flow(middleware):
         await middleware.check_rate_limit(ro_user, "device/list")
 
     # ops_rw: can make 5 requests
-    for i in range(5):
+    for _ in range(5):
         await middleware.check_rate_limit(ops_user, "interface/update")
 
     # 6th should fail
@@ -398,7 +397,7 @@ async def test_full_rate_limit_flow(middleware):
         await middleware.check_rate_limit(ops_user, "interface/update")
 
     # admin: unlimited
-    for i in range(100):
+    for _ in range(100):
         await middleware.check_rate_limit(admin, "system/reboot")
 
     # Still works
@@ -410,10 +409,46 @@ async def test_full_rate_limit_flow(middleware):
 async def test_approver_role_rate_limit(middleware, approver_user):
     """Test approver role has correct rate limit."""
     # Approvers get 5/min
-    for i in range(5):
+    for _i in range(5):
         headers = await middleware.check_rate_limit(approver_user, "plan/approve")
         assert headers["limit"] == 5
 
     # 6th should fail
     with pytest.raises(RateLimitExceededError):
         await middleware.check_rate_limit(approver_user, "plan/approve")
+
+
+# ========================================
+# Redis Error Handling Tests
+# ========================================
+
+
+@pytest.mark.asyncio
+async def test_middleware_handles_redis_errors(settings, ops_rw_user):
+    """Test middleware converts Redis errors to InternalError."""
+    from unittest.mock import patch
+
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    from routeros_mcp.mcp.errors import InternalError
+
+    mw = RateLimitMiddleware(settings)
+    await mw.init()
+
+    # Mock the store's check_and_record to raise RedisError
+    from routeros_mcp.infra.rate_limit import get_rate_limit_store
+
+    store = await get_rate_limit_store()
+
+    with patch.object(
+        store, "check_and_record", side_effect=RedisConnectionError("Connection refused")
+    ):
+        # Should convert to InternalError
+        with pytest.raises(InternalError) as exc_info:
+            await mw.check_rate_limit(ops_rw_user, "test/tool")
+
+        error = exc_info.value
+        assert "Rate limiting service temporarily unavailable" in str(error)
+        assert "original_error" in error.data
+
+    await mw.close()

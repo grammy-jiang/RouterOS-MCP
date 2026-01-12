@@ -411,14 +411,20 @@ class Settings(BaseSettings):
         default=10,
         ge=1,
         le=1000,
-        description="Rate limit for read_only role: requests per minute",
+        description=(
+            "Rate limit for read_only role: requests per minute. "
+            "Must be >= 1; only admin role supports unlimited (0) for emergency access."
+        ),
     )
 
     rate_limit_ops_rw_per_minute: int = Field(
         default=5,
         ge=1,
         le=1000,
-        description="Rate limit for ops_rw role: requests per minute",
+        description=(
+            "Rate limit for ops_rw role: requests per minute. "
+            "Must be >= 1; only admin role supports unlimited (0) to prevent unbounded write operations."
+        ),
     )
 
     rate_limit_admin_per_minute: int = Field(
@@ -432,7 +438,10 @@ class Settings(BaseSettings):
         default=5,
         ge=1,
         le=1000,
-        description="Rate limit for approver role: requests per minute",
+        description=(
+            "Rate limit for approver role: requests per minute. "
+            "Must be >= 1; only admin role supports unlimited (0) for break-glass emergency access."
+        ),
     )
 
     rate_limit_window_seconds: int = Field(

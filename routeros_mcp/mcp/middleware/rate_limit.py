@@ -24,11 +24,18 @@ import time
 
 from routeros_mcp.config import Settings
 from routeros_mcp.infra.rate_limit import (
+    UNLIMITED_RATE_LIMIT,
     get_rate_limit_store,
     initialize_rate_limit_store,
 )
 from routeros_mcp.mcp.errors import RateLimitExceededError
 from routeros_mcp.security.auth import User
+
+try:
+    from redis.exceptions import RedisError
+except ImportError:
+    # Fallback if redis not installed
+    RedisError = Exception  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +127,7 @@ class RateLimitMiddleware:
         self,
         user: User,
         tool_name: str,
-    ) -> dict[str, int | str]:
+    ) -> dict[str, int]:
         """Check if user has quota for tool execution.
 
         Args:
@@ -152,8 +159,8 @@ class RateLimitMiddleware:
         if not self.settings.rate_limit_enabled:
             # Rate limiting disabled, allow all requests
             return {
-                "limit": 999999,
-                "remaining": 999999,
+                "limit": UNLIMITED_RATE_LIMIT,
+                "remaining": UNLIMITED_RATE_LIMIT,
                 "reset": int(time.time() + 3600),
             }
 
@@ -227,6 +234,24 @@ class RateLimitMiddleware:
             )
             # Re-raise to return 429 error
             raise
+        except RedisError as e:
+            # Log Redis errors and convert to internal error
+            logger.error(
+                "Redis error during rate limit check",
+                extra={
+                    "user_sub": user.sub,
+                    "user_role": user.role,
+                    "tool_name": tool_name,
+                    "error": str(e),
+                },
+            )
+            # Re-raise as internal error - rate limiting is unavailable
+            from routeros_mcp.mcp.errors import InternalError
+
+            raise InternalError(
+                "Rate limiting service temporarily unavailable",
+                data={"original_error": str(e)},
+            ) from e
 
     async def get_rate_limit_headers(
         self,
