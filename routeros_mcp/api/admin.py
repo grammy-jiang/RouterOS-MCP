@@ -1813,4 +1813,356 @@ async def compliance_role_audit(
         )
 
 
+async def get_user_service():
+    """Dependency to get UserService."""
+    from routeros_mcp.domain.services.user import UserService
+    from routeros_mcp.infra.db.session import get_session
+
+    async for session in get_session():
+        yield UserService(session)
+
+
+@router.get("/api/admin/users")
+async def list_users(
+    is_active: bool | None = None,
+    role_name: str | None = None,
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    user_service: Any = Depends(get_user_service),
+) -> JSONResponse:
+    """List all users with optional filters.
+
+    Args:
+        is_active: Filter by active status
+        role_name: Filter by role name
+        user: Current authenticated user (must have admin role)
+        user_service: User service dependency
+
+    Returns:
+        JSON list of users
+    """
+    # Check user role
+    if user.get("role") not in ["admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions to list users",
+        )
+
+    try:
+        users = await user_service.list_users(
+            is_active=is_active,
+            role_name=role_name,
+        )
+
+        # Convert datetime objects to ISO strings
+        for u in users:
+            if u.get("last_login_at"):
+                u["last_login_at"] = u["last_login_at"].isoformat()
+            if u.get("created_at"):
+                u["created_at"] = u["created_at"].isoformat()
+            if u.get("updated_at"):
+                u["updated_at"] = u["updated_at"].isoformat()
+
+        return JSONResponse(content={"users": users})
+
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error listing users: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list users. Correlation ID: {correlation_id}",
+        )
+
+
+@router.post("/api/admin/users")
+async def create_user(
+    user_data: "UserCreateRequest",
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    user_service: Any = Depends(get_user_service),
+) -> JSONResponse:
+    """Create a new user.
+
+    Args:
+        user_data: User creation data
+        user: Current authenticated user (must have admin role)
+        user_service: User service dependency
+
+    Returns:
+        JSON response with created user
+    """
+    from routeros_mcp.api.admin_models import UserCreateRequest
+
+    # Check user role
+    if user.get("role") not in ["admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions to create users",
+        )
+
+    try:
+        created_user = await user_service.create_user(
+            sub=user_data.sub,
+            email=user_data.email,
+            display_name=user_data.display_name,
+            role_name=user_data.role_name,
+            device_scopes=user_data.device_scopes,
+            is_active=user_data.is_active,
+        )
+
+        # Convert datetime objects to ISO strings
+        if created_user.get("last_login_at"):
+            created_user["last_login_at"] = created_user["last_login_at"].isoformat()
+        if created_user.get("created_at"):
+            created_user["created_at"] = created_user["created_at"].isoformat()
+        if created_user.get("updated_at"):
+            created_user["updated_at"] = created_user["updated_at"].isoformat()
+
+        return JSONResponse(
+            content={"message": "User created successfully", "user": created_user},
+            status_code=status.HTTP_201_CREATED,
+        )
+
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error creating user: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create user. Correlation ID: {correlation_id}",
+        )
+
+
+@router.put("/api/admin/users/{sub}")
+async def update_user(
+    sub: str,
+    user_data: "UserUpdateRequest",
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    user_service: Any = Depends(get_user_service),
+) -> JSONResponse:
+    """Update a user.
+
+    Args:
+        sub: User OIDC subject identifier
+        user_data: User update data
+        user: Current authenticated user (must have admin role)
+        user_service: User service dependency
+
+    Returns:
+        JSON response with updated user
+    """
+    from routeros_mcp.api.admin_models import UserUpdateRequest
+
+    # Check user role
+    if user.get("role") not in ["admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions to update users",
+        )
+
+    try:
+        updated_user = await user_service.update_user(
+            sub=sub,
+            email=user_data.email,
+            display_name=user_data.display_name,
+            role_name=user_data.role_name,
+            device_scopes=user_data.device_scopes,
+            is_active=user_data.is_active,
+        )
+
+        # Convert datetime objects to ISO strings
+        if updated_user.get("last_login_at"):
+            updated_user["last_login_at"] = updated_user["last_login_at"].isoformat()
+        if updated_user.get("created_at"):
+            updated_user["created_at"] = updated_user["created_at"].isoformat()
+        if updated_user.get("updated_at"):
+            updated_user["updated_at"] = updated_user["updated_at"].isoformat()
+
+        return JSONResponse(
+            content={"message": "User updated successfully", "user": updated_user}
+        )
+
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error updating user {sub}: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update user. Correlation ID: {correlation_id}",
+        )
+
+
+@router.delete("/api/admin/users/{sub}")
+async def delete_user(
+    sub: str,
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    user_service: Any = Depends(get_user_service),
+) -> JSONResponse:
+    """Delete a user.
+
+    Args:
+        sub: User OIDC subject identifier
+        user: Current authenticated user (must have admin role)
+        user_service: User service dependency
+
+    Returns:
+        JSON response confirming deletion
+    """
+    # Check user role
+    if user.get("role") not in ["admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions to delete users",
+        )
+
+    try:
+        await user_service.delete_user(sub)
+
+        return JSONResponse(
+            content={"message": "User deleted successfully", "sub": sub}
+        )
+
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error deleting user {sub}: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete user. Correlation ID: {correlation_id}",
+        )
+
+
+@router.put("/api/admin/users/{sub}/device-scopes")
+async def update_device_scopes(
+    sub: str,
+    scopes_data: "DeviceScopesUpdateRequest",
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    user_service: Any = Depends(get_user_service),
+) -> JSONResponse:
+    """Bulk update device scopes for a user.
+
+    Args:
+        sub: User OIDC subject identifier
+        scopes_data: Device scopes update data
+        user: Current authenticated user (must have admin role)
+        user_service: User service dependency
+
+    Returns:
+        JSON response with updated user
+    """
+    from routeros_mcp.api.admin_models import DeviceScopesUpdateRequest
+
+    # Check user role
+    if user.get("role") not in ["admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions to update device scopes",
+        )
+
+    try:
+        updated_user = await user_service.update_device_scopes(
+            sub=sub,
+            device_scopes=scopes_data.device_scopes,
+        )
+
+        # Convert datetime objects to ISO strings
+        if updated_user.get("last_login_at"):
+            updated_user["last_login_at"] = updated_user["last_login_at"].isoformat()
+        if updated_user.get("created_at"):
+            updated_user["created_at"] = updated_user["created_at"].isoformat()
+        if updated_user.get("updated_at"):
+            updated_user["updated_at"] = updated_user["updated_at"].isoformat()
+
+        return JSONResponse(
+            content={"message": "Device scopes updated successfully", "user": updated_user}
+        )
+
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error updating device scopes for user {sub}: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update device scopes. Correlation ID: {correlation_id}",
+        )
+
+
+@router.get("/api/admin/roles")
+async def list_roles(
+    user: dict[str, Any] = Depends(get_current_user_dep()),
+    user_service: Any = Depends(get_user_service),
+) -> JSONResponse:
+    """List all available roles.
+
+    Args:
+        user: Current authenticated user
+        user_service: User service dependency
+
+    Returns:
+        JSON list of roles
+    """
+    try:
+        roles = await user_service.list_roles()
+
+        return JSONResponse(content={"roles": roles})
+
+    except Exception as e:
+        from routeros_mcp.infra.observability.logging import get_correlation_id
+
+        correlation_id = get_correlation_id()
+        logger.error(
+            f"Error listing roles: {e}",
+            exc_info=True,
+            extra={"correlation_id": correlation_id},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list roles. Correlation ID: {correlation_id}",
+        )
+
+
 __all__ = ["router"]

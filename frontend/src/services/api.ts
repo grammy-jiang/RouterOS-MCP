@@ -231,4 +231,61 @@ export const planApi = {
   },
 };
 
+export const userApi = {
+  async list(filters?: { is_active?: boolean; role_name?: string }): Promise<import('../types/user').User[]> {
+    const params = new URLSearchParams();
+    
+    if (filters?.is_active !== undefined) {
+      params.append('is_active', filters.is_active.toString());
+    }
+    if (filters?.role_name) {
+      params.append('role_name', filters.role_name);
+    }
+    
+    const queryString = params.toString();
+    const endpoint = `/api/admin/users${queryString ? `?${queryString}` : ''}`;
+    
+    const response = await fetchApi<import('../types/user').UserListResponse>(endpoint);
+    return response.users;
+  },
+
+  async create(data: import('../types/user').UserCreateRequest): Promise<import('../types/user').User> {
+    const response = await fetchApi<import('../types/user').UserResponse>('/api/admin/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    return response.user;
+  },
+
+  async update(sub: string, data: import('../types/user').UserUpdateRequest): Promise<import('../types/user').User> {
+    const response = await fetchApi<import('../types/user').UserResponse>(`/api/admin/users/${sub}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+    return response.user;
+  },
+
+  async delete(sub: string): Promise<void> {
+    await fetchApi<{ message: string }>(`/api/admin/users/${sub}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async updateDeviceScopes(sub: string, deviceScopes: string[]): Promise<import('../types/user').User> {
+    const response = await fetchApi<import('../types/user').UserResponse>(
+      `/api/admin/users/${sub}/device-scopes`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ device_scopes: deviceScopes }),
+      }
+    );
+    return response.user;
+  },
+
+  async listRoles(): Promise<import('../types/user').Role[]> {
+    const response = await fetchApi<import('../types/user').RoleListResponse>('/api/admin/roles');
+    return response.roles;
+  },
+};
+
 export { ApiError };

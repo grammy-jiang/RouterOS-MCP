@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard';
 import Devices from './pages/Devices';
 import Plans from './pages/Plans';
 import AuditLog from './pages/AuditLog';
+import AdminUsers from './pages/AdminUsers';
 
 function App() {
   return (
@@ -14,6 +15,7 @@ function App() {
           <Route path="devices" element={<Devices />} />
           <Route path="plans" element={<Plans />} />
           <Route path="audit" element={<AuditLog />} />
+          <Route path="admin/users" element={<AdminUsers />} />
         </Route>
       </Routes>
     </BrowserRouter>
