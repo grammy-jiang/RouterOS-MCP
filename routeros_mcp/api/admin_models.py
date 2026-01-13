@@ -34,3 +34,36 @@ class DeviceUpdateRequest(BaseModel):
         default=None, description="Environment (lab/staging/prod)"
     )
     port: int | None = Field(default=None, ge=1, le=65535, description="Management port")
+
+
+class UserCreateRequest(BaseModel):
+    """Request to create a new user."""
+
+    sub: str = Field(..., description="OIDC subject identifier (unique user ID)")
+    email: str | None = Field(default=None, description="User email address")
+    display_name: str | None = Field(default=None, description="User display name")
+    role_name: str = Field(..., description="Role name to assign")
+    device_scopes: list[str] = Field(
+        default_factory=list,
+        description="Device IDs user can access (empty = full access)"
+    )
+    is_active: bool = Field(default=True, description="Whether user is active")
+
+
+class UserUpdateRequest(BaseModel):
+    """Request to update a user."""
+
+    email: str | None = Field(default=None, description="User email address")
+    display_name: str | None = Field(default=None, description="User display name")
+    role_name: str | None = Field(default=None, description="Role name to assign")
+    device_scopes: list[str] | None = Field(default=None, description="Device IDs user can access")
+    is_active: bool | None = Field(default=None, description="Whether user is active")
+
+
+class DeviceScopesUpdateRequest(BaseModel):
+    """Request to bulk update device scopes for a user."""
+
+    device_scopes: list[str] = Field(
+        ...,
+        description="Device IDs user can access (empty = full access)"
+    )
