@@ -1,4 +1,3 @@
-import React from 'react';
 import type { PolicyViolation } from '../types/compliance';
 
 interface PolicyViolationHeatmapProps {

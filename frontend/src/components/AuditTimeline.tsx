@@ -1,4 +1,3 @@
-import React from 'react';
 import type { ComplianceAuditEvent } from '../types/compliance';
 
 interface AuditTimelineProps {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { complianceApi, ApiError } from '../services/compliance';
 import AuditTimeline from '../components/AuditTimeline';
 import PolicyViolationHeatmap from '../components/PolicyViolationHeatmap';
@@ -10,6 +10,7 @@ import type {
   ApprovalDecision,
   ApprovalStatistics,
   RoleHistoryEntry,
+  ComplianceFilters,
 } from '../types/compliance';
 
 export default function ComplianceDashboard() {
@@ -50,7 +51,7 @@ export default function ComplianceDashboard() {
   const fetchAuditEvents = useCallback(async () => {
     setLoadingAudit(true);
     try {
-      const filters: any = { limit: 100 };
+      const filters: ComplianceFilters = { limit: 100 };
       if (dateFrom) filters.date_from = new Date(dateFrom).toISOString();
       if (dateTo) filters.date_to = new Date(dateTo).toISOString();
       if (deviceFilter) filters.device_id = deviceFilter;
@@ -71,7 +72,7 @@ export default function ComplianceDashboard() {
   const fetchViolations = useCallback(async () => {
     setLoadingViolations(true);
     try {
-      const filters: any = { limit: 100 };
+      const filters: ComplianceFilters = { limit: 100 };
       if (dateFrom) filters.date_from = new Date(dateFrom).toISOString();
       if (dateTo) filters.date_to = new Date(dateTo).toISOString();
       if (deviceFilter) filters.device_id = deviceFilter;
@@ -92,7 +93,7 @@ export default function ComplianceDashboard() {
   const fetchApprovals = useCallback(async () => {
     setLoadingApprovals(true);
     try {
-      const filters: any = { limit: 100 };
+      const filters: ComplianceFilters = { limit: 100 };
       if (dateFrom) filters.date_from = new Date(dateFrom).toISOString();
 
       const response = await complianceApi.getApprovalSummary(filters);
@@ -111,7 +112,7 @@ export default function ComplianceDashboard() {
   const fetchRoleDistribution = useCallback(async () => {
     setLoadingRoles(true);
     try {
-      const filters: any = { limit: 500 };
+      const filters: ComplianceFilters = { limit: 500 };
       if (dateFrom) filters.date_from = new Date(dateFrom).toISOString();
       if (dateTo) filters.date_to = new Date(dateTo).toISOString();
       if (userFilter) filters.user_id = userFilter;
@@ -145,7 +146,7 @@ export default function ComplianceDashboard() {
   // Export handlers
   const handleExportJson = async () => {
     try {
-      const filters: any = { limit: 10000 };
+      const filters: ComplianceFilters = { limit: 10000 };
       if (dateFrom) filters.date_from = new Date(dateFrom).toISOString();
       if (dateTo) filters.date_to = new Date(dateTo).toISOString();
       if (deviceFilter) filters.device_id = deviceFilter;
@@ -168,7 +169,7 @@ export default function ComplianceDashboard() {
 
   const handleExportCsv = async () => {
     try {
-      const filters: any = { limit: 10000 };
+      const filters: ComplianceFilters = { limit: 10000 };
       if (dateFrom) filters.date_from = new Date(dateFrom).toISOString();
       if (dateTo) filters.date_to = new Date(dateTo).toISOString();
       if (deviceFilter) filters.device_id = deviceFilter;

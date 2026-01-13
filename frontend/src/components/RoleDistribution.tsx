@@ -1,4 +1,3 @@
-import React from 'react';
 import type { RoleHistoryEntry } from '../types/compliance';
 
 interface RoleDistributionProps {

@@ -1,4 +1,3 @@
-import React from 'react';
 import type { ApprovalStatistics, ApprovalDecision } from '../types/compliance';
 
 interface ApprovalMetricsProps {
