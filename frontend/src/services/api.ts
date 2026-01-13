@@ -17,6 +17,15 @@ import type {
   PlanRejectRequest,
   PlanRejectResponse,
 } from '../types/plan';
+import type {
+  User,
+  UserListResponse,
+  UserCreateRequest,
+  UserUpdateRequest,
+  UserResponse,
+  Role,
+  RoleListResponse,
+} from '../types/user';
 
 const RAW_API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
@@ -232,7 +241,7 @@ export const planApi = {
 };
 
 export const userApi = {
-  async list(filters?: { is_active?: boolean; role_name?: string }): Promise<import('../types/user').User[]> {
+  async list(filters?: { is_active?: boolean; role_name?: string }): Promise<User[]> {
     const params = new URLSearchParams();
     
     if (filters?.is_active !== undefined) {
@@ -245,20 +254,20 @@ export const userApi = {
     const queryString = params.toString();
     const endpoint = `/api/admin/users${queryString ? `?${queryString}` : ''}`;
     
-    const response = await fetchApi<import('../types/user').UserListResponse>(endpoint);
+    const response = await fetchApi<UserListResponse>(endpoint);
     return response.users;
   },
 
-  async create(data: import('../types/user').UserCreateRequest): Promise<import('../types/user').User> {
-    const response = await fetchApi<import('../types/user').UserResponse>('/api/admin/users', {
+  async create(data: UserCreateRequest): Promise<User> {
+    const response = await fetchApi<UserResponse>('/api/admin/users', {
       method: 'POST',
       body: JSON.stringify(data),
     });
     return response.user;
   },
 
-  async update(sub: string, data: import('../types/user').UserUpdateRequest): Promise<import('../types/user').User> {
-    const response = await fetchApi<import('../types/user').UserResponse>(`/api/admin/users/${sub}`, {
+  async update(sub: string, data: UserUpdateRequest): Promise<User> {
+    const response = await fetchApi<UserResponse>(`/api/admin/users/${sub}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
@@ -271,8 +280,8 @@ export const userApi = {
     });
   },
 
-  async updateDeviceScopes(sub: string, deviceScopes: string[]): Promise<import('../types/user').User> {
-    const response = await fetchApi<import('../types/user').UserResponse>(
+  async updateDeviceScopes(sub: string, deviceScopes: string[]): Promise<User> {
+    const response = await fetchApi<UserResponse>(
       `/api/admin/users/${sub}/device-scopes`,
       {
         method: 'PUT',
@@ -282,8 +291,8 @@ export const userApi = {
     return response.user;
   },
 
-  async listRoles(): Promise<import('../types/user').Role[]> {
-    const response = await fetchApi<import('../types/user').RoleListResponse>('/api/admin/roles');
+  async listRoles(): Promise<Role[]> {
+    const response = await fetchApi<RoleListResponse>('/api/admin/roles');
     return response.roles;
   },
 };

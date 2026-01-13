@@ -17,9 +17,12 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from routeros_mcp.api.admin_models import (
     DeviceCreateRequest,
     DeviceUpdateRequest,
+    DeviceScopesUpdateRequest,
     RejectionRequest,
+    UserCreateRequest,
+    UserUpdateRequest,
 )
-from routeros_mcp.mcp.errors import DeviceNotFoundError, EnvironmentMismatchError
+from routeros_mcp.mcp.errors import DeviceNotFoundError, EnvironmentMismatchError, ValidationError
 
 # Maximum number of audit events to export to CSV in a single request
 # Large exports may cause memory issues and timeouts
@@ -1822,6 +1825,24 @@ async def get_user_service():
         yield UserService(session)
 
 
+def _serialize_user_dates(user_dict: dict[str, Any]) -> dict[str, Any]:
+    """Serialize datetime fields in user dict to ISO format strings.
+    
+    Args:
+        user_dict: User dictionary with potential datetime fields
+        
+    Returns:
+        User dictionary with datetime fields converted to ISO strings
+    """
+    if user_dict.get("last_login_at"):
+        user_dict["last_login_at"] = user_dict["last_login_at"].isoformat()
+    if user_dict.get("created_at"):
+        user_dict["created_at"] = user_dict["created_at"].isoformat()
+    if user_dict.get("updated_at"):
+        user_dict["updated_at"] = user_dict["updated_at"].isoformat()
+    return user_dict
+
+
 @router.get("/api/admin/users")
 async def list_users(
     is_active: bool | None = None,
@@ -1855,12 +1876,7 @@ async def list_users(
 
         # Convert datetime objects to ISO strings
         for u in users:
-            if u.get("last_login_at"):
-                u["last_login_at"] = u["last_login_at"].isoformat()
-            if u.get("created_at"):
-                u["created_at"] = u["created_at"].isoformat()
-            if u.get("updated_at"):
-                u["updated_at"] = u["updated_at"].isoformat()
+            _serialize_user_dates(u)
 
         return JSONResponse(content={"users": users})
 
@@ -1881,7 +1897,7 @@ async def list_users(
 
 @router.post("/api/admin/users")
 async def create_user(
-    user_data: "UserCreateRequest",
+    user_data: UserCreateRequest,
     user: dict[str, Any] = Depends(get_current_user_dep()),
     user_service: Any = Depends(get_user_service),
 ) -> JSONResponse:
@@ -1895,8 +1911,6 @@ async def create_user(
     Returns:
         JSON response with created user
     """
-    from routeros_mcp.api.admin_models import UserCreateRequest
-
     # Check user role
     if user.get("role") not in ["admin"]:
         raise HTTPException(
@@ -1915,12 +1929,7 @@ async def create_user(
         )
 
         # Convert datetime objects to ISO strings
-        if created_user.get("last_login_at"):
-            created_user["last_login_at"] = created_user["last_login_at"].isoformat()
-        if created_user.get("created_at"):
-            created_user["created_at"] = created_user["created_at"].isoformat()
-        if created_user.get("updated_at"):
-            created_user["updated_at"] = created_user["updated_at"].isoformat()
+        _serialize_user_dates(created_user)
 
         return JSONResponse(
             content={"message": "User created successfully", "user": created_user},
@@ -1950,7 +1959,7 @@ async def create_user(
 @router.put("/api/admin/users/{sub}")
 async def update_user(
     sub: str,
-    user_data: "UserUpdateRequest",
+    user_data: UserUpdateRequest,
     user: dict[str, Any] = Depends(get_current_user_dep()),
     user_service: Any = Depends(get_user_service),
 ) -> JSONResponse:
@@ -1965,8 +1974,6 @@ async def update_user(
     Returns:
         JSON response with updated user
     """
-    from routeros_mcp.api.admin_models import UserUpdateRequest
-
     # Check user role
     if user.get("role") not in ["admin"]:
         raise HTTPException(
@@ -1985,12 +1992,7 @@ async def update_user(
         )
 
         # Convert datetime objects to ISO strings
-        if updated_user.get("last_login_at"):
-            updated_user["last_login_at"] = updated_user["last_login_at"].isoformat()
-        if updated_user.get("created_at"):
-            updated_user["created_at"] = updated_user["created_at"].isoformat()
-        if updated_user.get("updated_at"):
-            updated_user["updated_at"] = updated_user["updated_at"].isoformat()
+        _serialize_user_dates(updated_user)
 
         return JSONResponse(
             content={"message": "User updated successfully", "user": updated_user}
@@ -2069,7 +2071,7 @@ async def delete_user(
 @router.put("/api/admin/users/{sub}/device-scopes")
 async def update_device_scopes(
     sub: str,
-    scopes_data: "DeviceScopesUpdateRequest",
+    device_scopes_data: DeviceScopesUpdateRequest,
     user: dict[str, Any] = Depends(get_current_user_dep()),
     user_service: Any = Depends(get_user_service),
 ) -> JSONResponse:
@@ -2077,15 +2079,13 @@ async def update_device_scopes(
 
     Args:
         sub: User OIDC subject identifier
-        scopes_data: Device scopes update data
+        device_scopes_data: Device scopes update data
         user: Current authenticated user (must have admin role)
         user_service: User service dependency
 
     Returns:
         JSON response with updated user
     """
-    from routeros_mcp.api.admin_models import DeviceScopesUpdateRequest
-
     # Check user role
     if user.get("role") not in ["admin"]:
         raise HTTPException(
@@ -2096,16 +2096,11 @@ async def update_device_scopes(
     try:
         updated_user = await user_service.update_device_scopes(
             sub=sub,
-            device_scopes=scopes_data.device_scopes,
+            device_scopes=device_scopes_data.device_scopes,
         )
 
         # Convert datetime objects to ISO strings
-        if updated_user.get("last_login_at"):
-            updated_user["last_login_at"] = updated_user["last_login_at"].isoformat()
-        if updated_user.get("created_at"):
-            updated_user["created_at"] = updated_user["created_at"].isoformat()
-        if updated_user.get("updated_at"):
-            updated_user["updated_at"] = updated_user["updated_at"].isoformat()
+        _serialize_user_dates(updated_user)
 
         return JSONResponse(
             content={"message": "Device scopes updated successfully", "user": updated_user}

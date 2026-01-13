@@ -75,7 +75,13 @@ export default function UserForm({ user, roles, devices, onSubmit, onCancel }: U
             email: formData.email !== user.email ? formData.email : undefined,
             display_name: formData.display_name !== user.display_name ? formData.display_name : undefined,
             role_name: formData.role_name !== user.role_name ? formData.role_name : undefined,
-            device_scopes: deviceScopesMode === 'all' ? [] : formData.device_scopes,
+            device_scopes:
+              JSON.stringify(deviceScopesMode === 'all' ? [] : formData.device_scopes) !==
+              JSON.stringify(user.device_scopes)
+                ? deviceScopesMode === 'all'
+                  ? []
+                  : formData.device_scopes
+                : undefined,
             is_active: formData.is_active !== user.is_active ? formData.is_active : undefined,
           }
         : {

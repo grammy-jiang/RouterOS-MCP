@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from routeros_mcp.domain.services.user import UserService
 from routeros_mcp.infra.db.models import Role as RoleORM
-from routeros_mcp.infra.db.models import User as UserORM
 from routeros_mcp.mcp.errors import ValidationError
 
 
