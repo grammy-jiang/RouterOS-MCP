@@ -5,6 +5,7 @@ import type {
   RoleAuditResponse,
   ComplianceFilters,
 } from '../types/compliance';
+import { ApiError } from './api';
 
 const RAW_API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
@@ -17,18 +18,6 @@ if (import.meta.env.PROD && !RAW_API_BASE_URL.startsWith('https://')) {
 }
 
 const API_BASE_URL = RAW_API_BASE_URL;
-
-class ApiError extends Error {
-  status: number;
-  data?: unknown;
-
-  constructor(message: string, status: number, data?: unknown) {
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-    this.data = data;
-  }
-}
 
 async function fetchApi<T>(
   endpoint: string,
@@ -67,29 +56,37 @@ async function fetchApi<T>(
   }
 }
 
+/**
+ * Build URL query parameters from filters object
+ */
+function buildQueryParams(
+  filters: ComplianceFilters | undefined,
+  keys: (keyof ComplianceFilters)[]
+): string {
+  const params = new URLSearchParams();
+
+  for (const key of keys) {
+    const value = filters?.[key];
+    if (value !== undefined && value !== null) {
+      params.append(key as string, String(value));
+    }
+  }
+
+  return params.toString();
+}
+
 export const complianceApi = {
   async getAuditExport(filters?: ComplianceFilters): Promise<ComplianceAuditExportResponse> {
-    const params = new URLSearchParams();
+    const baseParams = buildQueryParams(filters, [
+      'date_from',
+      'date_to',
+      'device_id',
+      'tool_name',
+      'user_id',
+      'limit',
+    ]);
     
-    if (filters?.date_from) {
-      params.append('date_from', filters.date_from);
-    }
-    if (filters?.date_to) {
-      params.append('date_to', filters.date_to);
-    }
-    if (filters?.device_id) {
-      params.append('device_id', filters.device_id);
-    }
-    if (filters?.tool_name) {
-      params.append('tool_name', filters.tool_name);
-    }
-    if (filters?.user_id) {
-      params.append('user_id', filters.user_id);
-    }
-    if (filters?.limit) {
-      params.append('limit', filters.limit.toString());
-    }
-    
+    const params = new URLSearchParams(baseParams);
     params.append('format', 'json');
     
     const queryString = params.toString();
@@ -99,27 +96,16 @@ export const complianceApi = {
   },
 
   async exportAuditToCsv(filters?: ComplianceFilters): Promise<Blob> {
-    const params = new URLSearchParams();
+    const baseParams = buildQueryParams(filters, [
+      'date_from',
+      'date_to',
+      'device_id',
+      'tool_name',
+      'user_id',
+      'limit',
+    ]);
     
-    if (filters?.date_from) {
-      params.append('date_from', filters.date_from);
-    }
-    if (filters?.date_to) {
-      params.append('date_to', filters.date_to);
-    }
-    if (filters?.device_id) {
-      params.append('device_id', filters.device_id);
-    }
-    if (filters?.tool_name) {
-      params.append('tool_name', filters.tool_name);
-    }
-    if (filters?.user_id) {
-      params.append('user_id', filters.user_id);
-    }
-    if (filters?.limit) {
-      params.append('limit', filters.limit.toString());
-    }
-    
+    const params = new URLSearchParams(baseParams);
     params.append('format', 'csv');
     
     const queryString = params.toString();
@@ -143,66 +129,36 @@ export const complianceApi = {
   },
 
   async getApprovalSummary(filters?: ComplianceFilters): Promise<ApprovalSummaryResponse> {
-    const params = new URLSearchParams();
-    
-    if (filters?.status) {
-      params.append('status', filters.status);
-    }
-    if (filters?.date_from) {
-      params.append('date_from', filters.date_from);
-    }
-    if (filters?.limit) {
-      params.append('limit', filters.limit.toString());
-    }
-    if (filters?.offset) {
-      params.append('offset', filters.offset.toString());
-    }
-    
-    const queryString = params.toString();
+    const queryString = buildQueryParams(filters, [
+      'status',
+      'date_from',
+      'limit',
+      'offset',
+    ]);
     const endpoint = `/api/compliance/approvals${queryString ? `?${queryString}` : ''}`;
     
     return await fetchApi<ApprovalSummaryResponse>(endpoint);
   },
 
   async getPolicyViolations(filters?: ComplianceFilters): Promise<PolicyViolationResponse> {
-    const params = new URLSearchParams();
-    
-    if (filters?.device_id) {
-      params.append('device_id', filters.device_id);
-    }
-    if (filters?.date_from) {
-      params.append('date_from', filters.date_from);
-    }
-    if (filters?.date_to) {
-      params.append('date_to', filters.date_to);
-    }
-    if (filters?.limit) {
-      params.append('limit', filters.limit.toString());
-    }
-    
-    const queryString = params.toString();
+    const queryString = buildQueryParams(filters, [
+      'device_id',
+      'date_from',
+      'date_to',
+      'limit',
+    ]);
     const endpoint = `/api/compliance/policy-violations${queryString ? `?${queryString}` : ''}`;
     
     return await fetchApi<PolicyViolationResponse>(endpoint);
   },
 
   async getRoleAudit(filters?: ComplianceFilters): Promise<RoleAuditResponse> {
-    const params = new URLSearchParams();
-    
-    if (filters?.user_id) {
-      params.append('user_id', filters.user_id);
-    }
-    if (filters?.date_from) {
-      params.append('date_from', filters.date_from);
-    }
-    if (filters?.date_to) {
-      params.append('date_to', filters.date_to);
-    }
-    if (filters?.limit) {
-      params.append('limit', filters.limit.toString());
-    }
-    
-    const queryString = params.toString();
+    const queryString = buildQueryParams(filters, [
+      'user_id',
+      'date_from',
+      'date_to',
+      'limit',
+    ]);
     const endpoint = `/api/compliance/role-audit${queryString ? `?${queryString}` : ''}`;
     
     return await fetchApi<RoleAuditResponse>(endpoint);

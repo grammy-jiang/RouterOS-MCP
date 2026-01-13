@@ -61,7 +61,7 @@ export default function RoleDistribution({ roleHistory, loading }: RoleDistribut
                   <div key={role}>
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-sm font-medium text-gray-700 capitalize">
-                        {role.replace('_', ' ')}
+                        {role.replaceAll('_', ' ')}
                       </span>
                       <span className="text-sm text-gray-600">
                         {count} ({percentage}%)
@@ -89,7 +89,7 @@ export default function RoleDistribution({ roleHistory, loading }: RoleDistribut
                   <div key={role} className="flex items-center gap-2">
                     <div className={`w-3 h-3 rounded-full ${colors.bg}`} />
                     <span className="text-sm text-gray-700 capitalize">
-                      {role.replace('_', ' ')}
+                      {role.replaceAll('_', ' ')}
                     </span>
                     <span className="text-sm font-medium text-gray-900 ml-auto">{count}</span>
                   </div>
@@ -116,7 +116,7 @@ export default function RoleDistribution({ roleHistory, loading }: RoleDistribut
                           </div>
                           {latestEntry.user_role && (
                             <div className="text-xs text-gray-500 capitalize">
-                              {latestEntry.user_role.replace('_', ' ')}
+                              {latestEntry.user_role.replaceAll('_', ' ')}
                             </div>
                           )}
                         </div>

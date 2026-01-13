@@ -23,6 +23,9 @@ export default function PolicyViolationHeatmap({
   }
 
   const maxViolations = Math.max(...Object.values(violationsByDevice), 1);
+  
+  // Maximum intensity index for color mapping (0-9 maps to 10 color classes)
+  const MAX_INTENSITY = 9;
 
   return (
     <div className="bg-white rounded-lg shadow p-6">
@@ -37,7 +40,7 @@ export default function PolicyViolationHeatmap({
               .sort(([, a], [, b]) => b - a)
               .map(([deviceId, count]) => {
                 const percentage = (count / maxViolations) * 100;
-                const intensity = Math.min(Math.floor((count / maxViolations) * 9), 9);
+                const intensity = Math.min(Math.floor((count / maxViolations) * MAX_INTENSITY), MAX_INTENSITY);
                 const colorClasses = [
                   'bg-red-50',
                   'bg-red-100',

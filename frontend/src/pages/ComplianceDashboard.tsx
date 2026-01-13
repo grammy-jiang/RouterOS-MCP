@@ -19,7 +19,13 @@ export default function ComplianceDashboard() {
   const [loadingViolations, setLoadingViolations] = useState(true);
   const [loadingApprovals, setLoadingApprovals] = useState(true);
   const [loadingRoles, setLoadingRoles] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  
+  // Error states - separate for each section
+  const [auditError, setAuditError] = useState<string | null>(null);
+  const [violationsError, setViolationsError] = useState<string | null>(null);
+  const [approvalsError, setApprovalsError] = useState<string | null>(null);
+  const [rolesError, setRolesError] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   // Data states
   const [auditEvents, setAuditEvents] = useState<ComplianceAuditEvent[]>([]);
@@ -47,86 +53,97 @@ export default function ComplianceDashboard() {
     setDateTo(now.toISOString().split('T')[0]);
   }, []);
 
+  // Helper function to build filters from current state
+  const buildFilters = useCallback((limit: number = 100): ComplianceFilters => {
+    const filters: ComplianceFilters = { limit };
+    
+    if (dateFrom) {
+      const fromDate = new Date(dateFrom);
+      if (!isNaN(fromDate.getTime())) {
+        filters.date_from = fromDate.toISOString();
+      }
+    }
+    if (dateTo) {
+      const toDate = new Date(dateTo);
+      if (!isNaN(toDate.getTime())) {
+        filters.date_to = toDate.toISOString();
+      }
+    }
+    if (deviceFilter) {
+      filters.device_id = deviceFilter;
+    }
+    if (userFilter) {
+      filters.user_id = userFilter;
+    }
+    
+    return filters;
+  }, [dateFrom, dateTo, deviceFilter, userFilter]);
+
   // Fetch audit events
   const fetchAuditEvents = useCallback(async () => {
     setLoadingAudit(true);
     try {
-      const filters: ComplianceFilters = { limit: 100 };
-      if (dateFrom) filters.date_from = new Date(dateFrom).toISOString();
-      if (dateTo) filters.date_to = new Date(dateTo).toISOString();
-      if (deviceFilter) filters.device_id = deviceFilter;
-      if (userFilter) filters.user_id = userFilter;
-
+      const filters = buildFilters(100);
       const response = await complianceApi.getAuditExport(filters);
       setAuditEvents(response.events);
-      setError(null);
+      setAuditError(null);
     } catch (err) {
       console.error('Failed to fetch audit events:', err);
-      setError(err instanceof ApiError ? err.message : 'Failed to fetch audit events');
+      setAuditError(err instanceof ApiError ? err.message : 'Failed to fetch audit events');
     } finally {
       setLoadingAudit(false);
     }
-  }, [dateFrom, dateTo, deviceFilter, userFilter]);
+  }, [buildFilters]);
 
   // Fetch policy violations
   const fetchViolations = useCallback(async () => {
     setLoadingViolations(true);
     try {
-      const filters: ComplianceFilters = { limit: 100 };
-      if (dateFrom) filters.date_from = new Date(dateFrom).toISOString();
-      if (dateTo) filters.date_to = new Date(dateTo).toISOString();
-      if (deviceFilter) filters.device_id = deviceFilter;
-
+      const filters = buildFilters(100);
       const response = await complianceApi.getPolicyViolations(filters);
       setViolations(response.violations);
       setViolationsByDevice(response.statistics.by_device);
-      setError(null);
+      setViolationsError(null);
     } catch (err) {
       console.error('Failed to fetch policy violations:', err);
-      setError(err instanceof ApiError ? err.message : 'Failed to fetch policy violations');
+      setViolationsError(err instanceof ApiError ? err.message : 'Failed to fetch policy violations');
     } finally {
       setLoadingViolations(false);
     }
-  }, [dateFrom, dateTo, deviceFilter]);
+  }, [buildFilters]);
 
   // Fetch approval metrics
   const fetchApprovals = useCallback(async () => {
     setLoadingApprovals(true);
     try {
-      const filters: ComplianceFilters = { limit: 100 };
-      if (dateFrom) filters.date_from = new Date(dateFrom).toISOString();
-
+      const filters = buildFilters(100);
       const response = await complianceApi.getApprovalSummary(filters);
       setApprovalDecisions(response.decisions);
       setApprovalStatistics(response.statistics);
-      setError(null);
+      setApprovalsError(null);
     } catch (err) {
       console.error('Failed to fetch approval metrics:', err);
-      setError(err instanceof ApiError ? err.message : 'Failed to fetch approval metrics');
+      setApprovalsError(err instanceof ApiError ? err.message : 'Failed to fetch approval metrics');
     } finally {
       setLoadingApprovals(false);
     }
-  }, [dateFrom]);
+  }, [buildFilters]);
 
   // Fetch role distribution
   const fetchRoleDistribution = useCallback(async () => {
     setLoadingRoles(true);
     try {
-      const filters: ComplianceFilters = { limit: 500 };
-      if (dateFrom) filters.date_from = new Date(dateFrom).toISOString();
-      if (dateTo) filters.date_to = new Date(dateTo).toISOString();
-      if (userFilter) filters.user_id = userFilter;
-
+      const filters = buildFilters(500);
       const response = await complianceApi.getRoleAudit(filters);
       setRoleHistory(response.role_history);
-      setError(null);
+      setRolesError(null);
     } catch (err) {
       console.error('Failed to fetch role distribution:', err);
-      setError(err instanceof ApiError ? err.message : 'Failed to fetch role distribution');
+      setRolesError(err instanceof ApiError ? err.message : 'Failed to fetch role distribution');
     } finally {
       setLoadingRoles(false);
     }
-  }, [dateFrom, dateTo, userFilter]);
+  }, [buildFilters]);
 
   // Fetch all data
   const fetchAllData = useCallback(() => {
@@ -145,13 +162,9 @@ export default function ComplianceDashboard() {
 
   // Export handlers
   const handleExportJson = async () => {
+    setExportError(null);
     try {
-      const filters: ComplianceFilters = { limit: 10000 };
-      if (dateFrom) filters.date_from = new Date(dateFrom).toISOString();
-      if (dateTo) filters.date_to = new Date(dateTo).toISOString();
-      if (deviceFilter) filters.device_id = deviceFilter;
-      if (userFilter) filters.user_id = userFilter;
-
+      const filters = buildFilters(10000);
       const response = await complianceApi.getAuditExport(filters);
       const dataStr = JSON.stringify(response, null, 2);
       const dataBlob = new Blob([dataStr], { type: 'application/json' });
@@ -163,18 +176,14 @@ export default function ComplianceDashboard() {
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error('Failed to export JSON:', err);
-      alert('Failed to export data to JSON');
+      setExportError(err instanceof ApiError ? err.message : 'Failed to export data to JSON');
     }
   };
 
   const handleExportCsv = async () => {
+    setExportError(null);
     try {
-      const filters: ComplianceFilters = { limit: 10000 };
-      if (dateFrom) filters.date_from = new Date(dateFrom).toISOString();
-      if (dateTo) filters.date_to = new Date(dateTo).toISOString();
-      if (deviceFilter) filters.device_id = deviceFilter;
-      if (userFilter) filters.user_id = userFilter;
-
+      const filters = buildFilters(10000);
       const blob = await complianceApi.exportAuditToCsv(filters);
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -184,7 +193,7 @@ export default function ComplianceDashboard() {
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error('Failed to export CSV:', err);
-      alert('Failed to export data to CSV');
+      setExportError(err instanceof ApiError ? err.message : 'Failed to export data to CSV');
     }
   };
 
@@ -215,9 +224,33 @@ export default function ComplianceDashboard() {
       </div>
 
       {/* Error Display */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-          <strong className="font-medium">Error:</strong> {error}
+      {(exportError || auditError || violationsError || approvalsError || rolesError) && (
+        <div className="space-y-2">
+          {exportError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+              <strong className="font-medium">Export Error:</strong> {exportError}
+            </div>
+          )}
+          {auditError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+              <strong className="font-medium">Audit Error:</strong> {auditError}
+            </div>
+          )}
+          {violationsError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+              <strong className="font-medium">Violations Error:</strong> {violationsError}
+            </div>
+          )}
+          {approvalsError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+              <strong className="font-medium">Approvals Error:</strong> {approvalsError}
+            </div>
+          )}
+          {rolesError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+              <strong className="font-medium">Roles Error:</strong> {rolesError}
+            </div>
+          )}
         </div>
       )}
 

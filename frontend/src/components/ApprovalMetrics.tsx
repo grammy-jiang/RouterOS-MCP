@@ -30,7 +30,14 @@ export default function ApprovalMetrics({ statistics, decisions, loading }: Appr
   if (decisionsWithTime.length > 0) {
     const totalMinutes = decisionsWithTime.reduce((sum, d) => {
       const requestedAt = new Date(d.requested_at).getTime();
-      const decidedAt = new Date(d.approved_at || d.rejected_at || '').getTime();
+      const decidedAtStr = d.approved_at || d.rejected_at || '';
+      const decidedAt = new Date(decidedAtStr).getTime();
+      
+      // Validate that both dates are valid before calculating
+      if (isNaN(requestedAt) || isNaN(decidedAt)) {
+        return sum;
+      }
+      
       const diffMinutes = (decidedAt - requestedAt) / 1000 / 60;
       return sum + diffMinutes;
     }, 0);
