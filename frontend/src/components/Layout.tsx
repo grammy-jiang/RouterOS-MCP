@@ -33,6 +33,12 @@ export default function Layout() {
           >
             Audit Log
           </Link>
+          <Link
+            to="/compliance"
+            className="block py-2.5 px-6 text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+          >
+            Compliance Dashboard
+          </Link>
           <div className="mt-4 pt-4 border-t border-gray-200">
             <p className="px-6 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
               Administration
